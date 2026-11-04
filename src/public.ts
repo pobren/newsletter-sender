@@ -1,0 +1,282 @@
+// Everything readers see without signing in: sign up forms, confirming, unsubscribing, the archive of past issues,
+// images, and (only when the owner switches them on) open and click counts. Plus the addresses sending services
+// report bounces and spam complaints to.
+
+import { csvLine, cleanEmail } from "./csv.ts";
+import { getMeta, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
+import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
+import { cleanBlocks, esc, renderEmail } from "./render.ts";
+import { safeJson, sendSig } from "./sending.ts";
+import { loadProvider, sealSecret } from "./settings.ts";
+import { turnstileKey, turnstileOk } from "./turnstile.ts";
+
+export { csvLine };
+
+const html = (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", ...extra } });
+
+/** A simple page in the brand's colours. */
+export function publicPage(brand: Pick<BrandRow, "name" | "colour" | "logo">, title: string, body: string, opts: { index?: boolean; turnstile?: boolean } = {}): string {
+	const colour = /^#[0-9a-f]{6}$/i.test(brand.colour) ? brand.colour : "#a3195b";
+	return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | ${esc(brand.name)}</title>${opts.index ? "" : '<meta name="robots" content="noindex">'}
+<style>:root{--c:${colour}}*{box-sizing:border-box}body{margin:0;background:#fbf7f9;color:#1d1424;font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}main{max-width:620px;margin:0 auto;padding:48px 20px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--c);text-decoration:none;margin-bottom:28px}.brand img{height:40px;width:auto}
+.card{background:#fff;border:1px solid #efe2e9;border-radius:16px;padding:28px}h1{font-size:30px;line-height:1.2;margin:0 0 12px}p{margin:0 0 14px;color:#4a3b52}
+label{display:block;font-weight:600;margin:16px 0 6px}input{width:100%;min-height:50px;padding:0 14px;border:2px solid #e6cfdb;border-radius:10px;font:inherit}input:focus{outline:3px solid #fbe6f0;border-color:var(--c)}
+button,.btn{display:inline-flex;align-items:center;gap:8px;margin-top:20px;min-height:50px;padding:0 22px;border:0;border-radius:10px;background:var(--c);color:#fff;font:600 17px system-ui,sans-serif;cursor:pointer;text-decoration:none}
+button svg,.btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hp{position:absolute;left:-9999px}.small{font-size:14px;color:#6b5a73}.err{color:#a1122e;font-weight:600}ul.issues{list-style:none;padding:0;margin:0}ul.issues li{padding:14px 0;border-bottom:1px solid #efe2e9}ul.issues a{color:#1d1424;font-weight:600;text-decoration:none}ul.issues span{display:block;font-size:14px;color:#6b5a73}
+</style>${opts.turnstile ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ""}</head><body><main>
+<a class="brand" href="/archive">${brand.logo ? `<img src="${esc(brand.logo)}" alt="${esc(brand.name)}">` : esc(brand.name)}</a>${body}</main></body></html>`;
+}
+
+const ICON_SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>';
+const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+interface Field {
+	key: string;
+	label: string;
+	required?: boolean;
+}
+
+export const listFields = (l: ListRow): Field[] => (safeJson(l.fields) ?? []).filter((f: any) => f && typeof f.key === "string" && typeof f.label === "string");
+
+/** The sign up form, as a hosted page or as code to paste into any website. */
+export function formHtml(l: ListRow, action: string, siteKey: string | null): string {
+	const fields = listFields(l)
+		.map((f) => `<label for="f_${esc(f.key)}">${esc(f.label)}</label><input id="f_${esc(f.key)}" name="${esc(f.key)}"${f.required ? " required" : ""}>`)
+		.join("");
+	return `<form method="post" action="${esc(action)}">
+<label for="ns_email">Your email address</label><input id="ns_email" type="email" name="email" required autocomplete="email">
+<label for="ns_name">Your name (optional)</label><input id="ns_name" name="name" autocomplete="name">${fields}
+<div class="hp" aria-hidden="true"><label for="ns_hp">Leave this empty</label><input id="ns_hp" name="hp" tabindex="-1" autocomplete="off"></div>
+${siteKey ? `<div class="cf-turnstile" data-sitekey="${esc(siteKey)}" data-response-field-name="ts" style="margin-top:16px"></div>` : ""}
+<button type="submit">${ICON_SEND}Subscribe</button></form>`;
+}
+
+async function listBySlug(db: D1Database, slug: string) {
+	const l = await db.prepare("SELECT * FROM lists WHERE slug = ?").bind(slug).first<ListRow>();
+	const b = l ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(l.brand_id).first<BrandRow>() : null;
+	return l && b ? { l, b } : null;
+}
+
+/** At most this many sign ups from one address in ten minutes. */
+const SIGNUPS_PER_IP = 10;
+
+async function tooMany(db: D1Database, ip: string): Promise<boolean> {
+	const slot = Math.floor(Date.now() / 600_000);
+	const key = `rl:${slot}:${ip}`;
+	const n = Number((await getMeta(db, key)) ?? 0) + 1;
+	await setMeta(db, key, String(n));
+	return n > SIGNUPS_PER_IP;
+}
+
+/** Someone signing up, from the hosted page, a form on any website or the API. */
+export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" } | { error: string }> {
+	const db = env.DB;
+	const email = cleanEmail(input.email);
+	if (!email) return { error: "Please check your email address." };
+	const name = typeof input.name === "string" ? input.name.replace(/\s+/g, " ").trim().slice(0, 120) || null : null;
+	const fields: Record<string, string> = {};
+	for (const f of listFields(l)) {
+		const v = input.fields?.[f.key];
+		if (typeof v === "string" && v.trim()) fields[f.key] = v.trim().slice(0, 500);
+		else if (f.required && !confirmed) return { error: `Please fill in ${f.label}.` };
+	}
+	const now = iso();
+	await db.prepare("INSERT INTO subscribers (id, brand_id, email, name, fields, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (brand_id, email) DO NOTHING").bind(newId(8), b.id, email, name, JSON.stringify(fields), newId(16), now).run();
+	const s = (await db.prepare("SELECT * FROM subscribers WHERE brand_id = ? AND email = ?").bind(b.id, email).first<SubscriberRow>())!;
+	// Keep what they told us this time, without losing what we had.
+	const merged = { ...(safeJson(s.fields) ?? {}), ...fields };
+	await db.prepare("UPDATE subscribers SET name = COALESCE(?, name), fields = ? WHERE id = ?").bind(name, JSON.stringify(merged), s.id).run();
+	if (s.suppressed === "complained") return { ok: true, status: "already" }; // marked us as spam: never again, but don't say so
+	const m = await db.prepare("SELECT status FROM memberships WHERE list_id = ? AND subscriber_id = ?").bind(l.id, s.id).first<{ status: string }>();
+	if (m?.status === "active") return { ok: true, status: "already" };
+	const direct = confirmed || !l.double_optin;
+	const token = direct ? null : newId(16);
+	await db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, confirm_token, created_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = excluded.status, source = excluded.source, confirm_token = excluded.confirm_token, confirmed_at = excluded.confirmed_at, left_at = NULL`)
+		.bind(l.id, s.id, direct ? "active" : "pending", source, token, now, direct ? now : null).run();
+	// A bounced address that signs up again gets another chance.
+	if (s.suppressed === "bounced") await db.prepare("UPDATE subscribers SET suppressed = NULL, suppressed_at = NULL WHERE id = ?").bind(s.id).run();
+	await logEvent(db, b.id, direct ? "subscribed" : "signed_up", s.id, null, `${l.name} (${source})`).run();
+	const base = await origin(db);
+	if (!direct) await oneOff(env, b, email, `Please confirm: ${l.name}`, [`Hello${name ? ` ${name.split(" ")[0]}` : ""},`, `Please confirm you'd like to get ${l.name === b.name ? b.name : `${l.name} from ${b.name}`}. Just press the button below.`, `If you didn't ask for this, you can ignore this email and you won't hear from us again.`], { label: "Yes, sign me up", href: `${base}/c/${token}` });
+	else if (l.welcome_subject && l.welcome_text) await oneOff(env, b, email, l.welcome_subject, l.welcome_text.split(/\n{2,}/));
+	return { ok: true, status: direct ? "active" : "pending" };
+}
+
+/**
+ * A one off email (a sign up confirmation or welcome). Cloudflare's email service sends these when the Worker has
+ * it (Paul's rule: confirmations only, never newsletters); otherwise the brand's own sending service does.
+ */
+export async function oneOff(env: Env, b: BrandRow, to: string, subject: string, paras: string[], button?: { label: string; href: string }): Promise<boolean> {
+	const blocks = [{ type: "text" as const, text: paras.join("\n\n") }, ...(button ? [{ type: "button" as const, label: button.label, href: button.href }] : [])];
+	const base = await origin(env.DB);
+	const out = renderEmail(subject, blocks, { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: `${base}/archive`, track: null }, { email: to });
+	const text = [...paras, button ? `${button.label}: ${button.href}` : ""].filter(Boolean).join("\n\n") + `\n\n${b.name}\n`;
+	if (env.EMAIL) {
+		try {
+			await env.EMAIL.send({ to, from: { email: b.from_email, name: b.from_name }, subject, text, html: out.html.replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, "") } as any);
+			return true;
+		} catch (e) {
+			console.error("Cloudflare email failed, trying the sending service", e);
+		}
+	}
+	const p = await loadProvider(env.DB, b);
+	if (!p) return false;
+	const r = await sendOne(p, b.from_name, b.from_email, { to, subject, text, html: out.html, headers: {}, replyTo: b.reply_to });
+	return r.ok;
+}
+
+export async function handlePublic(request: Request, env: Env, url: URL): Promise<Response | null> {
+	const db = env.DB;
+	const path = url.pathname;
+	const ip = request.headers.get("cf-connecting-ip") ?? "local";
+
+	// -- Sign up -----------------------------------------------------------------
+	const sm = /^\/s\/([a-z0-9-]{1,60})\/?$/.exec(path);
+	if (sm) {
+		const found = await listBySlug(db, sm[1]);
+		if (!found) return html(publicPage({ name: "Newsletter", colour: "#a3195b", logo: null }, "Not found", `<div class="card"><h1>That sign up form isn't here</h1><p>It may have moved.</p></div>`), 404);
+		const { l, b } = found;
+		const siteKey = turnstileKey(env);
+		if (request.method === "POST") {
+			const wantsJson = (request.headers.get("accept") ?? "").includes("application/json") || (request.headers.get("content-type") ?? "").includes("application/json");
+			const form: Record<string, unknown> = wantsJson ? ((await request.json().catch(() => ({}))) as any) : Object.fromEntries(await request.formData().catch(() => new FormData()));
+			const fail = (msg: string, status = 400) => (wantsJson ? Response.json({ error: msg }, { status, headers: cors }) : html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1><p class="err">${esc(msg)}</p>${formHtml(l, `/s/${l.slug}`, siteKey)}</div>`, { turnstile: !!siteKey }), status));
+			if (form.hp) return wantsJson ? Response.json({ ok: true }, { headers: cors }) : Response.redirect(`${url.origin}/s/${l.slug}?done=1`, 303);
+			if (await tooMany(db, ip)) return fail("Lots of sign ups from here just now. Please try again in a few minutes.", 429);
+			if (!(await turnstileOk(env, request, form.ts ?? form["cf-turnstile-response"]))) return fail("We couldn't check you're a person. Please try again.");
+			const fields: Record<string, unknown> = {};
+			for (const f of listFields(l)) fields[f.key] = form[f.key];
+			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? new URL(request.headers.get("referer")!).hostname : "form");
+			if ("error" in r) return fail(r.error);
+			if (wantsJson) return Response.json({ ok: true, confirm: r.status === "pending" }, { headers: cors });
+			return Response.redirect(l.thanks_url || `${url.origin}/s/${l.slug}?done=${r.status === "pending" ? 1 : 2}`, 303);
+		}
+		const done = url.searchParams.get("done");
+		if (done) return html(publicPage(b, l.name, `<div class="card"><h1>${done === "1" ? "Nearly there" : "You're on the list"}</h1><p>${done === "1" ? "Please check your inbox and press the button in the email we've just sent, so we know it's really you." : `Thanks for signing up to ${esc(l.name)}.`}</p></div>`));
+		return html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1>${l.description ? `<p>${esc(l.description)}</p>` : ""}${formHtml(l, `/s/${l.slug}`, siteKey)}<p class="small" style="margin-top:16px">You can unsubscribe at any time with the link in every email.</p></div>`, { index: true, turnstile: !!siteKey }));
+	}
+	if (request.method === "OPTIONS" && /^\/s\//.test(path)) return new Response(null, { status: 204, headers: cors });
+
+	// -- Confirm ---------------------------------------------------------------------
+	const cm = /^\/c\/([0-9a-f]{32})\/?$/.exec(path);
+	if (cm) {
+		const m = await db.prepare("SELECT m.*, l.name AS list_name, l.brand_id, l.welcome_subject, l.welcome_text FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.confirm_token = ?").bind(cm[1]).first<any>();
+		const b = m ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(m.brand_id).first<BrandRow>() : await db.prepare("SELECT * FROM brands LIMIT 1").first<BrandRow>();
+		const brand = b ?? { name: "Newsletter", colour: "#a3195b", logo: null };
+		if (!m || !b) return html(publicPage(brand, "Link expired", `<div class="card"><h1>That link has already been used</h1><p>If you've confirmed already, you're all set.</p></div>`), 404);
+		// Link checkers in some inboxes open every link, so confirming needs a press (done for you by the page's script).
+		if (request.method !== "POST") return html(publicPage(b, "Confirm", `<div class="card"><h1>Confirm your subscription</h1><p>${esc(m.list_name)} from ${esc(b.name)}.</p><form method="post" id="go"><button type="submit">${ICON_CHECK}Yes, sign me up</button></form></div><script>document.getElementById("go").submit()</script>`));
+		await db.prepare("UPDATE memberships SET status = 'active', confirmed_at = ?, confirm_token = NULL WHERE list_id = ? AND subscriber_id = ?").bind(iso(), m.list_id, m.subscriber_id).run();
+		await logEvent(db, b.id, "subscribed", m.subscriber_id, null, `${m.list_name} (confirmed)`).run();
+		const s = await db.prepare("SELECT email FROM subscribers WHERE id = ?").bind(m.subscriber_id).first<{ email: string }>();
+		if (s && m.welcome_subject && m.welcome_text) await oneOff(env, b, s.email, m.welcome_subject, String(m.welcome_text).split(/\n{2,}/));
+		return html(publicPage(b, "Confirmed", `<div class="card"><h1>You're on the list</h1><p>Thanks for confirming. ${esc(m.list_name)} will arrive in your inbox.</p></div>`));
+	}
+
+	// -- Unsubscribe (also the one click unsubscribe mail apps use) ---------------------
+	const um = /^\/u\/([0-9a-f]{32}|test)\/?$/.exec(path);
+	if (um) {
+		const s = um[1] === "test" ? null : await db.prepare("SELECT * FROM subscribers WHERE token = ?").bind(um[1]).first<SubscriberRow>();
+		const b = s ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(s.brand_id).first<BrandRow>() : await db.prepare("SELECT * FROM brands LIMIT 1").first<BrandRow>();
+		const brand = b ?? { name: "Newsletter", colour: "#a3195b", logo: null };
+		if (um[1] === "test") return html(publicPage(brand, "Unsubscribe", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link unsubscribes the reader straight away.</p></div>`));
+		if (!s || !b) return html(publicPage(brand, "Unsubscribe", `<div class="card"><h1>You're not on the list</h1><p>There's nothing more to do.</p></div>`), 404);
+		const campaign = /^[0-9a-f]{16}$/.test(url.searchParams.get("c") ?? "") ? url.searchParams.get("c") : null;
+		if (request.method === "POST") {
+			const changed = await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id).run();
+			if (changed.meta.changes) await logEvent(db, b.id, "unsubscribed", s.id, campaign, request.headers.get("content-type")?.includes("form") && (await request.clone().text()).includes("One-Click") ? "one click" : "page").run();
+			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(b.name)}.</p><p class="small">Changed your mind? You can sign up again on the website.</p></div>`));
+		}
+		return html(publicPage(b, "Unsubscribe", `<div class="card"><h1>Unsubscribe?</h1><p>Stop all emails from ${esc(b.name)} to ${esc(s.email)}.</p><form method="post"><button type="submit">${ICON_X}Unsubscribe</button></form></div>`));
+	}
+
+	// -- The archive of past issues ------------------------------------------------------
+	const am = /^\/archive(?:\/([a-z0-9-]{1,80}))?\/?$/.exec(path);
+	if (am) {
+		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		if (!b || !b.archive) return null;
+		if (!am[1]) {
+			const { results } = await db.prepare("SELECT subject, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 200").bind(b.id).all<CampaignRow>();
+			const items = results.map((c) => `<li><a href="/archive/${esc(c.slug!)}">${esc(c.subject.replace(/\{\{[^}]*\}\}/g, "").trim())}</a><span>${new Date(c.started_at!).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></li>`).join("");
+			const forms = (await db.prepare("SELECT slug, name FROM lists WHERE brand_id = ? ORDER BY created_at LIMIT 1").bind(b.id).first<{ slug: string; name: string }>());
+			return html(publicPage(b, "Past issues", `<div class="card"><h1>Past issues</h1>${items ? `<ul class="issues">${items}</ul>` : "<p>Nothing here yet.</p>"}${forms ? `<a class="btn" href="/s/${esc(forms.slug)}">${ICON_SEND}Subscribe</a>` : ""}</div>`, { index: true }));
+		}
+		const c = await db.prepare("SELECT * FROM campaigns WHERE slug = ? AND brand_id = ? AND status IN ('sent', 'sending') AND public = 1").bind(am[1], b.id).first<CampaignRow>();
+		if (!c) return null;
+		const out = renderEmail(c.subject, cleanBlocks(safeJson(c.blocks)), { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: "/archive", track: null }, { email: "" });
+		return html(out.html.replace("<title>", '<meta name="robots" content="index"><link rel="alternate" href="/archive"><title>').replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, '<a href="/archive" style="color:#6b5a73">More issues</a>'));
+	}
+
+	// -- Images -------------------------------------------------------------------------------
+	const im = /^\/img\/([0-9a-f]{16}\.(?:png|jpe?g|gif|webp))$/.exec(path);
+	if (im) {
+		const obj = env.IMAGES ? await env.IMAGES.get(im[1]) : null;
+		if (!obj) return new Response("Not found", { status: 404 });
+		return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "image/png", "cache-control": "public, max-age=31536000, immutable" } });
+	}
+
+	// -- Opens and clicks (only in emails sent with them switched on) -------------------------------
+	const om = /^\/o\/(\d+)\.([0-9a-f]{12})$/.exec(path);
+	if (om) {
+		if ((await sendSig(await sealSecret(db), Number(om[1]))) === om[2]) await db.prepare("UPDATE sends SET opened_at = COALESCE(opened_at, ?) WHERE id = ?").bind(iso(), Number(om[1])).run();
+		return new Response(Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (ch) => ch.charCodeAt(0)), { headers: { "content-type": "image/gif", "cache-control": "no-store" } });
+	}
+	const lm = /^\/l\/(\d+)\.([0-9a-f]{12})\/(\d{1,3})$/.exec(path);
+	if (lm) {
+		const id = Number(lm[1]);
+		const send = await db.prepare("SELECT campaign_id FROM sends WHERE id = ?").bind(id).first<{ campaign_id: string }>();
+		const link = send ? await db.prepare("SELECT url FROM links WHERE campaign_id = ? AND n = ?").bind(send.campaign_id, Number(lm[3])).first<{ url: string }>() : null;
+		if (!link) return new Response("That link has expired.", { status: 404 });
+		if ((await sendSig(await sealSecret(db), id)) === lm[2]) {
+			await db.batch([
+				db.prepare("UPDATE sends SET clicked_at = COALESCE(clicked_at, ?), opened_at = COALESCE(opened_at, ?) WHERE id = ?").bind(iso(), iso(), id),
+				db.prepare("UPDATE links SET clicks = clicks + 1 WHERE campaign_id = ? AND n = ?").bind(send!.campaign_id, Number(lm[3])),
+			]);
+		}
+		return Response.redirect(link.url, 302);
+	}
+
+	// -- Bounces and complaints from the sending services ------------------------------------------
+	const hm = /^\/hooks\/(ses|postmark|mailgun|brevo|resend)\/([0-9a-f]{32})$/.exec(path);
+	if (hm && request.method === "POST") {
+		const b = await db.prepare("SELECT * FROM brands WHERE hook_key = ?").bind(hm[2]).first<BrandRow>();
+		if (!b) return new Response("Not found", { status: 404 });
+		const body = (await request.json().catch(() => null)) as any;
+		if (hm[1] === "ses") {
+			// Amazon SNS: confirm the subscription the set-up made, then pass on each SES event.
+			if (body?.Type === "SubscriptionConfirmation" && trustedSubscribeUrl(body.SubscribeURL)) {
+				await fetch(body.SubscribeURL);
+				await logEvent(db, b.id, "sending.connected", null, null, "Amazon SES bounces and complaints connected").run();
+				return new Response("OK");
+			}
+			if (body?.Type === "Notification") {
+				const e = parseSesEvent(safeJson(body.Message));
+				if (e) await recordMailEvent(db, b, e);
+			}
+			return new Response("OK");
+		}
+		if (isProvider(hm[1])) {
+			const e = parseProviderEvent(hm[1], body);
+			if (e) await recordMailEvent(db, b, e);
+		}
+		return new Response("OK");
+	}
+	return null;
+}
+
+const cors = { "access-control-allow-origin": "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, accept" };
+
+/** A bounce or complaint: count it against the campaign, and never email a hard bounce or a complaint again. */
+export async function recordMailEvent(db: D1Database, b: BrandRow, e: MailEvent): Promise<void> {
+	for (const address of e.addresses) {
+		const s = e.sub ? await db.prepare("SELECT id, email FROM subscribers WHERE id = ? AND brand_id = ?").bind(e.sub, b.id).first<{ id: string; email: string }>() : await db.prepare("SELECT id, email FROM subscribers WHERE email = ? AND brand_id = ?").bind(address, b.id).first<{ id: string; email: string }>();
+		if (!s) continue;
+		const stmts = [logEvent(db, b.id, e.kind === "complaint" ? "complained" : e.permanent ? "bounced" : "soft_bounce", s.id, e.campaign ?? null, e.detail)];
+		if (e.permanent) stmts.push(db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE id = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(e.kind === "complaint" ? "complained" : "bounced", iso(), s.id));
+		await db.batch(stmts);
+	}
+}

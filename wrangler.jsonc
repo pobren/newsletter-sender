@@ -1,0 +1,24 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "newsletter-sender",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-01-15",
+	// One D1 database. Wrangler and the Deploy to Cloudflare button make it on the first deploy; Newsletter Sender
+	// makes its own tables the first time it runs.
+	"d1_databases": [{ "binding": "DB", "database_name": "newsletter-sender" }],
+	// The send queue: one batch of 50 emails per worker (a slow SES account takes about four minutes a batch, inside
+	// the queue's 15 minute limit), up to 10 workers at once. Keep max_concurrency the same as CONCURRENCY
+	// in src/sending.ts.
+	"queues": {
+		"producers": [{ "binding": "SENDS", "queue": "newsletter-sender-sends" }],
+		"consumers": [{ "queue": "newsletter-sender-sends", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 12, "max_concurrency": 10 }]
+	},
+	// Pictures in your emails.
+	"r2_buckets": [{ "binding": "IMAGES", "bucket_name": "newsletter-sender-images" }],
+	// Cloudflare's email service, for sign up confirmations only (newsletters go through Amazon SES or your own
+	// service). Needs your sending domain set up under Email Sending in the Cloudflare dashboard. See the README.
+	"send_email": [{ "name": "EMAIL" }],
+	// Starts scheduled campaigns.
+	"triggers": { "crons": ["* * * * *"] },
+	"observability": { "enabled": true }
+}

@@ -1,0 +1,98 @@
+<div align="center">
+  <h1>Newsletter Sender</h1>
+  <p><strong>Newsletter sending you own. Runs in your own Cloudflare account, sends through Amazon SES.</strong><br>
+  Lists, sign up forms, an email editor, imports from your old tool, bounces and stats.</p>
+  <p><a href="https://newslettersender.com/">Website</a> · <a href="#install">Install</a> · <a href="https://github.com/pobren/newsletter-sender/issues">Report a bug</a></p>
+</div>
+
+Newsletter Sender runs in your own Cloudflare account. Your subscribers, your emails and your stats stay there, and you send through your own Amazon SES account (or Postmark, Mailgun, Brevo or Resend), so you pay their sending price and nothing per subscriber.
+
+**Free for your own newsletters, source available.** See [Licence](#licence) below.
+
+<img src="docs/overview.png" alt="The Newsletter Sender overview: subscribers, the last email's progress and what's happened" width="100%">
+
+## What it does
+
+- **Lists and sign up forms.** A hosted sign up page for each list, and a form to paste into your own website. Extra questions if you want them, and a robot check if you switch on Turnstile.
+- **Double opt in.** New readers confirm by email first (you can turn it off per list). The confirm link is safe from email scanners that click every link.
+- **The editor.** Headings, text with **bold**, *italic* and links, pictures (uploaded to your own storage), buttons and lines, with a live preview. `{{first_name|there}}` puts in each reader's first name.
+- **Sending at full speed.** Newsletter Sender reads your SES sending rate and spreads the sending across up to ten workers, so a 10,000 person list at 14 a second takes about 12 minutes. If the service says slow down, it does, and carries on.
+- **Safety checks.** It won't send from an SES sandbox account, or more than your daily SES limit. If every email in a batch is turned down the same way (an unverified domain, a revoked key), sending pauses and tells you why.
+- **Test, schedule, stop.** Send a test to yourself, schedule it for later, or stop a send part way.
+- **Unsubscribe in one click.** Every email has an unsubscribe link and the one click unsubscribe headers Gmail and Yahoo ask bulk senders for.
+- **Bounces and spam complaints.** Hard bounces and complaints come straight back and that address is never emailed again.
+- **Import and export.** CSV files from Mailchimp, Sendy, Substack, Kit and others. We find the email column, join first and last names and keep extra columns. Nobody who unsubscribed, bounced or complained is added back.
+- **Stats.** Sent, bounced, unsubscribed and marked as spam for every email. Opens and clicks are **off by default**: switch them on in Settings if you want them.
+- **Public archive.** Past issues on the web at `/archive`, if you want it.
+
+<img src="docs/editor.png" alt="Writing an email: blocks on the left, live preview on the right" width="100%">
+
+## What you need
+
+- A Cloudflare account. The free plan works for smaller lists. For lists in the tens of thousands, Cloudflare's Workers Paid plan gives the database and queue more room.
+- A domain to send from, such as `news@yourdomain.com`.
+- An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo or Resend.
+
+## Install
+
+```sh
+git clone https://github.com/pobren/newsletter-sender.git
+cd newsletter-sender
+npm install
+npx wrangler queues create newsletter-sender-sends
+npx wrangler secret put SETUP_TOKEN    # a long secret code you make up
+npm run deploy
+```
+
+Wrangler, Cloudflare's own tool, asks you to sign in to Cloudflare in your browser. It makes the database and the picture storage on the first deploy, and Newsletter Sender makes its own tables the first time it runs.
+
+Then open `https://<your Newsletter Sender address>/setup?code=<your code>` to make your account. Only someone with the code can. The same link resets your password if you ever forget it.
+
+Updating later keeps everything you've set up: pull the new version and run `npm run deploy` again.
+
+To try it on your computer first: copy `.dev.vars.example` to `.dev.vars`, choose a code, then `npm run dev`.
+
+## Amazon SES
+
+1. In AWS, open **IAM › Users › Create user** (no console access). Attach **AmazonSESFullAccess** and **AmazonSNSFullAccess**.
+2. Open the user, then **Security credentials › Create access key** (Application running outside AWS).
+3. In Newsletter Sender, open **Sending**, choose **Amazon SES**, paste the two keys and choose your region.
+4. Press **Set up Amazon SES for me**. It adds your domain with DKIM signing, a `bounce.` subdomain for bounces, and sends every bounce and complaint back to Newsletter Sender.
+5. Add the DNS records it shows (each has a copy button). In Cloudflare, turn the orange cloud off for the CNAMEs.
+6. Press **Check where it's up to**. New SES accounts start in the sandbox: ask Amazon for production access under **SES › Account dashboard**.
+
+<img src="docs/sending.png" alt="The Sending tab: choosing a service, keys and the bounce webhook" width="100%">
+
+### Postmark, Mailgun, Brevo or Resend
+
+Paste your key on the **Sending** tab and your plan's emails a second. We send a test to you before saving. Then add the webhook address it shows in that service, for bounces and spam complaints.
+
+## Sign up confirmations
+
+Confirmation and welcome emails go through Cloudflare's own email service, so they're fast and don't use your newsletter sending. Set your sending domain up under **Email › Email Sending** in Cloudflare. Newsletters themselves always go through SES or the service you chose. If Cloudflare's email service isn't set up, confirmations go through that service instead.
+
+## Robot check (optional)
+
+Sign in, set-up and sign up forms can use [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/). In Cloudflare, add a Turnstile widget for your Newsletter Sender address (Managed), then add two secrets to the Worker: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. It switches on once both are there.
+
+## How it works
+
+One Cloudflare Worker, a D1 database, a queue and an R2 bucket for pictures. When you press send, every reader gets a row, the rows go on the queue in batches of 50, and up to ten workers send them at their share of your sending rate. What's been sent is saved as it goes, so a worker that stops part way picks up where it left off. A check every minute starts scheduled emails.
+
+Your sending keys are stored encrypted in your database. They're never shown again, only the last few characters.
+
+<img src="docs/signup.png" alt="A hosted sign up page" width="480">
+
+## Licence
+
+Newsletter Sender is source available under the [Business Source License 1.1](LICENSE). In plain English:
+
+- **Free** for one person or organisation's own newsletters, with any number of subscribers.
+- **Needs a commercial licence:** sending for clients or other people, or offering it as a hosted, managed or white label service. [Talk to us](https://paulobrien.dev/contact/) (choose "Let's work together").
+- Each version becomes Apache 2.0 four years after it's released.
+
+There's no licence key and nothing in the app stops you. We trust you. The [LICENSE](LICENSE) file is the legal text.
+
+## Help
+
+Questions and bugs go to [GitHub issues](https://github.com/pobren/newsletter-sender/issues). Please don't send personal details there.

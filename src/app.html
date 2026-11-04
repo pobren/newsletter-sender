@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Newsletter Sender</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='9' fill='%23a3195b'/%3E%3Cpath d='M8 18 L27 9 L22 27 L17 20 Z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root{--c:#a3195b;--cd:#7d1246;--pink:#fbe6f0;--soft:#fff5fa;--ink:#1d1424;--text:#4a3b52;--muted:#6b5a73;--line:#efe2e9;--bg:#fbf7f9;--ok:#0f7a4a;--warn:#a35a00;--bad:#a1122e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--c)}h1,h2,h3{margin:0;line-height:1.2}h1{font-size:28px;font-weight:800}h2{font-size:21px;font-weight:700}h3{font-size:17px}
+.ico{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.bar{max-width:1200px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.mark{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--ink);text-decoration:none}.mark svg{width:32px;height:32px}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap;flex:1}nav.tabs a{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:9px;color:var(--text);text-decoration:none;font-weight:600;font-size:15px}
+nav.tabs a.on,nav.tabs a:hover{background:var(--pink);color:var(--cd)}
+main{max-width:1200px;margin:0 auto;padding:28px 20px 80px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:8px 16px;border-radius:10px;border:0;background:var(--c);color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--cd)}.btn.ghost{background:#fff;color:var(--ink);border:2px solid #e6cfdb}.btn.ghost:hover{border-color:var(--c)}.btn.danger{background:#fff;color:var(--bad);border:2px solid #f0c9d2}.btn.small{min-height:34px;padding:4px 10px;font-size:14px}
+.btn[disabled]{opacity:.55;cursor:default}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grow{flex:1}.right{margin-left:auto}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:18px 0}
+.stat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}.stat p{margin:0;font-size:13px;color:var(--muted);font-weight:600}.stat b{display:block;font-size:28px;font-weight:800;margin-top:2px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:15px}.hint{font-size:13px;color:var(--muted);font-weight:400;margin:4px 0 0}
+input,select,textarea{width:100%;min-height:44px;padding:9px 12px;border:2px solid #e6cfdb;border-radius:10px;font:inherit;background:#fff;color:var(--ink)}textarea{min-height:120px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:3px solid var(--pink);border-color:var(--c)}input[type=checkbox]{width:20px;height:20px;min-height:0;accent-color:var(--c)}
+.check{display:flex;gap:10px;align-items:flex-start;font-weight:500;margin:12px 0}.check input{margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:13px;color:var(--muted)}tr.click{cursor:pointer}tr.click:hover td{background:var(--soft)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:600;background:#eee;color:var(--text)}.pill.draft{background:#f1eef3}.pill.scheduled{background:#e6efff;color:#1d4fa3}.pill.sending{background:#fff1d6;color:var(--warn)}.pill.sent,.pill.active{background:#dff5ea;color:var(--ok)}.pill.paused,.pill.bounced,.pill.complained,.pill.cancelled{background:#fde4ea;color:var(--bad)}.pill.pending{background:#fff1d6;color:var(--warn)}.pill.unsubscribed{background:#f1eef3;color:var(--muted)}
+.err{color:var(--bad);font-weight:600}.okmsg{color:var(--ok);font-weight:600}.muted{color:var(--muted)}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}@media(max-width:900px){.split{grid-template-columns:1fr}}
+iframe.preview{width:100%;height:calc(100vh - 110px);min-height:520px;position:sticky;top:90px;border:1px solid var(--line);border-radius:14px;background:#fff}
+.block{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#fff}.block .tools{display:flex;gap:6px;align-items:center;margin-bottom:6px}.block .tools b{flex:1;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--text)}.icon-btn:hover{border-color:var(--c);color:var(--c)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:12px 0}.tile{border:2px solid var(--line);border-radius:12px;padding:14px;background:#fff;cursor:pointer;text-align:left;font:inherit}.tile.on{border-color:var(--c);background:var(--soft)}.tile b{display:block}.tile span{font-size:13px;color:var(--muted)}
+.rec{display:grid;grid-template-columns:70px minmax(0,1.3fr) minmax(0,1.6fr);gap:8px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}.rec code{display:flex;gap:6px;align-items:flex-start;word-break:break-all;background:var(--soft);padding:6px 8px;border-radius:8px}.rec code button{flex:none}
+@media(max-width:700px){.rec{grid-template-columns:1fr}}
+code.copy{display:flex;gap:8px;align-items:center;word-break:break-all;background:var(--soft);padding:8px 10px;border-radius:8px;font-size:14px}
+.progress{height:12px;background:var(--pink);border-radius:999px;overflow:hidden;margin:10px 0}.progress i{display:block;height:100%;background:var(--c)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;font-weight:600;z-index:20;max-width:90vw}
+.modal{position:fixed;inset:0;background:rgba(29,20,36,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:15}.modal .card{max-width:560px;width:100%;max-height:90vh;overflow:auto;margin:0}
+.center{max-width:460px;margin:60px auto}
+.steps li{margin:6px 0}.done{color:var(--ok)}
+.feed{list-style:none;margin:0;padding:0}.feed li{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.feed time{color:var(--muted);font-size:13px;display:block}
+[hidden]{display:none!important}
+@media(max-width:700px){header{position:static}.bar{padding:10px 16px;gap:10px}nav.tabs{order:3;flex:0 0 100%;flex-wrap:nowrap;overflow-x:auto;margin:0 -16px;padding:0 16px}nav.tabs a{flex:none}#signout{margin-left:auto}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat b{font-size:24px}main{padding:20px 16px 60px}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M17 4a4 4 0 0 1 0 8"/><path d="M22 21c0-3-2-5-4-6"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></symbol>
+<symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8V3"/><path d="M8 21v-7h8v7"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="i-test" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></symbol>
+<symbol id="i-out" viewBox="0 0 24 24"><path d="M9 21H5V3h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></symbol>
+<symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="i-btn" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="5"/></symbol>
+</svg>
+
+<header id="top" hidden>
+	<div class="bar">
+		<a class="mark" href="#overview"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="9" fill="#a3195b"/><path d="M8 18 L27 9 L22 27 L17 20 Z" fill="#fff"/><path d="M17 20 L27 9" stroke="#a3195b" stroke-width="1.5"/></svg><span id="brandName">Newsletter Sender</span></a>
+		<nav class="tabs" aria-label="Main">
+			<a href="#overview" data-tab="overview"><svg class="ico"><use href="#i-home"/></svg>Overview</a>
+			<a href="#emails" data-tab="emails"><svg class="ico"><use href="#i-mail"/></svg>Emails</a>
+			<a href="#people" data-tab="people"><svg class="ico"><use href="#i-users"/></svg>Subscribers</a>
+			<a href="#lists" data-tab="lists"><svg class="ico"><use href="#i-list"/></svg>Lists and forms</a>
+			<a href="#sending" data-tab="sending"><svg class="ico"><use href="#i-send"/></svg>Sending</a>
+			<a href="#settings" data-tab="settings"><svg class="ico"><use href="#i-cog"/></svg>Settings</a>
+		</nav>
+		<button class="btn ghost small" id="signout"><svg class="ico"><use href="#i-out"/></svg>Sign out</button>
+	</div>
+</header>
+<main id="main"></main>
+<p class="muted" style="text-align:center;font-size:13px">Newsletter Sender {{VERSION}} · <a href="https://newslettersender.com/">newslettersender.com</a></p>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const main = $("#main");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const icon = (n) => `<svg class="ico" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const num = (n) => Number(n || 0).toLocaleString("en-GB");
+const when = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+const STATUS = { draft: "Draft", scheduled: "Scheduled", sending: "Sending", paused: "Paused", sent: "Sent", cancelled: "Stopped", active: "Subscribed", pending: "Not confirmed yet", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam" };
+const pill = (s) => `<span class="pill ${esc(s)}">${esc(STATUS[s] || s)}</span>`;
+let timer = null;
+let view = new AbortController(); // listeners for the open view, dropped when you move on
+
+async function api(path, opts = {}) {
+	const res = await fetch(path, { method: opts.method || (opts.body ? "POST" : "GET"), headers: opts.body && !(opts.body instanceof FormData) ? { "content-type": "application/json" } : {}, body: opts.body instanceof FormData ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined });
+	const data = await res.json().catch(() => ({}));
+	if (res.status === 401 && !opts.quiet) { boot(); throw new Error("Please sign in."); }
+	if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+	return data;
+}
+function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 3500); }
+async function run(btn, fn) {
+	const was = btn && btn.disabled; if (btn) btn.disabled = true;
+	try { return await fn(); } catch (e) { toast(e.message); } finally { if (btn) btn.disabled = was; }
+}
+function copyBtn(text) { return `<button class="icon-btn" type="button" title="Copy" data-copy="${esc(text)}">${icon("copy")}</button>`; }
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied")); } });
+function modal(html) { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="card">${html}</div>`; m.addEventListener("click", (e) => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); }); document.body.append(m); return m; }
+function robot(state) { return state.turnstile ? `<div class="cf-turnstile" data-sitekey="${esc(state.turnstile)}" data-response-field-name="ts" style="margin-top:14px"></div>` : ""; }
+function loadTurnstile(state) { if (state.turnstile && !window.turnstile) { const s = document.createElement("script"); s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js"; s.async = true; document.head.append(s); } }
+
+// -- Set-up and sign in -------------------------------------------------------------------------
+async function boot() {
+	clearInterval(timer);
+	const state = await api("/api/state", { quiet: true });
+	const code = new URLSearchParams(location.search).get("code");
+	if (code || !state.setUp) return setupScreen(state, code);
+	if (!state.signedIn) return signinScreen(state);
+	$("#top").hidden = false;
+	window.onhashchange = route;
+	route();
+}
+function setupScreen(state, code) {
+	$("#top").hidden = true;
+	if (!code) {
+		main.innerHTML = `<div class="center card"><h1>Welcome to Newsletter Sender</h1><p>To make your account, open the set-up link from when you installed it: <code>/setup?code=your-code</code>.</p>${state.setupTokenOk ? "" : `<p class="err">The SETUP_TOKEN secret isn't set yet (or is still the example). Add it under your Worker's Settings, Variables and Secrets, then use that code.</p>`}</div>`;
+		return;
+	}
+	main.innerHTML = `<form class="center card" id="f"><h1>${state.setUp ? "Reset your sign in" : "Make your account"}</h1><p class="muted">${state.setUp ? "Choose a new password. Everything else stays as it is." : "This is the only account. You can change everything later."}</p>
+	<label for="email">Your email address</label><input id="email" type="email" required autocomplete="email">
+	${state.setUp ? "" : `<label for="name">Your name</label><input id="name" autocomplete="name"><label for="brand">Your newsletter's name</label><input id="brand" placeholder="Such as The Friday Letter">`}
+	<label for="pw">Password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password"><p class="hint">At least 10 characters.</p>${robot(state)}
+	<p class="err" id="e"></p><button class="btn">${icon("check")}${state.setUp ? "Save and sign in" : "Make my account"}</button></form>`;
+	loadTurnstile(state);
+	$("#f").onsubmit = async (e) => {
+		e.preventDefault();
+		try {
+			await api("/api/setup", { body: { code, email: $("#email").value, name: $("#name")?.value, brand: $("#brand")?.value, password: $("#pw").value, ts: $("[name=ts]")?.value } });
+			history.replaceState(null, "", "/#overview"); boot();
+		} catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); }
+	};
+}
+function signinScreen(state) {
+	$("#top").hidden = true;
+	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><button class="btn">${icon("out")}Sign in</button><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
+	loadTurnstile(state);
+	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
+}
+$("#signout").onclick = async () => { await api("/api/signout", { body: {} }); location.hash = ""; boot(); };
+
+function route() {
+	clearInterval(timer);
+	view.abort(); view = new AbortController(); window.onbeforeunload = null;
+	const [tab, id] = (location.hash.slice(1) || "overview").split("/");
+	$$("nav.tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === (tab === "email" ? "emails" : tab)));
+	main.innerHTML = `<p class="muted">Loading…</p>`;
+	const views = { overview, emails, email: () => editor(id), people, lists, sending, settings };
+	(views[tab] || overview)().catch((e) => { main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
+}
+
+// -- Overview ---------------------------------------------------------------------------------------
+const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected" };
+async function overview() {
+	const o = await api("/api/overview");
+	$("#brandName").textContent = o.brand;
+	const todo = [
+		[!!o.sending, `Choose how to send`, "#sending"],
+		[o.subscribers > 0, "Add your first subscribers", "#people"],
+		[!!o.last, "Send your first email", "#emails"],
+	];
+	main.innerHTML = `<div class="row"><h1 class="grow">Hello${o.name ? ` ${esc(o.name.split(" ")[0])}` : ""}</h1><a class="btn" href="#emails" id="new">${icon("plus")}New email</a></div>
+	<div class="stats"><div class="stat"><p>Subscribers</p><b>${num(o.subscribers)}</b></div><div class="stat"><p>Waiting to confirm</p><b>${num(o.pending)}</b></div><div class="stat"><p>Emails sent, last 30 days</p><b>${num(o.sent30)}</b></div><div class="stat"><p>Bounced or marked as spam</p><b>${num(o.suppressed)}</b></div></div>
+	${todo.some((t) => !t[0]) ? `<div class="card"><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
+	<div class="split"><div class="card"><h2>Last email</h2>${o.last ? `<p><a href="#email/${o.last.id}"><b>${esc(o.last.subject)}</b></a> ${pill(o.last.status)}</p>${statsHtml(o.last.stats, o.last.total, false)}` : `<p class="muted">Nothing sent yet.</p>`}</div>
+	<div class="card"><h2>What's happened</h2>${o.activity.length ? `<ul class="feed">${o.activity.map((a) => `<li><time>${when(a.at)}</time>${esc(KIND[a.kind] || a.kind)}${a.email ? `: ${esc(a.email)}` : ""}${a.subject ? ` · ${esc(a.subject)}` : ""}${a.detail ? ` <span class="muted">(${esc(a.detail)})</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted">Nothing yet.</p>`}</div></div>`;
+	$("#new").onclick = (e) => { e.preventDefault(); newEmail(e.currentTarget); };
+}
+function statsHtml(s, total, tracking) {
+	const done = s.sent + s.failed + s.skipped;
+	const pct = total ? Math.round((done / total) * 100) : 0;
+	return `${s.queued ? `<div class="progress"><i style="width:${pct}%"></i></div><p class="muted">${num(done)} of ${num(total)} done</p>` : ""}
+	<div class="stats"><div class="stat"><p>Sent</p><b>${num(s.sent)}</b></div><div class="stat"><p>Bounced</p><b>${num(s.bounced)}</b></div><div class="stat"><p>Unsubscribed</p><b>${num(s.unsubscribed)}</b></div><div class="stat"><p>Marked as spam</p><b>${num(s.complained)}</b></div>
+	${s.failed ? `<div class="stat"><p>Didn't go</p><b>${num(s.failed)}</b></div>` : ""}${tracking ? `<div class="stat"><p>Opened</p><b>${num(s.opens)}</b></div><div class="stat"><p>Clicked</p><b>${num(s.clicks)}</b></div>` : ""}</div>`;
+}
+
+// -- Emails --------------------------------------------------------------------------------------------
+async function newEmail(btn) { await run(btn, async () => { const r = await api("/api/campaigns", { body: { subject: "" } }); location.hash = `email/${r.id}`; }); }
+async function emails() {
+	const list = await api("/api/campaigns");
+	main.innerHTML = `<div class="row"><h1 class="grow">Emails</h1><button class="btn" id="new">${icon("plus")}New email</button></div>
+	<div class="card">${list.length ? `<table><thead><tr><th>Subject</th><th>Status</th><th>When</th><th>People</th></tr></thead><tbody>${list.map((c) => `<tr class="click" data-id="${c.id}"><td><b>${esc(c.subject)}</b></td><td>${pill(c.status)}</td><td>${when(c.started_at || c.send_at || c.updated_at)}</td><td>${c.total ? num(c.total) : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">No emails yet. Press New email to write your first.</p>`}</div>`;
+	$("#new").onclick = (e) => newEmail(e.currentTarget);
+	$$("tr.click").forEach((tr) => (tr.onclick = () => (location.hash = `email/${tr.dataset.id}`)));
+}
+
+const BLOCKS = { heading: ["Heading", "text"], text: ["Text", "text"], image: ["Picture", "image"], button: ["Button", "btn"], divider: ["Line", "minus"] };
+async function editor(id) {
+	const signal = view.signal;
+	const [c, ls] = await Promise.all([api(`/api/campaigns/${id}`), api("/api/lists")]);
+	if (signal.aborted) return;
+	if (!["draft", "scheduled"].includes(c.status)) return report(c, ls);
+	let blocks = c.blocks;
+	let saved = true;
+	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#emails">${icon("back")}Emails</a><h1 class="grow">${c.status === "scheduled" ? "Scheduled email" : "Write an email"}</h1><span class="muted" id="saveState">Saved</span></div>
+	${c.status === "scheduled" ? `<div class="card"><p>${icon("clock")} Goes out ${when(c.send_at)}. <button class="btn ghost small" id="unschedule">${icon("x")}Don't send then</button></p></div>` : ""}
+	<div class="split" style="margin-top:16px"><div>
+		<div class="card"><label for="subject">Subject</label><input id="subject" value="${esc(c.subject === "Untitled email" ? "" : c.subject)}" placeholder="Such as Spring news">
+		<label for="pre">Preview text <span class="hint">(optional: the line inboxes show after the subject)</span></label><input id="pre" value="${esc(c.preheader || "")}">
+		<p class="hint">Put <code>{{first_name|there}}</code> anywhere to use each reader's first name, with "there" when you don't have it.</p></div>
+		<div class="card"><h2>Who it goes to</h2>${ls.map((l) => `<label class="check"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}> ${esc(l.name)} <span class="muted">(${num(l.active)})</span></label>`).join("")}
+		<label for="tags">Only people with these tags <span class="hint">(optional, separated by commas)</span></label><input id="tags" value="${esc(c.audience.tags.join(", "))}"><p id="count" class="muted"></p>
+		<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past issues</label></div>
+		<div class="card"><h2>The email</h2><div id="blocks"></div><div class="row" style="margin-top:10px">${Object.entries(BLOCKS).map(([k, [n, i]]) => `<button class="btn ghost small" data-add="${k}">${icon(i)}${n}</button>`).join("")}</div></div>
+		<div class="card"><h2>Send</h2><label for="testTo">Send a test to</label><div class="row"><input class="grow" id="testTo" type="email" placeholder="you@example.com" style="width:auto"><button class="btn ghost" id="test">${icon("test")}Send test</button></div>
+		<label for="at">Or choose when it goes</label><div class="row"><input class="grow" id="at" type="datetime-local" style="width:auto"><button class="btn ghost" id="schedule">${icon("clock")}Schedule</button></div>
+		<div class="row" style="margin-top:18px"><button class="btn" id="send">${icon("send")}Send now</button></div></div>
+	</div><div><iframe class="preview" id="preview" title="Preview" sandbox=""></iframe></div></div>`;
+	const box = $("#blocks");
+	const draw = () => {
+		box.innerHTML = blocks.map((b, i) => `<div class="block" data-i="${i}"><div class="tools"><b>${BLOCKS[b.type][0]}</b><button class="icon-btn" data-move="-1" title="Move up">${icon("up")}</button><button class="icon-btn" data-move="1" title="Move down">${icon("down")}</button><button class="icon-btn" data-del title="Remove">${icon("trash")}</button></div>${blockFields(b)}</div>`).join("") || `<p class="muted">Add a block below to start.</p>`;
+	};
+	const blockFields = (b) => {
+		if (b.type === "heading") return `<input data-k="text" value="${esc(b.text)}">`;
+		if (b.type === "text") return `<textarea data-k="text" rows="6">${esc(b.text)}</textarea><p class="hint">A blank line starts a new paragraph. **bold**, *italic*, [link text](https://...)</p>`;
+		if (b.type === "image") return `<div class="row"><input class="grow" data-k="src" value="${esc(b.src)}" placeholder="https://... or upload" style="width:auto"><label class="btn ghost small" style="margin:0">${icon("upload")}Upload<input type="file" accept="image/*" data-upload hidden></label></div><label>Describe the picture <span class="hint">(for people who can't see it)</span></label><input data-k="alt" value="${esc(b.alt || "")}"><label>Link <span class="hint">(optional)</span></label><input data-k="href" value="${esc(b.href || "")}" placeholder="https://...">`;
+		if (b.type === "button") return `<label>Button text</label><input data-k="label" value="${esc(b.label)}"><label>Link</label><input data-k="href" value="${esc(b.href)}" placeholder="https://...">`;
+		return `<p class="muted">A dividing line.</p>`;
+	};
+	draw();
+	const gather = () => ({ subject: $("#subject").value, preheader: $("#pre").value, blocks, audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: $("#tags").value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean) }, public: $("#public").checked });
+	let saving = null;
+	const save = async () => {
+		saving = api(`/api/campaigns/${id}`, { body: gather() }).then(() => { saved = true; $("#saveState").textContent = "Saved"; $("#preview").src = `/api/campaigns/${id}/preview?t=${Date.now()}`; }).catch((e) => { $("#saveState").textContent = e.message; });
+		return saving;
+	};
+	let t = null;
+	const changed = () => { saved = false; $("#saveState").textContent = "Saving…"; clearTimeout(t); t = setTimeout(save, 700); };
+	const recount = async () => { const a = gather().audience; try { const r = await api("/api/audience", { body: a }); $("#count").textContent = a.lists.length ? `Goes to ${num(r.count)} people. Sending takes ${r.time}.` : "Choose at least one list."; } catch {} };
+	main.addEventListener("input", (e) => {
+		const el = e.target;
+		const blk = el.closest(".block");
+		if (blk && el.dataset.k) blocks[+blk.dataset.i][el.dataset.k] = el.value;
+		if (el.name === "list" || el.id === "tags") recount();
+		if (el.id !== "testTo" && el.id !== "at") changed();
+	}, { signal });
+	main.addEventListener("change", async (e) => {
+		if (e.target.matches("[name=list]") || e.target.id === "public") changed();
+		if (e.target.matches("[data-upload]")) {
+			const i = +e.target.closest(".block").dataset.i;
+			const fd = new FormData(); fd.append("file", e.target.files[0]);
+			await run(null, async () => { const r = await api("/api/images", { body: fd }); blocks[i].src = r.url; draw(); changed(); });
+		}
+	}, { signal });
+	main.addEventListener("click", async (e) => {
+		const b = e.target.closest("button"); if (!b) return;
+		const blk = b.closest(".block");
+		if (b.dataset.add) { blocks.push({ heading: { type: "heading", text: "A heading" }, text: { type: "text", text: "" }, image: { type: "image", src: "", alt: "" }, button: { type: "button", label: "Read more", href: "https://" }, divider: { type: "divider" } }[b.dataset.add]); draw(); changed(); }
+		else if (blk && b.dataset.move) { const i = +blk.dataset.i, j = i + +b.dataset.move; if (j >= 0 && j < blocks.length) { [blocks[i], blocks[j]] = [blocks[j], blocks[i]]; draw(); changed(); } }
+		else if (blk && b.hasAttribute("data-del")) { blocks.splice(+blk.dataset.i, 1); draw(); changed(); }
+	}, { signal });
+	$("#unschedule") && ($("#unschedule").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${id}/unschedule`, { body: {} }); route(); }));
+	$("#test").onclick = (e) => run(e.currentTarget, async () => { await save(); const r = await api(`/api/campaigns/${id}/test`, { body: { to: $("#testTo").value } }); toast(`Test sent to ${r.sent === 1 ? $("#testTo").value || "you" : r.sent + " addresses"}`); });
+	$("#schedule").onclick = (e) => run(e.currentTarget, async () => { await save(); if (!$("#at").value) throw new Error("Please choose a date and time."); await api(`/api/campaigns/${id}/schedule`, { body: { at: new Date($("#at").value).toISOString() } }); toast("Scheduled"); route(); });
+	$("#send").onclick = async (e) => {
+		await save();
+		const a = gather().audience;
+		const r = await api("/api/audience", { body: a }).catch(() => ({ count: 0, time: "" }));
+		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> people straight away and takes ${esc(r.time)}. You can't change it once it's gone.</p><p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
+		$("#go", m).onclick = async (ev) => { ev.currentTarget.disabled = true; try { await api(`/api/campaigns/${id}/send`, { body: {} }); m.remove(); route(); } catch (err) { $("#me", m).textContent = err.message; ev.currentTarget.disabled = false; } };
+	};
+	$("#preview").src = `/api/campaigns/${id}/preview`;
+	recount();
+	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
+}
+async function report(c, ls) {
+	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#emails">${icon("back")}Emails</a><h1 class="grow">${esc(c.subject)}</h1>${pill(c.status)}</div>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}</p>
+	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
+	${statsHtml(c.stats, c.total, c.tracking)}
+	<div class="row">${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
+	${c.links.length ? `<div class="card" style="margin-top:18px"><h2>Clicks</h2><table>${c.links.map((l) => `<tr><td style="word-break:break-all">${esc(l.url)}</td><td>${num(l.clicks)}</td></tr>`).join("")}</table></div>` : ""}
+	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
+	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
+	$("#resume") && ($("#resume").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/resume`, { body: {} }); route(); }));
+	$("#dup").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/duplicate`, { body: {} }); location.hash = `email/${r.id}`; });
+	if (c.status === "sending") timer = setInterval(async () => { const fresh = await api(`/api/campaigns/${c.id}`).catch(() => null); if (fresh && (fresh.status !== "sending" || fresh.stats.sent !== c.stats.sent)) route(); }, 4000);
+}
+
+// -- Subscribers ---------------------------------------------------------------------------------------
+async function people() {
+	const ls = await api("/api/lists");
+	const q = { list: "", status: "active", q: "", page: 0 };
+	main.innerHTML = `<div class="row"><h1 class="grow">Subscribers</h1><button class="btn" id="add">${icon("plus")}Add someone</button><button class="btn ghost" id="import">${icon("upload")}Import a list</button><a class="btn ghost" id="export" href="/api/export">${icon("download")}Export</a></div>
+	<div class="card"><div class="row"><select id="fl" style="width:auto"><option value="">Every list</option>${ls.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select>
+	<select id="fs" style="width:auto"><option value="active">Subscribed</option><option value="pending">Not confirmed yet</option><option value="unsubscribed">Unsubscribed</option><option value="bounced">Bounced</option><option value="complained">Marked as spam</option><option value="all">Everyone</option></select>
+	<input id="fq" class="grow" placeholder="Search by email or name" style="width:auto"></div><div id="rows" style="margin-top:12px"></div></div>`;
+	const load = async () => {
+		const r = await api(`/api/subscribers?${new URLSearchParams(q)}`);
+		const name = (id) => ls.find((l) => l.id === id)?.name || "";
+		$("#rows").innerHTML = r.rows.length ? `<table><thead><tr><th>Email</th><th>Name</th><th>Lists</th><th>Joined</th></tr></thead><tbody>${r.rows.map((s) => `<tr class="click" data-id="${s.id}"><td>${esc(s.email)}${s.suppressed ? " " + pill(s.suppressed) : ""}</td><td>${esc(s.name || "")}</td><td>${s.lists.map((l) => `${esc(name(l.id))} ${l.status !== "active" ? pill(l.status) : ""}`).join("<br>")}</td><td>${when(s.created_at)}</td></tr>`).join("")}</tbody></table>
+		<div class="row" style="margin-top:12px">${q.page ? `<button class="btn ghost small" id="prev">${icon("back")}Back</button>` : ""}${r.more ? `<button class="btn ghost small" id="next">${icon("down")}More</button>` : ""}</div>` : `<p class="muted">Nobody here.</p>`;
+		$$("#rows tr.click").forEach((tr) => (tr.onclick = () => person(tr.dataset.id, ls, load)));
+		$("#prev") && ($("#prev").onclick = () => { q.page--; load(); });
+		$("#next") && ($("#next").onclick = () => { q.page++; load(); });
+		$("#export").href = `/api/export${q.list ? `?list=${q.list}` : ""}`;
+	};
+	$("#fl").onchange = (e) => { q.list = e.target.value; q.page = 0; load(); };
+	$("#fs").onchange = (e) => { q.status = e.target.value; q.page = 0; load(); };
+	let t; $("#fq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.q = e.target.value; q.page = 0; load(); }, 300); };
+	$("#add").onclick = () => {
+		const m = modal(`<h2>Add someone</h2><label>Email address</label><input id="ae" type="email"><label>Name <span class="hint">(optional)</span></label><input id="an"><label>List</label><select id="al">${ls.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select>
+		<label class="check"><input type="checkbox" id="ac"> Send them a confirmation email first <span class="hint">(leave unticked if they've already agreed to hear from you)</span></label><p class="err" id="ar"></p><div class="row"><button class="btn" id="ago">${icon("plus")}Add</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+		$("#ago", m).onclick = async () => { try { const r = await api("/api/subscribers", { body: { email: $("#ae", m).value, name: $("#an", m).value, list: $("#al", m).value, confirm: $("#ac", m).checked } }); m.remove(); toast(r.status === "already" ? "Already on the list" : r.status === "pending" ? "Confirmation email sent" : "Added"); load(); } catch (e) { $("#ar", m).textContent = e.message; } };
+	};
+	$("#import").onclick = () => importer(ls, load);
+	load();
+}
+async function person(id, ls, reload) {
+	const s = await api(`/api/subscribers/${id}`);
+	const m = modal(`<h2>${esc(s.email)}</h2>${s.suppressed ? `<p>${pill(s.suppressed)} We won't email this address again.</p>` : ""}<label>Name</label><input id="pn" value="${esc(s.name || "")}"><label>Tags <span class="hint">(separated by commas)</span></label><input id="pt" value="${esc(s.tags.join(", "))}">
+	${Object.keys(s.fields).length ? `<table style="margin-top:12px">${Object.entries(s.fields).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table>` : ""}
+	<h3 style="margin-top:16px">What's happened</h3><ul class="feed">${s.history.map((h) => `<li><time>${when(h.at)}</time>${esc(KIND[h.kind] || h.kind)}${h.subject ? ` · ${esc(h.subject)}` : ""}${h.detail ? ` <span class="muted">(${esc(h.detail)})</span>` : ""}</li>`).join("") || "<li class='muted'>Nothing yet.</li>"}</ul>
+	<div class="row" style="margin-top:16px"><button class="btn" id="ps">${icon("save")}Save</button><button class="btn ghost" id="pu">${icon("x")}Unsubscribe</button><button class="btn danger" id="pd">${icon("trash")}Delete everything about them</button></div>`);
+	$("#ps", m).onclick = (e) => run(e.currentTarget, async () => { await api(`/api/subscribers/${id}`, { body: { name: $("#pn", m).value, tags: $("#pt", m).value.split(",").map((x) => x.trim()).filter(Boolean) } }); m.remove(); reload(); });
+	$("#pu", m).onclick = (e) => run(e.currentTarget, async () => { await api(`/api/subscribers/${id}/unsubscribe`, { body: {} }); m.remove(); reload(); });
+	$("#pd", m).onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this person and their history for good? Use Unsubscribe instead if you just want to stop emailing them.")) return; await api(`/api/subscribers/${id}`, { method: "DELETE" }); m.remove(); reload(); });
+}
+
+// The same CSV reading as src/csv.ts, so the list is checked before anything is sent.
+function parseCsv(text) {
+	const src = text.replace(/^﻿/, ""); const first = src.split(/\r?\n/, 1)[0] || "";
+	const sep = [",", ";", "\t"].map((s) => [s, first.split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+	const rows = []; let row = [], cell = "", quoted = false;
+	for (let i = 0; i < src.length; i++) { const c = src[i];
+		if (quoted) { if (c === '"' && src[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c; }
+		else if (c === '"' && cell === "") quoted = true; else if (c === sep) { row.push(cell); cell = ""; }
+		else if (c === "\n" || c === "\r") { if (c === "\r" && src[i + 1] === "\n") i++; row.push(cell); if (row.some((x) => x.trim())) rows.push(row); row = []; cell = ""; } else cell += c; }
+	row.push(cell); if (row.some((x) => x.trim())) rows.push(row); return rows;
+}
+const fkey = (h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
+const SKIP = new Set("email email_address e_mail name full_name first_name firstname fname last_name lastname surname lname tags status member_rating optin_time optin_ip confirm_time confirm_ip latitude longitude gmtoff dstoff timezone cc region last_changed leid euid notes date_added date_created signup_date unsubscribed bounced complaint joined subscribed list".split(" "));
+function readImport(rows) {
+	if (!rows.length) return { rows: [], skipped: 0, columns: [] };
+	const head = rows[0].map(fkey); let emailCol = head.findIndex((h) => ["email", "email_address", "e_mail", "mail"].includes(h)); let start = 1;
+	const isEmail = (x) => /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i.test(String(x || "").trim());
+	if (emailCol < 0) { emailCol = rows[0].findIndex(isEmail); start = 0; if (emailCol < 0) return { rows: [], skipped: rows.length, columns: [] }; }
+	const col = (...n) => (start ? head.findIndex((h) => n.includes(h)) : -1);
+	const nameCol = col("name", "full_name"), firstCol = col("first_name", "firstname", "fname"), lastCol = col("last_name", "lastname", "surname", "lname"), tagCol = col("tags");
+	const extra = start ? head.map((h, i) => ({ h, i })).filter(({ h, i }) => h && !SKIP.has(h) && i !== emailCol) : [];
+	const seen = new Set(); const out = []; let skipped = 0;
+	for (const r of rows.slice(start)) { const email = String(r[emailCol] || "").trim().toLowerCase(); if (!isEmail(email) || seen.has(email)) { skipped++; continue; } seen.add(email);
+		const joined = [r[firstCol] || "", r[lastCol] || ""].map((s) => s.trim()).filter(Boolean).join(" ");
+		const fields = {}; for (const { h, i } of extra) if ((r[i] || "").trim()) fields[h] = r[i].trim();
+		out.push({ email, name: ((nameCol >= 0 ? r[nameCol] : "") || joined || "").trim() || null, fields, tags: tagCol >= 0 ? (r[tagCol] || "").split(/[,;|]/).map((t) => t.trim()).filter(Boolean) : [] }); }
+	return { rows: out, skipped, columns: extra.map((e) => e.h) };
+}
+function importer(ls, reload) {
+	const m = modal(`<h2>Import a list</h2><p>A CSV file from your old newsletter tool (Mailchimp, Sendy, Substack, Kit and others) or a spreadsheet. We find the email column ourselves.</p>
+	<label>The file</label><input type="file" id="if" accept=".csv,text/csv,text/plain"><p id="ip" class="muted"></p><label>Into this list</label><select id="il">${ls.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select>
+	<label>Tag them <span class="hint">(optional)</span></label><input id="it" placeholder="such as imported">
+	<label class="check"><input type="checkbox" id="ic"> Everyone on this list agreed to get emails from me</label><p class="hint">Nobody who has unsubscribed, bounced or marked you as spam is added back.</p><p class="err" id="ie"></p>
+	<div class="row"><button class="btn" id="igo" disabled>${icon("upload")}Import</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+	let data = null;
+	$("#if", m).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; data = readImport(parseCsv(await f.text())); $("#ip", m).textContent = data.rows.length ? `${num(data.rows.length)} people found${data.skipped ? `, ${num(data.skipped)} rows skipped (no email, or a repeat)` : ""}.${data.columns.length ? ` Also keeping: ${data.columns.join(", ")}.` : ""}` : "We couldn't find any email addresses in that file."; $("#igo", m).disabled = !data.rows.length; };
+	$("#igo", m).onclick = async (e) => {
+		const btn = e.currentTarget; btn.disabled = true; let added = 0;
+		try { for (let i = 0; i < data.rows.length; i += 1000) { const r = await api("/api/import", { body: { list: $("#il", m).value, rows: data.rows.slice(i, i + 1000), tags: $("#it", m).value.split(",").map((t) => t.trim()).filter(Boolean), consent: $("#ic", m).checked } }); added += r.added; $("#ip", m).textContent = `Imported ${num(added)} of ${num(data.rows.length)}…`; }
+			m.remove(); toast(`Imported ${num(added)} people`); reload();
+		} catch (err) { $("#ie", m).textContent = err.message; btn.disabled = false; }
+	};
+}
+
+// -- Lists and forms -----------------------------------------------------------------------------------
+async function lists() {
+	const ls = await api("/api/lists");
+	main.innerHTML = `<div class="row"><h1 class="grow">Lists and forms</h1><button class="btn" id="add">${icon("plus")}New list</button></div>
+	${ls.map((l) => `<div class="card"><div class="row"><h2 class="grow">${esc(l.name)}</h2><button class="btn ghost small" data-edit="${l.id}">${icon("cog")}Change</button></div>
+	<p class="muted">${num(l.active)} subscribed · ${num(l.pending)} not confirmed yet · ${num(l.left_count)} unsubscribed · ${l.double_optin ? "people confirm by email first" : "no confirmation email"}</p>
+	<label>Sign up page</label><code class="copy"><a class="grow" href="${esc(l.url)}" target="_blank">${esc(l.url)}</a>${copyBtn(l.url)}</code>
+	<label>Form for your website <span class="hint">(paste into any page; style it to match)</span></label><code class="copy"><span class="grow" style="white-space:pre-wrap;font-size:12px">${esc(l.embed)}</span>${copyBtn(l.embed)}</code></div>`).join("")}`;
+	$("#add").onclick = () => listForm({ name: "", description: "", double_optin: 1, fields: [] }, ls.length);
+	$$("[data-edit]").forEach((b) => (b.onclick = () => listForm(ls.find((l) => l.id === b.dataset.edit), ls.length)));
+}
+function listForm(l, count) {
+	const m = modal(`<h2>${l.id ? "Change the list" : "New list"}</h2><label>Name</label><input id="ln" value="${esc(l.name)}"><label>What it's about <span class="hint">(shown on the sign up page)</span></label><textarea id="ld" rows="3">${esc(l.description || "")}</textarea>
+	<label class="check"><input type="checkbox" id="lo" ${l.double_optin ? "checked" : ""}> People confirm by email before they're added (recommended)</label>
+	<label>Extra questions on the form <span class="hint">(one per line; add * for required, such as Company*)</span></label><textarea id="lf" rows="3">${esc((l.fields || []).map((f) => f.label + (f.required ? "*" : "")).join("\n"))}</textarea>
+	<label>Welcome email subject <span class="hint">(optional, sent when someone joins)</span></label><input id="lws" value="${esc(l.welcome_subject || "")}"><label>Welcome email</label><textarea id="lwt" rows="4">${esc(l.welcome_text || "")}</textarea>
+	<label>After signing up, go to <span class="hint">(optional, your own thank you page)</span></label><input id="lt" value="${esc(l.thanks_url || "")}" placeholder="https://...">
+	<p class="err" id="le"></p><div class="row"><button class="btn" id="lgo">${icon("save")}Save</button>${l.id && count > 1 ? `<button class="btn danger" id="ldel">${icon("trash")}Delete list</button>` : ""}<button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+	$("#lgo", m).onclick = async () => { try { await api("/api/lists", { body: { id: l.id, name: $("#ln", m).value, description: $("#ld", m).value, double_optin: $("#lo", m).checked, fields: $("#lf", m).value.split("\n").map((x) => x.trim()).filter(Boolean).map((x) => ({ label: x.replace(/\*$/, ""), required: x.endsWith("*") })), welcome_subject: $("#lws", m).value, welcome_text: $("#lwt", m).value, thanks_url: $("#lt", m).value } }); m.remove(); route(); } catch (e) { $("#le", m).textContent = e.message; } };
+	$("#ldel", m) && ($("#ldel", m).onclick = async () => { if (confirm("Delete this list? The people on it stay in your other lists.")) { await api(`/api/lists/${l.id}`, { method: "DELETE" }); m.remove(); route(); } });
+}
+
+// -- Sending ---------------------------------------------------------------------------------------------
+const PROVIDERS = [
+	["ses", "Amazon SES", "Full speed, lowest cost. Recommended."],
+	["postmark", "Postmark", "Paste a server token"],
+	["mailgun", "Mailgun", "Paste a sending key"],
+	["brevo", "Brevo", "Paste an API key"],
+	["resend", "Resend", "Paste an API key"],
+];
+async function sending() {
+	const s = await api("/api/sending");
+	let pick = s.sending?.provider || "ses";
+	const recs = (r) => r.map((x) => `<div class="rec"><b>${x.type}${x.priority ? ` ${x.priority}` : ""}</b><code><span class="grow">${esc(x.name)}</span>${copyBtn(x.name)}</code><code><span class="grow">${esc(x.value)}</span>${copyBtn(x.value)}</code><span class="hint" style="grid-column:1/-1">${esc(x.why)}${x.optional ? " Optional." : ""}</span></div>`).join("");
+	main.innerHTML = `<h1>Sending</h1><p class="muted">Newsletters go from <b>${esc(s.fromEmail)}</b> (change it under Settings). Your keys are stored encrypted in your own Cloudflare account and never shown again.</p>
+	${s.sending ? `<div class="card"><div class="row"><h2 class="grow">${icon("check")} Sending through ${esc(s.sending.name)}</h2><button class="btn danger small" id="remove">${icon("trash")}Remove</button></div><p class="muted">Key ending ${esc(s.sending.keyEnd)}${s.sending.region ? ` · region ${esc(s.sending.region)}` : ""} · up to ${num(s.rate)} emails a second, so 10,000 people take about ${Math.max(1, Math.round(10000 / s.rate / 60))} minutes.</p>
+	${s.sending.provider === "ses" ? `<div class="row"><button class="btn" id="sesSetup">${icon("cog")}Set up Amazon SES for me</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check where it's up to</button></div><div id="sesOut">${s.ses ? `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs.</p>${recs(s.ses.records)}` : ""}</div>`
+	: `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>Add this address as a webhook in ${esc(s.sending.name)}, for bounces and spam complaints, so we stop emailing them:</p><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code>`}</div>` : ""}
+	<div class="card"><h2>${s.sending ? "Change how you send" : "Choose how to send"}</h2><div class="tiles">${PROVIDERS.map(([id, n, t]) => `<button class="tile ${id === pick ? "on" : ""}" data-p="${id}"><b>${n}</b><span>${t}</span></button>`).join("")}</div><div id="pf"></div></div>
+	<div class="card"><h2>Sign up confirmations</h2>${s.cloudflareEmail ? `<p>${icon("check")} Cloudflare's email service sends sign up confirmations and welcome emails. It needs <b>${esc(s.fromEmail.split("@")[1])}</b> set up under Email Sending in your Cloudflare dashboard. Newsletters always go through the service above.</p>` : `<p>Sign up confirmations go through the service above.</p>`}
+	<div class="row"><input id="ct" type="email" placeholder="Send a test confirmation to…" class="grow" style="width:auto"><button class="btn ghost" id="ctest">${icon("test")}Send test</button></div></div>`;
+	const form = () => {
+		$$(".tile").forEach((t) => t.classList.toggle("on", t.dataset.p === pick));
+		const ses = pick === "ses";
+		$("#pf").innerHTML = (ses ? `<ol class="hint"><li>In AWS, open IAM, Users, Create user (no console access).</li><li>Attach the policies <b>AmazonSESFullAccess</b> and <b>AmazonSNSFullAccess</b>.</li><li>Open the user, Security credentials, Create access key (Application running outside AWS).</li></ol>
+		<label>Access key ID</label><input id="kid" placeholder="AKIA..."><label>Secret access key</label><input id="key" type="password" autocomplete="off"><label>Region</label><select id="region">${["eu-west-1", "eu-west-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-2", "ap-southeast-2", "ap-south-1", "ca-central-1"].map((r) => `<option>${r}</option>`).join("")}</select>`
+		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="off">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails a second <span class="hint">(your plan's limit; Resend allows 2 unless you've asked for more)</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
+		$("#psave").onclick = (e) => run(e.currentTarget, async () => { try { await api("/api/sending", { body: { provider: pick, key: $("#key").value, accessKeyId: $("#kid")?.value, region: $("#region")?.value, mailgunDomain: $("#mgd")?.value, mailgunRegion: $("#mgr")?.value, rate: $("#rate")?.value } }); toast("Saved"); route(); } catch (err) { $("#pe").textContent = err.message; } });
+	};
+	$$(".tile").forEach((t) => (t.onclick = () => { pick = t.dataset.p; form(); }));
+	form();
+	$("#remove") && ($("#remove").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Remove these keys? Nothing can be sent until you add a service again.")) { await api("/api/sending", { method: "DELETE" }); route(); } }));
+	$("#sesSetup") && ($("#sesSetup").onclick = (e) => run(e.currentTarget, async () => { const r = await api("/api/sending/ses-setup", { body: {} }); $("#sesOut").innerHTML = `<ul>${r.steps.map((x) => `<li class="done">${icon("check")} ${esc(x)}</li>`).join("")}</ul><h3>Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs.</p>${recs(r.records)}`; }));
+	$("#sesCheck") && ($("#sesCheck").onclick = (e) => run(e.currentTarget, async () => {
+		const r = await api("/api/sending/ses-status");
+		const good = (x) => x === "SUCCESS" || x === true;
+		$("#sesOut").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-top:14px"><ul class="steps"><li class="${good(r.verified) ? "done" : ""}">${good(r.verified) ? icon("check") : icon("clock")} ${esc(r.domain)} ${r.verified ? "can send" : "isn't verified yet (DNS can take up to an hour)"}</li><li class="${good(r.dkim) ? "done" : ""}">${good(r.dkim) ? icon("check") : icon("clock")} Signing (DKIM): ${esc(r.dkim.toLowerCase().replace("_", " "))}</li><li class="${good(r.bounceDomain) ? "done" : ""}">${good(r.bounceDomain) ? icon("check") : icon("clock")} Bounce address: ${esc(r.bounceDomain.toLowerCase().replace("_", " "))}</li><li class="${r.production ? "done" : ""}">${r.production ? icon("check") + " Out of the sandbox" : icon("clock") + " Still in the SES sandbox: ask Amazon for production access (SES, Account dashboard)"}</li><li>Up to ${num(r.rate)} emails a second and ${num(r.max24)} a day (${num(r.sent24)} sent in the last 24 hours)</li></ul></div>`);
+	}));
+	$("#ctest").onclick = (e) => run(e.currentTarget, async () => { await api("/api/sending/test", { body: { to: $("#ct").value } }); toast("Test sent"); });
+}
+
+// -- Settings --------------------------------------------------------------------------------------------
+async function settings() {
+	const b = await api("/api/brand");
+	main.innerHTML = `<h1>Settings</h1><form class="card" id="f"><h2>Your newsletter</h2>
+	<label>Name</label><input id="name" value="${esc(b.name)}"><label>From name <span class="hint">(who emails come from)</span></label><input id="from_name" value="${esc(b.from_name)}">
+	<label>From address</label><input id="from_email" type="email" value="${esc(b.from_email)}"><p class="hint">On a domain you've set up for sending, such as news@yourdomain.com.</p>
+	<label>Replies go to <span class="hint">(optional)</span></label><input id="reply_to" type="email" value="${esc(b.reply_to || "")}">
+	<label>Footer <span class="hint">(your postal address or company details; the law in many countries asks for one)</span></label><textarea id="footer" rows="2">${esc(b.footer || "")}</textarea>
+	<div class="row"><div><label>Colour</label><input id="colour" type="color" value="${esc(b.colour)}" style="width:90px;padding:4px"></div><div class="grow"><label>Logo address <span class="hint">(optional, https://...)</span></label><input id="logo" value="${esc(b.logo || "")}"></div></div>
+	<label class="check"><input type="checkbox" id="archive" ${b.archive ? "checked" : ""}> Public archive of past issues at <a href="/archive" target="_blank">/archive</a></label>
+	<label class="check"><input type="checkbox" id="tracking" ${b.tracking ? "checked" : ""}> Count opens and clicks <span class="hint">(off by default: it adds an invisible picture and changes links, and some readers would rather it didn't)</span></label>
+	<p class="err" id="e"></p><button class="btn">${icon("save")}Save</button></form>
+	<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button></div>
+	<div class="card"><h2>Licence</h2><p>Newsletter Sender is free for one person or organisation's own newsletters. Sending for clients, or offering it as a hosted or white label service, needs a commercial licence: <a href="https://paulobrien.dev/contact/">get in touch</a>.</p></div>`;
+	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, tracking: $("#tracking").checked } }); toast("Saved"); $("#brandName").textContent = $("#name").value; } catch (err) { $("#e").textContent = err.message; } };
+	$("#everywhere").onclick = (e) => run(e.currentTarget, async () => { await api("/api/signout-everywhere", { body: {} }); boot(); });
+}
+
+boot();
+</script>
+</body>
+</html>

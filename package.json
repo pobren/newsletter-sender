@@ -1,0 +1,32 @@
+{
+	"name": "newsletter-sender",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Newsletters for solo writers, businesses and agencies, from your own Cloudflare account. Hosted on Cloudflare, sent with Amazon SES.",
+	"license": "SEE LICENSE IN LICENSE",
+	"type": "module",
+	"homepage": "https://newslettersender.com/",
+	"repository": { "type": "git", "url": "git+https://github.com/pobren/newsletter-sender.git" },
+	"bugs": { "url": "https://github.com/pobren/newsletter-sender/issues" },
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"test": "node --experimental-strip-types --test test/*.test.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"engines": { "node": ">=22" },
+	"devDependencies": {
+		"@cloudflare/workers-types": "^5.20261019.1",
+		"typescript": "^5.8.3",
+		"wrangler": "^4.20.0"
+	},
+	"cloudflare": {
+		"label": "Newsletter Sender",
+		"products": ["Workers", "D1", "Queues", "R2"],
+		"bindings": {
+			"SETUP_TOKEN": {
+				"description": "A long secret code you choose (replace the example, which won't work). After deploying, open `https://<your Newsletter Sender>/setup?code=<your code>` to make your account. Only someone with the code can."
+			}
+		}
+	}
+}
