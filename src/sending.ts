@@ -180,17 +180,17 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 }
 
 /** Puts batches for send rows lo..hi on the queue, 100 messages a call. */
-export async function enqueue(env: Env, campaign: string, lo: number, hi: number): Promise<void> {
-	const all = batches(lo, hi).map(([from, to]) => ({ body: { campaign, from, to } satisfies SendBatch }));
+export async function enqueue(env: Env, campaign: string, lo: number, hi: number, run = 0): Promise<void> {
+	const all = batches(lo, hi).map(([from, to]) => ({ body: { campaign, from, to, run } satisfies SendBatch }));
 	for (let i = 0; i < all.length; i += 100) await env.SENDS.sendBatch(all.slice(i, i + 100));
 }
 
 /** Carries on a paused campaign: the rows still queued go back on the queue. */
 export async function resume(env: Env, c: CampaignRow): Promise<{ ok: true } | { error: string }> {
-	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', health = CASE WHEN health = 1 THEN 2 ELSE health END, updated_at = ? WHERE id = ? AND status = 'paused' RETURNING id").bind(iso(), c.id).first();
+	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', run = run + 1, health = CASE WHEN health = 1 THEN 2 ELSE health END, updated_at = ? WHERE id = ? AND status = 'paused' RETURNING run").bind(iso(), c.id).first<{ run: number }>();
 	if (!claim) return { error: "Only a paused campaign can carry on." };
 	const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
-	if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi);
+	if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi, claim.run);
 	else await finishIfDone(env.DB, c.id);
 	return { ok: true };
 }
@@ -238,6 +238,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const db = env.DB;
 	const c = await db.prepare("SELECT * FROM campaigns WHERE id = ?").bind(b.campaign).first<CampaignRow>();
 	if (!c || c.status !== "sending") return 0; // cancelled or paused: leave the rows as they are
+	if ((b.run ?? 0) !== (c.run ?? 0)) return 0; // from before a pause: the carry on queued these rows again
 	const brand = await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>();
 	const test = await loadTestFor(db, c.id);
 	const provider = brand ? (test ? ({ provider: "ses", key: "" } as ProviderConfig) : await loadProvider(db, brand)) : null;
@@ -264,8 +265,14 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
+	// Every 50 emails we look again, so pressing Pause (or Stop) takes effect within seconds, not at the end of the batch.
+	let stopped = false, flushes = 0;
 	const flush = async () => {
 		if (pending.length) await db.batch(pending.splice(0));
+		if (++flushes % 5 === 0) {
+			const now = await db.prepare("SELECT status, run FROM campaigns WHERE id = ?").bind(c.id).first<{ status: string; run: number }>();
+			if (!now || now.status !== "sending" || (now.run ?? 0) !== (c.run ?? 0)) stopped = true;
+		}
 	};
 	const record = (id: number, s: Sent) => {
 		if (s.ok) pending.push(db.prepare("UPDATE sends SET status = 'sent', message_id = ?, sent_at = ? WHERE id = ?").bind(s.id ?? null, iso(), id));
@@ -291,8 +298,9 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		record(r.id, sent);
 		if (pending.length >= 10) await flush();
 		return sent;
-	});
+	}, realClock, () => stopped);
 	await flush();
+	if (stopped) return 0; // paused or stopped part way: what's left stays queued for Carry on sending
 	if (test) {
 		const replies = pretendReplies(db, brand.id, c.id, test, outcome.done.filter(([, s]) => s.ok).map(([r]) => r));
 		if (replies.length) {
@@ -334,18 +342,18 @@ export { mergeSubject };
  * Runs `send` for each row, starting the nth no sooner than n / rate seconds in, with up to OPEN at once. Stops
  * starting new ones as soon as the service says slow down.
  */
-export async function paced<R, T extends Sent>(rows: R[], rate: number, send: (r: R) => Promise<T>, clock: { now(): number; sleep(ms: number): Promise<void> } = realClock): Promise<{ done: [R, T][]; throttled: boolean }> {
+export async function paced<R, T extends Sent>(rows: R[], rate: number, send: (r: R) => Promise<T>, clock: { now(): number; sleep(ms: number): Promise<void> } = realClock, halt: () => boolean = () => false): Promise<{ done: [R, T][]; throttled: boolean }> {
 	const t0 = clock.now();
 	const gap = 1000 / rate;
 	const done: [R, T][] = [];
 	let next = 0;
 	let throttled = false;
 	const worker = async () => {
-		while (!throttled && next < rows.length) {
+		while (!throttled && !halt() && next < rows.length) {
 			const i = next++;
 			const wait = t0 + i * gap - clock.now();
 			if (wait > 0) await clock.sleep(wait);
-			if (throttled) {
+			if (throttled || halt()) {
 				next = Math.min(next, i);
 				return;
 			}
@@ -360,7 +368,7 @@ export async function paced<R, T extends Sent>(rows: R[], rate: number, send: (r
 
 const realClock = { now: () => Date.now(), sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
 
-async function pause(db: D1Database, c: CampaignRow, why: string): Promise<void> {
+export async function pause(db: D1Database, c: CampaignRow, why: string): Promise<void> {
 	await db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE id = ? AND status = 'sending'").bind(iso(), c.id).run();
 	await logEvent(db, c.brand_id, "campaign.paused", null, c.id, why).run();
 }
@@ -371,7 +379,48 @@ export async function finishIfDone(db: D1Database, id: string): Promise<void> {
 		.prepare("UPDATE campaigns SET status = 'sent', finished_at = ?, updated_at = ? WHERE id = ? AND status = 'sending' AND NOT EXISTS (SELECT 1 FROM sends WHERE campaign_id = ? AND status = 'queued') RETURNING brand_id")
 		.bind(iso(), iso(), id, id)
 		.first<{ brand_id: string }>();
-	if (done) await logEvent(db, done.brand_id, "campaign.sent", null, id).run();
+	if (done) {
+		await logEvent(db, done.brand_id, "campaign.sent", null, id).run();
+		await doneEmail(db, id).catch((e) => console.error("finished email", e));
+	}
+}
+
+/** Tells the owner a campaign has finished: how it went in a few lines, and a link to the full report. */
+export async function doneEmail(db: D1Database, id: string, fetcher: typeof fetch = fetch): Promise<void> {
+	const c = await db.prepare("SELECT * FROM campaigns WHERE id = ?").bind(id).first<CampaignRow>();
+	const b = c && (await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>());
+	if (!c || !b || !(b.done_email ?? 1) || (await loadTestFor(db, id))) return;
+	const owner = await db.prepare("SELECT email FROM accounts ORDER BY created_at LIMIT 1").first<{ email: string }>();
+	const provider = await loadProvider(db, b);
+	if (!owner || !provider) return;
+	const [st, ev, en] = await db.batch([
+		db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(id),
+		db.prepare("SELECT kind, COUNT(DISTINCT subscriber_id) AS n FROM events WHERE campaign_id = ? AND kind IN ('bounced', 'complained', 'unsubscribed') GROUP BY kind").bind(id),
+		db.prepare("SELECT COUNT(opened_at) AS opens, COUNT(clicked_at) AS clicks FROM sends WHERE campaign_id = ?").bind(id),
+	]);
+	const s = Object.fromEntries((st.results as any[]).map((r) => [r.status, r.n]));
+	const e = Object.fromEntries((ev.results as any[]).map((r) => [r.kind, r.n]));
+	const g = (en.results[0] as any) ?? {};
+	const sent = s.sent ?? 0;
+	const pct = (n: number) => (sent ? `${((n / sent) * 100).toFixed(n && n / sent < 0.01 ? 2 : 1)}%` : "0%");
+	const n = (v: number) => v.toLocaleString("en-GB");
+	const mins = c.started_at && c.finished_at ? Math.max(1, Math.round((Date.parse(c.finished_at) - Date.parse(c.started_at)) / 60000)) : 0;
+	const name = c.name || c.subject.replace(/\{\{[^}]*\}\}/g, "").trim();
+	const lines: [string, string][] = [
+		["Sent", `${n(sent)}${mins ? ` in ${mins < 60 ? `${mins} minute${mins === 1 ? "" : "s"}` : `${Math.floor(mins / 60)} hour${mins >= 120 ? "s" : ""} ${mins % 60} minutes`}` : ""}`],
+		...(s.failed ? ([["Failed", n(s.failed)]] as [string, string][]) : []),
+		["Bounced", `${n(e.bounced ?? 0)} (${pct(e.bounced ?? 0)})`],
+		["Marked as spam", `${n(e.complained ?? 0)} (${pct(e.complained ?? 0)})`],
+		["Unsubscribed so far", n(e.unsubscribed ?? 0)],
+		...(b.track_opens ? ([["Opened so far", `${n(g.opens ?? 0)} (${pct(g.opens ?? 0)})`]] as [string, string][]) : []),
+		...(b.track_clicks ? ([["Clicked so far", `${n(g.clicks ?? 0)} (${pct(g.clicks ?? 0)})`]] as [string, string][]) : []),
+	];
+	const link = `${await origin(db)}/#email/${c.id}`;
+	const x = (v: string) => v.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
+	const body = `<p>Your campaign <b>${x(name)}</b> has finished sending.</p><table cellpadding="6" style="border-collapse:collapse;margin:12px 0">${lines.map(([k, v]) => `<tr><td style="color:#6b5a73">${k}</td><td><b>${x(v)}</b></td></tr>`).join("")}</table><p><a href="${x(link)}" style="display:inline-block;background:${x(b.colour)};color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">See the full report</a></p>`;
+	const text = `Your campaign "${name}" has finished sending.\n\n${lines.map(([k, v]) => `${k}: ${v}`).join("\n")}\n\nSee the full report: ${link}`;
+	const out = renderEmail(`Finished sending: ${name}`, body, { brandName: b.name, colour: b.colour, logo: b.logo, unsubscribeUrl: `${await origin(db)}/#settings`, track: null }, { email: owner.email });
+	await sendOne(provider, b.from_name, b.from_email, { to: owner.email, subject: `Finished sending: ${name}`, text, html: out.html.replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, `<a href="${x(`${await origin(db)}/#settings`)}">Turn these emails off</a>`), headers: {} }, fetcher);
 }
 
 /** Every minute: starts campaigns whose time has come. */
@@ -386,13 +435,13 @@ export async function startDue(env: Env, now = new Date()): Promise<void> {
 	}
 	// A send that's made no progress for an hour (its queue message was lost) gets its remaining rows queued again.
 	const hourAgo = iso(new Date(now.getTime() - 3600_000));
-	const { results: stuck } = await env.DB.prepare(`SELECT c.id FROM campaigns c WHERE c.status = 'sending' AND c.updated_at < ?1
+	const { results: stuck } = await env.DB.prepare(`SELECT c.id, c.run FROM campaigns c WHERE c.status = 'sending' AND c.updated_at < ?1
 		AND EXISTS (SELECT 1 FROM sends WHERE campaign_id = c.id AND status = 'queued')
-		AND COALESCE((SELECT MAX(sent_at) FROM sends WHERE campaign_id = c.id), c.started_at) < ?1 LIMIT 5`).bind(hourAgo).all<{ id: string }>();
+		AND COALESCE((SELECT MAX(sent_at) FROM sends WHERE campaign_id = c.id), c.started_at) < ?1 LIMIT 5`).bind(hourAgo).all<{ id: string; run: number }>();
 	for (const c of stuck) {
 		await env.DB.prepare("UPDATE campaigns SET updated_at = ? WHERE id = ?").bind(iso(now), c.id).run();
 		const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
-		if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi);
+		if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi, c.run);
 	}
 }
 

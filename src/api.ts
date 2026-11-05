@@ -6,10 +6,11 @@ import { firstBrand, iso, logEvent, newId, origin, type AccountRow, type BrandRo
 import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
-import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
+import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
+import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { dnsHost, findZone, TOKEN_URL } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
@@ -138,6 +139,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			last: lastCampaign ? { ...lastCampaign, stats: await campaignStats(db, lastCampaign.id) } : null,
 			sending: providerSummary(provider),
 			activity: events.results,
+			archive: Boolean(brand.archive),
 		});
 	}
 
@@ -152,7 +154,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if (!str(b.name, 80)) return bad("Please give your company or newsletter a name.");
 				if (!fromEmail) return bad("Please enter the address your newsletter comes from, such as news@yourdomain.com.");
 				const logo = typeof b.logo === "string" && /^https:\/\/\S{1,1000}$/.test(b.logo.trim()) ? b.logo.trim() : null;
-				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1, app_name: str(b.app_name, 60) || null, footer_links: (b.manage_link === false ? 0 : 1) | (b.forward_link ? 2 : 0) });
+				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1, app_name: str(b.app_name, 60) || null, footer_links: (b.manage_link === false ? 0 : 1) | (b.forward_link ? 2 : 0), done_email: b.done_email === false ? 0 : 1 });
 			}
 			if ("track_opens" in b) {
 				let domain: string | null = null;
@@ -494,7 +496,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const file = `${slugify(c.name || c.subject) || "campaign"}-${who}${who === "link" ? `-${n}` : ""}.csv`;
 		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" } });
 	}
-	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|resume|duplicate|preview))?$/.exec(path);
+	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|preview))?$/.exec(path);
 	if (cm) {
 		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<CampaignRow>();
 		if (!c) return bad("That email has gone.", 404);
@@ -564,6 +566,11 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			await logEvent(db, brand.id, "campaign.cancelled", null, c.id).run();
 			return ok();
 		}
+		if (action === "pause") {
+			if (c.status !== "sending") return bad("Only an email that's sending can be paused.");
+			await pause(db, c, "You paused it. Carry on whenever you're ready.");
+			return ok();
+		}
 		if (action === "resume") {
 			const r = await resume(env, c);
 			return "error" in r ? bad(r.error) : ok();
@@ -598,6 +605,43 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			}
 		});
 		return ok({ html: sanitise(fixed), title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text)?.[1]?.trim() ?? "" });
+	}
+
+	// -- Automations ------------------------------------------------------------------------------------
+	if (path === "/api/automations" && method === "GET") {
+		const { results } = await db.prepare(`SELECT a.id, a.name, a.trigger, a.steps, a.enabled, a.updated_at,
+			(SELECT COUNT(*) FROM automation_runs r WHERE r.automation_id = a.id AND r.status = 'waiting') AS waiting,
+			(SELECT COUNT(*) FROM automation_runs r WHERE r.automation_id = a.id AND r.status = 'done') AS finished,
+			(SELECT COUNT(*) FROM automation_runs r WHERE r.automation_id = a.id) AS started
+			FROM automations a WHERE a.brand_id = ? ORDER BY a.created_at DESC`).bind(brand.id).all<any>();
+		return ok(results.map((a) => ({ ...a, trigger: cleanTrigger(safeJson(a.trigger)), steps: cleanSteps(safeJson(a.steps)), enabled: Boolean(a.enabled) })));
+	}
+	if (path === "/api/automations" && method === "POST") {
+		const b = await body(request);
+		const id = newAutomationId();
+		await db.prepare("INSERT INTO automations (id, brand_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").bind(id, brand.id, str(b.name, 120) || "New automation", iso(), iso()).run();
+		return ok({ id });
+	}
+	const am = /^\/api\/automations\/([0-9a-f]{16})$/.exec(path);
+	if (am) {
+		const a = await db.prepare("SELECT * FROM automations WHERE id = ? AND brand_id = ?").bind(am[1], brand.id).first<any>();
+		if (!a) return bad("That automation has gone.", 404);
+		if (method === "DELETE") {
+			await db.batch([db.prepare("DELETE FROM automation_runs WHERE automation_id = ?").bind(a.id), db.prepare("DELETE FROM automations WHERE id = ?").bind(a.id)]);
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			const trigger = b.trigger === undefined ? cleanTrigger(safeJson(a.trigger)) : cleanTrigger(b.trigger);
+			const steps = b.steps === undefined ? cleanSteps(safeJson(a.steps)) : cleanSteps(b.steps);
+			const enabled = b.enabled === undefined ? Boolean(a.enabled) : Boolean(b.enabled);
+			if (enabled && (!trigger || !steps.length)) return bad("Choose what starts it and add at least one step before switching it on.");
+			await db.prepare("UPDATE automations SET name = ?, trigger = ?, steps = ?, enabled = ?, updated_at = ? WHERE id = ?")
+				.bind(str(b.name, 120) || a.name, JSON.stringify(trigger ?? {}), JSON.stringify(steps), enabled ? 1 : 0, iso(), a.id).run();
+			return ok({ trigger, steps, enabled });
+		}
+		const counts = (await db.prepare("SELECT step, status, COUNT(*) AS n FROM automation_runs WHERE automation_id = ? GROUP BY step, status").bind(a.id).all<{ step: number; status: string; n: number }>()).results;
+		return ok({ id: a.id, name: a.name, trigger: cleanTrigger(safeJson(a.trigger)), steps: cleanSteps(safeJson(a.steps)), enabled: Boolean(a.enabled), counts });
 	}
 
 	// -- Templates -------------------------------------------------------------------------------------
