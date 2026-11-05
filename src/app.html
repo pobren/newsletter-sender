@@ -94,7 +94,7 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 
 /* Set up wizard: one step a page, a step bar like the mover */
 .wtitle{display:flex;gap:14px;align-items:center}.blogo{flex:none;display:block}.lic.aws{background:#fff;border:1px solid var(--line)}
-.found{display:flex;gap:16px;align-items:center;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:#fff;margin:14px 0 18px}.found>div{flex:1;min-width:0}.found b{display:block;font-size:17px}.found small{display:block;color:var(--muted);font-size:14px;margin-top:2px}.found .okmsg .ico{width:24px;height:24px}
+.found{display:flex;gap:16px;align-items:center;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:#fff;margin:14px 0 18px}.found>div{flex:1;min-width:0}.found>div>b{display:block;font-size:17px}.found small{display:block;color:var(--muted);font-size:14px;margin-top:2px}.found .okmsg .ico{width:24px;height:24px}
 .focus .shell{display:block}.focus #side{display:none}.wiz .steps{list-style:none;padding:0}.regions{grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.regions .option{padding:12px 14px}
 .wiz{max-width:760px;margin:0 auto}.whead{display:flex;align-items:center;justify-content:space-between;gap:12px}.whead h1{margin:0}
 .wsteps{list-style:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:0;margin:20px 0;counter-reset:s}
@@ -787,13 +787,21 @@ async function sesWizard(stepArg) {
 			<li><b>Press the button below.</b> AWS opens with everything filled in. Sign in if it asks.<br><a class="btn" href="${stackUrl(wiz.region)}" target="_blank" rel="noopener">${AWS_LOGO(22, "#fff")}Create the user and keys in AWS${icon("ext")}</a></li>
 			<li><b>Scroll to the bottom</b>, tick <i>I acknowledge that AWS CloudFormation might create IAM resources</i> and press <b>Create stack</b>.</li>
 			<li><b>Wait about a minute</b> until it says CREATE_COMPLETE, then open the <b>Outputs</b> tab.</li>
-			<li><b>Copy the two keys</b> into the boxes here.</li>
+			<li><b>Copy the two keys</b> into the boxes here. Easiest: select the whole Outputs table, copy it and paste it into either box. We pick out both keys.</li>
 		</ol>
+		<div class="found"><span class="lic">${icon("refresh")}</span><div><b>AWS says the stack already exists?</b><small>You made it before, so there's no need to make it again. Open it, then open its <b>Outputs</b> tab for the two keys.</small></div><a class="btn ghost small" href="https://console.aws.amazon.com/cloudformation/home?region=${wiz.region}#/stacks?filteringText=newsletter-sender" target="_blank" rel="noopener">${icon("ext")}Open my stack</a></div>
 		${have ? `<p class="okmsg">${icon("check")} Keys saved (ending ${esc(s.sending.keyEnd)}). Press Next to keep them, or paste new ones.</p>` : ""}
 		<label for="kid">Access key ID <span class="hint">(AccessKeyId)</span></label><input id="kid" placeholder="AKIA..." autocomplete="off" data-lpignore="true">
 		<label for="key">Secret access key <span class="hint">(SecretAccessKey)</span></label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">
 		<p class="hint"><a href="https://newslettersender.com/help/amazon-ses/" target="_blank" rel="noopener">Step by step guide, with screen grabs</a></p>`,
 		`<button class="btn" id="wnext">${icon("check")}Check the keys and go on</button>`);
+		// Paste the whole Outputs table into either box and both keys land in the right place.
+		const pick = (e) => {
+			const t = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+			const id = t.match(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/), secret = t.match(/(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/);
+			if (id && secret) { e.preventDefault(); $("#kid").value = id[0]; $("#key").value = secret[0]; toast("Both keys pasted"); }
+		};
+		$("#kid").addEventListener("paste", pick); $("#key").addEventListener("paste", pick);
 		$("#wnext").onclick = (e) => run(e.currentTarget, async () => {
 			const kid = $("#kid").value.trim(), key = $("#key").value.trim();
 			if (have && !kid && !key) return go(3);
