@@ -160,6 +160,8 @@ const SCHEMA = [
 		message_id TEXT, error TEXT, sent_at TEXT, opened_at TEXT, clicked_at TEXT, UNIQUE (campaign_id, subscriber_id))`,
 	`CREATE INDEX IF NOT EXISTS sends_campaign_status ON sends (campaign_id, status)`,
 	`CREATE INDEX IF NOT EXISTS sends_message ON sends (message_id)`,
+	// Segments by activity: what each person did with recent emails.
+	`CREATE INDEX IF NOT EXISTS sends_subscriber ON sends (subscriber_id, sent_at)`,
 	`CREATE TABLE IF NOT EXISTS events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, brand_id TEXT NOT NULL, at TEXT NOT NULL, kind TEXT NOT NULL, subscriber_id TEXT, campaign_id TEXT, detail TEXT)`,
 	`CREATE INDEX IF NOT EXISTS events_brand_at ON events (brand_id, at)`,
@@ -192,7 +194,7 @@ const MIGRATIONS = [
 	// Footer links: 1 = Manage your subscription (on to start with), 2 = Forward to a friend.
 	"ALTER TABLE brands ADD COLUMN footer_links INTEGER NOT NULL DEFAULT 1",
 ];
-const SCHEMA_VERSION = "7";
+const SCHEMA_VERSION = "8";
 
 let ready: Promise<void> | null = null;
 
