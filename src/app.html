@@ -85,6 +85,10 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 .crumb{display:inline-flex;align-items:center;gap:6px;font-weight:600;text-decoration:none;margin-bottom:10px}
 .option>span:not(.lic){min-width:0;flex:1}.urlrow{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px}.urlrow input{width:100%}
 @media(max-width:520px){.bar .lbl{display:none}.bar{flex-wrap:nowrap}.mark span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.fold{display:flex;align-items:center;gap:10px;width:100%;padding:7px 12px;margin:0 0 10px;border:0;border-radius:10px;background:none;color:var(--muted);font:600 13px system-ui,sans-serif;cursor:pointer}.fold:hover{background:var(--pink);color:var(--cd)}
+.slim .shell{grid-template-columns:76px minmax(0,1fr)}.slim nav.side p,.slim nav.side a span,.slim .fold span{display:none}.slim nav.side a,.slim .fold{justify-content:center;padding:10px 0}.slim .fold .ico{transform:rotate(180deg)}.slim nav.side p+a{margin-top:14px}
+.gs{position:relative}.gs .close{position:absolute;top:14px;right:14px}
+@media(max-width:900px){.fold{display:none}.slim .shell{display:block}.slim nav.side a span{display:inline}.slim nav.side a{padding:9px 12px}}
 .pill.blocked{background:#fde4ea;color:var(--bad)}
 @media(max-width:900px){.shell{display:block}aside#side{padding:0;background:#fff;border-bottom:1px solid var(--line)}nav.side{position:static;flex-direction:row;overflow-x:auto;padding:8px 16px;gap:4px}nav.side p{display:none}nav.side a{flex:none;white-space:nowrap}}
 </style>
@@ -152,17 +156,18 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 <div class="shell">
 	<aside id="side" hidden>
 		<nav class="side" aria-label="Main">
+			<button type="button" id="fold" class="fold" title="Make the menu smaller" aria-label="Make the menu smaller"><svg class="ico"><use href="#i-back"/></svg><span>Hide menu</span></button>
 			<p>Campaigns</p>
-			<a href="#campaigns" data-v="campaigns"><svg class="ico"><use href="#i-home"/></svg>All campaigns</a>
-			<a href="#new" data-v="new"><svg class="ico"><use href="#i-pencil"/></svg>New campaign</a>
+			<a href="#campaigns" data-v="campaigns" title="All campaigns"><svg class="ico"><use href="#i-home"/></svg><span>All campaigns</span></a>
+			<a href="#new" data-v="new" title="New campaign"><svg class="ico"><use href="#i-pencil"/></svg><span>New campaign</span></a>
 			<p>Templates</p>
-			<a href="#templates" data-v="templates"><svg class="ico"><use href="#i-mail"/></svg>All templates</a>
-			<a href="#templates/new" data-v="templates-new"><svg class="ico"><use href="#i-plus"/></svg>New template</a>
+			<a href="#templates" data-v="templates" title="All templates"><svg class="ico"><use href="#i-mail"/></svg><span>All templates</span></a>
+			<a href="#templates/new" data-v="templates-new" title="New template"><svg class="ico"><use href="#i-plus"/></svg><span>New template</span></a>
 			<p>Lists and subscribers</p>
-			<a href="#lists" data-v="lists"><svg class="ico"><use href="#i-list"/></svg>View all lists</a>
-			<a href="#blocklist" data-v="blocklist"><svg class="ico"><use href="#i-shield"/></svg>Blocklist</a>
+			<a href="#lists" data-v="lists" title="View all lists"><svg class="ico"><use href="#i-list"/></svg><span>View all lists</span></a>
+			<a href="#blocklist" data-v="blocklist" title="Blocklist"><svg class="ico"><use href="#i-shield"/></svg><span>Blocklist</span></a>
 			<p>Reports</p>
-			<a href="#reports" data-v="reports"><svg class="ico"><use href="#i-chart"/></svg>See reports</a>
+			<a href="#reports" data-v="reports" title="See reports"><svg class="ico"><use href="#i-chart"/></svg><span>See reports</span></a>
 		</nav>
 	</aside>
 	<main id="main"></main>
@@ -180,6 +185,10 @@ const when = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "numeric", m
 const STATUS = { draft: "Draft", scheduled: "Scheduled", sending: "Sending", paused: "Paused", sent: "Sent", cancelled: "Stopped", active: "Subscribed", pending: "Unconfirmed", blocked: "Blocked", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam" };
 const pill = (s) => `<span class="pill ${esc(s)}">${esc(STATUS[s] || s)}</span>`;
 let timer = null;
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
+const fold = (mini) => { document.body.classList.toggle("slim", mini); const b = $("#fold"); const t = mini ? "Make the menu bigger" : "Make the menu smaller"; b.title = t; b.setAttribute("aria-label", t); };
+fold(store.get("ns.menu") === "mini");
+$("#fold").onclick = () => { const mini = !document.body.classList.contains("slim"); store.set("ns.menu", mini ? "mini" : null); fold(mini); };
 let view = new AbortController(); // listeners for the open view, dropped when you move on
 
 async function api(path, opts = {}) {
@@ -287,7 +296,7 @@ async function campaigns() {
 	const tr = r.tracking;
 	const todo = [[!!o.named, "Add your company or newsletter name", "#settings"], [!!o.sending, "Choose how to send", "#settings/sending"], [o.subscribers > 0, "Add your first subscribers", "#lists"], [!!o.last, "Send your first campaign", "#new"]];
 	main.innerHTML = `<h1>All campaigns</h1>
-	${todo.some((t) => !t[0]) ? `<div class="card" style="margin-top:16px"><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
+	${todo.some((t) => !t[0]) && !store.get("ns.gs") ? `<div class="card gs" style="margin-top:16px"><button class="icon-btn close" id="gsx" title="Close" aria-label="Close getting started">${icon("x")}</button><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
 	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span><input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
 	<div class="card flush">${r.campaigns.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th><th>Unique opens</th><th>Unique clicks</th><th class="c">Duplicate</th><th class="c">Delete</th></tr></thead><tbody>${r.campaigns.map((c) => {
 		const sent = ["sent", "sending", "paused", "cancelled"].includes(c.status);
@@ -299,6 +308,7 @@ async function campaigns() {
 	}).join("")}</tbody></table></div>` : `<p class="muted pad">No campaigns yet. Press Create and send a new campaign to write your first.</p>`}</div>
 	${tr.opens || tr.clicks ? "" : `<p class="hint">Opens and clicks are off. <a href="#settings/tracking">Switch them on in Settings</a> if you'd like them.</p>`}`;
 	$("#q").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$("tr[data-q]").forEach((tr) => (tr.hidden = q && !tr.dataset.q.includes(q))); };
+	$("#gsx") && ($("#gsx").onclick = () => { store.set("ns.gs", "1"); $("#gsx").closest(".card").remove(); toast("Hidden. Bring it back any time under Settings, Account."); });
 	$$("[data-dup]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { const x = await api(`/api/campaigns/${b.closest("tr").dataset.id}/duplicate`, { body: {} }); location.hash = `email/${x.id}`; })));
 	$$("[data-del]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this campaign and its stats for good?")) return; await api(`/api/campaigns/${b.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));
 }
@@ -762,8 +772,9 @@ async function settings(section) {
 		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked, track_domain: $("#td").value } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
 	}
 	if (sec === "account") {
-		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button></div>
+		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show getting started again</button>` : ""}</div></div>
 		<div class="card"><h2>Licence</h2><p>Newsletter Sender is free for one person or organisation's own newsletters. Sending for clients, or offering it as a hosted or white label service, needs a commercial licence: <a href="https://paulobrien.dev/contact/">get in touch</a>.</p></div>`;
+		$("#gsback") && ($("#gsback").onclick = () => { store.set("ns.gs", null); location.hash = "campaigns"; });
 		$("#everywhere").onclick = (e) => run(e.currentTarget, async () => { await api("/api/signout-everywhere", { body: {} }); boot(); });
 	}
 }
