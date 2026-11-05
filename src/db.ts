@@ -111,6 +111,10 @@ export interface SubscriberRow {
 
 export interface CampaignRow {
 	id: string;
+	/** Who this one comes from; empty means the brand's own (Settings). */
+	from_name?: string | null;
+	from_email?: string | null;
+	reply_to?: string | null;
 	run?: number;
 	brand_id: string;
 	/** What the owner calls it (only they see it). */
@@ -204,8 +208,11 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN run INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE brands ADD COLUMN done_email INTEGER NOT NULL DEFAULT 1",
 	"ALTER TABLE automations ADD COLUMN last_day TEXT",
+	"ALTER TABLE campaigns ADD COLUMN from_name TEXT",
+	"ALTER TABLE campaigns ADD COLUMN from_email TEXT",
+	"ALTER TABLE campaigns ADD COLUMN reply_to TEXT",
 ];
-const SCHEMA_VERSION = "10";
+const SCHEMA_VERSION = "11";
 
 let ready: Promise<void> | null = null;
 

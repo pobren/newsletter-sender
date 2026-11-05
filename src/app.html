@@ -28,7 +28,7 @@ input:focus,select:focus,textarea:focus{outline:3px solid var(--pink);border-col
 .check{display:flex;gap:10px;align-items:flex-start;font-weight:500;margin:12px 0}.check input{margin-top:2px}
 table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:13px;color:var(--muted)}tr.click{cursor:pointer}tr.click:hover td{background:var(--soft)}
 .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:600;background:#eee;color:var(--text)}.pill.draft{background:#f1eef3}.pill.scheduled{background:#e6efff;color:#1d4fa3}.pill.sending{background:#fff1d6;color:var(--warn)}.pill.sent,.pill.active{background:#dff5ea;color:var(--ok)}.pill.paused,.pill.bounced,.pill.complained,.pill.cancelled{background:#fde4ea;color:var(--bad)}.pill.pending{background:#fff1d6;color:var(--warn)}.pill.unsubscribed{background:#f1eef3;color:var(--muted)}
-.err{color:var(--bad);font-weight:600}.okmsg{color:var(--ok);font-weight:600}.muted{color:var(--muted)}
+.err{color:var(--bad);font-weight:600}.hint.good{color:var(--ok)}.hint.err,.hint.good{display:flex;gap:6px;align-items:center}.okmsg{color:var(--ok);font-weight:600}.muted{color:var(--muted)}
 .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}@media(max-width:900px){.split{grid-template-columns:1fr}}
 iframe.preview{width:100%;height:calc(100vh - 110px);min-height:520px;position:sticky;top:90px;border:1px solid var(--line);border-radius:14px;background:#fff}
 .block{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#fff}.block .tools{display:flex;gap:6px;align-items:center;margin-bottom:6px}.block .tools b{flex:1;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -353,6 +353,22 @@ function ago(s) {
 }
 const rate = (n, of, cls) => (of ? `<span class="rate ${cls}">${(Math.round((n / of) * 10000) / 100).toFixed(2)}%</span> ${num(n)}` : `<span class="muted">-</span>`);
 
+// -- Checking a From address can be sent from (Amazon SES needs the address or its domain verified) -------------
+async function checkFrom(input, out) {
+	const email = input.value.trim();
+	if (!out) return;
+	if (!email) { out.innerHTML = ""; return; }
+	if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { out.className = "hint err"; out.innerHTML = `${icon("alert")} Please enter a whole email address, such as news@yourdomain.com.`; return; }
+	out.className = "hint"; out.textContent = "Checking with your sending service…";
+	try {
+		const r = await api(`/api/sending/can-send?email=${encodeURIComponent(email)}`, { quiet: true });
+		if (input.value.trim() !== email) return;
+		out.className = r.ok === false ? "hint err" : r.ok ? "hint good" : "hint";
+		out.innerHTML = `${icon(r.ok === false ? "alert" : r.ok ? "check" : "eye")} ${esc(r.message)}`;
+	} catch (e) { out.className = "hint"; out.textContent = e.message; }
+}
+const watchFrom = (input, out) => { if (!input) return; let t; input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => checkFrom(input, out), 600); }); checkFrom(input, out); };
+
 // -- All campaigns ---------------------------------------------------------------------------------------
 async function campaigns() {
 	// The health card asks the sending service for its numbers, which can take a moment. Last time's card shows straight
@@ -460,6 +476,11 @@ async function editor(id, kind) {
 			<label for="cname">Campaign name <span class="hint">(only you see this, such as November news)</span></label><input id="cname" value="${esc(c.name || "")}" placeholder="Such as November news">
 			<label for="subject">Subject line <span class="hint">(what readers see in their inbox)</span></label><input id="subject" value="${esc(c.subject === "Untitled email" ? "" : c.subject)}" placeholder="Such as Our autumn news">
 			<label for="pre">Preview text <span class="hint">(optional: the line inboxes show after the subject)</span></label><input id="pre" value="${esc(c.preheader || "")}">
+			${isT ? "" : `<div class="row" style="gap:12px"><div class="grow"><label for="fromName">From name</label><input id="fromName" value="${esc(c.from_name || c.defaults?.from_name || "")}" autocomplete="off"></div>
+			<div class="grow"><label for="fromEmail">From address</label><input id="fromEmail" type="email" value="${esc(c.from_email || c.defaults?.from_email || "")}" autocomplete="off"></div></div>
+			<p class="hint" id="fromCheck"></p>
+			<label for="replyTo">Reply to <span class="hint">(optional: where replies go, if not the From address)</span></label><input id="replyTo" type="email" value="${esc(c.reply_to || c.defaults?.reply_to || "")}" autocomplete="off">
+			<p class="hint">These start as your <a href="#settings">Settings</a>. Change them here for just this campaign.</p>`}
 		</div>
 		<div class="card"><h2>Who it goes to</h2>
 			<p class="step"><b>1</b>Choose the lists</p>
@@ -566,7 +587,7 @@ async function editor(id, kind) {
 		toast(/src=["'](?!https?:|data:|cid:)/i.test(text) ? "Design loaded. Some pictures use short addresses: upload them, or use full https:// addresses." : "Design loaded");
 	};
 
-	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
+	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
 	let saving = null;
 	const save = async () => {
 		clearTimeout(t);
@@ -576,7 +597,8 @@ async function editor(id, kind) {
 	let t = null;
 	const changed = () => { saved = false; $("#saveState").textContent = "Saving…"; clearTimeout(t); t = setTimeout(save, 900); };
 	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")} Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.`; } catch {} };
-	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code"].includes(e.target.id)) changed(); }, { signal });
+	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo"].includes(e.target.id)) changed(); }, { signal });
+	if (!isT) watchFrom($("#fromEmail"), $("#fromCheck"));
 	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public") changed(); }, { signal });
 	if (!isT) {
 		const act = c.audience.activity;
@@ -1190,7 +1212,7 @@ async function settings(section) {
 	if (sec === "company") {
 		main.innerHTML = `${head}<form class="card" id="f"><h2>Your company or newsletter</h2>
 		<label>Company or newsletter name <span class="hint">(shown at the top of the app and of every email)</span></label><input id="name" value="${esc(b.name === "My newsletter" ? "" : b.name)}" placeholder="Such as Acme Ltd or The Friday Letter"><label>Name at the top of this app <span class="hint">(optional)</span></label><input id="app_name" value="${esc(b.app_name || "")}" placeholder="Newsletter Sender"><label>From name <span class="hint">(who emails come from)</span></label><input id="from_name" value="${esc(b.from_name)}">
-		<label>From address</label><input id="from_email" type="email" value="${esc(b.from_email)}"><p class="hint">On a domain you've set up for sending, such as news@yourdomain.com.</p>
+		<label>From address</label><input id="from_email" type="email" value="${esc(b.from_email)}"><p class="hint">On a domain you've set up for sending, such as news@yourdomain.com.</p><p class="hint" id="fromCheckS"></p>
 		<label>Reply to <span class="hint">(optional)</span></label><input id="reply_to" type="email" value="${esc(b.reply_to || "")}">
 		<label>Footer <span class="hint">(your postal address or company details; the law in many countries asks for one)</span></label><textarea id="footer" rows="2">${esc(b.footer || "")}</textarea>
 		<label class="check"><input type="checkbox" id="manage_link" ${(b.footer_links ?? 1) & 1 ? "checked" : ""}> Add a "Manage your subscription" link <span class="hint">(readers change their name and lists, so fewer unsubscribe completely)</span></label>
@@ -1199,12 +1221,13 @@ async function settings(section) {
 		<label class="check"><input type="checkbox" id="done_email" ${(b.done_email ?? 1) ? "checked" : ""}> Email me when a campaign finishes sending <span class="hint">(a short summary and a link to the report)</span></label>
 		<label class="check"><input type="checkbox" id="archive" ${b.archive ? "checked" : ""}> Public archive of past campaigns at <a href="/archive" target="_blank">/archive</a></label>
 		<p class="err" id="e"></p><button class="btn">${icon("save")}Save</button></form>`;
+		watchFrom($("#from_email"), $("#fromCheckS"));
 		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, app_name: $("#app_name").value, manage_link: $("#manage_link").checked, forward_link: $("#forward_link").checked, done_email: $("#done_email").checked } }); toast("Saved"); showName({ app_name: $("#app_name").value }); $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
 	}
 	if (sec === "lists") {
 		main.innerHTML = `${head}<form class="card" id="rules"><h2>How your lists work</h2>
 		<div class="rule"><div><b>Can someone be on more than one list?</b><p class="hint">Sending to several lists at once never emails anyone twice.</p></div><div class="opts"><label><input type="radio" name="one" value="0" ${b.one_list ? "" : "checked"}>Yes</label><label><input type="radio" name="one" value="1" ${b.one_list ? "checked" : ""}>No, one list each</label></div></div>
-		<div class="rule"><div><b>When someone unsubscribes</b><p class="hint">The law only asks that they stop getting what they unsubscribed from. Leaving everything is the simplest.</p></div><div class="opts"><label><input type="radio" name="scope" value="all" ${b.unsub_scope === "list" ? "" : "checked"}>They leave every list</label><label><input type="radio" name="scope" value="list" ${b.unsub_scope === "list" ? "checked" : ""}>Just the list that campaign went to</label></div></div>
+		<div class="rule"><div><b>When someone unsubscribes</b><p class="hint">The law only asks that they stop getting what they unsubscribed from. They stay on your other lists, so you keep readers who only wanted less.</p></div><div class="opts"><label><input type="radio" name="scope" value="list" ${b.unsub_scope === "all" ? "" : "checked"}>Just the list that campaign went to</label><label><input type="radio" name="scope" value="all" ${b.unsub_scope === "all" ? "checked" : ""}>They leave every list</label></div></div>
 		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form>`;
 		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); toast("Saved"); }); };
 	}

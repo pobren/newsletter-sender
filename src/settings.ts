@@ -169,6 +169,23 @@ export interface SesStatus {
 }
 
 /** Where the domain is up to in Amazon SES, and the account's limits. */
+/**
+ * Can this address be sent from? With Amazon SES the address itself or its whole domain has to be verified in the
+ * account. Other services check when sending, so we say we can't tell.
+ */
+export async function canSendFrom(c: ProviderConfig | null, email: string, fetcher: typeof fetch = fetch): Promise<{ ok: boolean | null; message: string }> {
+	const domain = email.split("@")[1] ?? "";
+	if (!c) return { ok: null, message: "Choose how to send under Settings, Sending, and we'll check this address." };
+	if (c.provider !== "ses") return { ok: null, message: "Make sure this address is allowed by your sending service." };
+	const keys = sesKeys(c);
+	for (const id of [email, domain]) {
+		const got = await ses(keys, "GET", `/identities/${encodeURIComponent(id)}`, null, fetcher);
+		if (got.ok && got.data?.VerifiedForSendingStatus) return { ok: true, message: id === domain ? `Amazon SES can send from any address at ${domain}.` : `Amazon SES can send from ${email}.` };
+		if (!got.ok && !/NotFound/i.test(got.text)) return { ok: null, message: `We couldn't ask Amazon SES just now: ${awsError(got)}` };
+	}
+	return { ok: false, message: `Amazon SES can't send from ${email} yet. Set up ${domain} under Settings, Sending (or verify the address in Amazon SES), then try again.` };
+}
+
 export async function sesStatus(c: ProviderConfig, domain: string, fetcher: typeof fetch = fetch): Promise<SesStatus | { error: string }> {
 	const keys = sesKeys(c);
 	const acct = await sesAccount(keys, fetcher);
