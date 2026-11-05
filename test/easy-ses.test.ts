@@ -61,3 +61,17 @@ test("counts a domain Amazon already has as there, from the error header", async
 	const other = (async () => new Response(JSON.stringify({ message: "Nope" }), { status: 400, headers: { "x-amzn-ErrorType": "BadRequestException" } })) as typeof fetch;
 	assert.ok(!alreadyThere(await ses(keys, "POST", "/identities", { EmailIdentity: "example.com" }, other)));
 });
+
+test("spots a domain on Cloudflare from its nameservers, walking up from a subdomain", async () => {
+	const { dnsHost } = await import("../src/cloudflare.ts");
+	const f = (async (url: string) => {
+		const name = new URL(url).searchParams.get("name");
+		const answer = name === "example.co.uk" ? [{ type: 2, data: "ada.ns.cloudflare.com." }, { type: 2, data: "bob.ns.cloudflare.com." }] : [];
+		return json({ Status: 0, Answer: answer });
+	}) as typeof fetch;
+	const r = await dnsHost("news.example.co.uk", f);
+	assert.ok(!("error" in r) && r.cloudflare && r.zone === "example.co.uk");
+	const g = (async () => json({ Status: 0, Answer: [{ type: 2, data: "ns01.domaincontrol.com." }] })) as typeof fetch;
+	const r2 = await dnsHost("example.com", g);
+	assert.ok(!("error" in r2) && !r2.cloudflare && r2.host === "GoDaddy");
+});

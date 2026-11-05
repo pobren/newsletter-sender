@@ -91,6 +91,23 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 @media(max-width:900px){.fold{display:none}.slim .shell{display:block}.slim nav.side a span{display:inline}.slim nav.side a{padding:9px 12px}}
 .pill.blocked{background:#fde4ea;color:var(--bad)}
 @media(max-width:900px){.shell{display:block}aside#side{padding:0;background:#fff;border-bottom:1px solid var(--line)}nav.side{position:static;flex-direction:row;overflow-x:auto;padding:8px 16px;gap:4px}nav.side p{display:none}nav.side a{flex:none;white-space:nowrap}}
+
+/* Set up wizard: one step a page, a step bar like the mover */
+.wtitle{display:flex;gap:14px;align-items:center}.blogo{flex:none;display:block}.lic.aws{background:#fff;border:1px solid var(--line)}
+.found{display:flex;gap:16px;align-items:center;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:#fff;margin:14px 0 18px}.found>div{flex:1;min-width:0}.found b{display:block;font-size:17px}.found small{display:block;color:var(--muted);font-size:14px;margin-top:2px}.found .okmsg .ico{width:24px;height:24px}
+.focus .shell{display:block}.focus #side{display:none}.wiz .steps{list-style:none;padding:0}.regions{grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.regions .option{padding:12px 14px}
+.wiz{max-width:760px;margin:0 auto}.whead{display:flex;align-items:center;justify-content:space-between;gap:12px}.whead h1{margin:0}
+.wsteps{list-style:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:0;margin:20px 0;counter-reset:s}
+.wsteps li{counter-increment:s;font-size:14px;font-weight:650;color:var(--muted);text-align:center;padding-top:36px;position:relative}
+.wsteps li::before{content:counter(s);position:absolute;top:0;left:50%;transform:translateX(-50%);width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#fff;border:2px solid var(--line);font-weight:750}
+.wsteps li.on{color:var(--ink)}.wsteps li.on::before{background:var(--c);color:#fff;border-color:var(--c)}
+.wsteps li.done::before{content:"\2713";background:var(--soft);color:var(--c);border-color:transparent}
+@media(max-width:560px){.wsteps li span{display:none}}
+.wcard{padding:28px}.wcard h2{font-size:24px;margin:2px 0 10px}.wnum{color:var(--c);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;margin:0}
+.wnav{display:flex;justify-content:space-between;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+.wlist{padding-left:22px;margin:14px 0 18px}.wlist li{margin:0 0 14px;line-height:1.5}.wlist li .btn{margin-top:10px}.wlist.plain{list-style:none;padding:0}.wlist.plain li{display:flex;gap:8px;align-items:center;margin:0 0 8px}.wlist.plain .ico{color:var(--ok)}
+a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--soft)}.btn.big{min-height:52px;font-size:17px;padding:10px 22px}
+.steps.big li{font-size:16px;margin:10px 0}.wready{font-size:20px;font-weight:750;color:var(--ok);display:flex;gap:8px;align-items:center}
 </style>
 </head>
 <body>
@@ -117,7 +134,7 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
 <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
-<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol><symbol id="i-next" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol><symbol id="i-wand" viewBox="0 0 24 24"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8l1.4 1.4M17.8 6.2l1.4-1.4M12.2 6.2l-1.4-1.4M3 21l9-9"/></symbol>
 <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
 <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></symbol>
 <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></symbol>
@@ -261,11 +278,12 @@ function route() {
 	if (v === "sending") { v = "settings"; id = "sending"; }
 	const side = v === "email" ? "campaigns" : v === "template" ? "templates" : v === "list" ? "lists" : v === "templates" && id === "new" ? "templates-new" : v;
 	$$("nav.side a").forEach((a) => a.classList.toggle("on", a.dataset.v === side));
-	$("#settingsLink").classList.toggle("on", v === "settings");
+	$("#settingsLink").classList.toggle("on", v === "settings" || v === "ses");
+	document.body.classList.toggle("focus", v === "ses"); // the wizard gets the whole page, no menu
 	// The page you're on stays put until the next one is ready (no flicker); a thin bar shows if it takes a moment.
 	const busy = $("#busy"); const slow = setTimeout(() => (busy.hidden = false), 250);
 	const done = () => { clearTimeout(slow); busy.hidden = true; };
-	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), reports, settings: () => settings(id) };
+	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), reports, settings: () => settings(id), ses: () => sesWizard(id) };
 	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
@@ -685,6 +703,7 @@ const helpHtml = (id) => `${HELP[id].guide ? `<a class="btn small" href="${HELP[
 async function sending(head = "") {
 	const s = await api("/api/sending");
 	let pick = s.sending?.provider || "ses";
+	let manual = false;
 	const recs = (r) => r.map((x) => `<div class="rec"><b>${x.type}${x.priority ? ` ${x.priority}` : ""}</b><code><span class="grow">${esc(x.name)}</span>${copyBtn(x.name)}</code><code><span class="grow">${esc(x.value)}</span>${copyBtn(x.value)}</code><span class="hint" style="grid-column:1/-1">${esc(x.why)}${x.optional ? " Optional." : ""}</span></div>`).join("");
 	main.innerHTML = `${head}<p class="muted">Newsletters go from <b>${esc(s.fromEmail)}</b> (change it under Your company). Your keys are stored encrypted in your own Cloudflare account and never shown again.</p>
 	${s.sending ? `<div class="card"><div class="row"><h2 class="grow" style="display:flex;gap:10px;align-items:center">${logo(s.sending.provider)} Sending through ${esc(s.sending.name)}</h2><button class="btn danger small" id="remove">${icon("trash")}Remove</button></div><p class="muted">Key ending ${esc(s.sending.keyEnd)}${s.sending.region ? ` · region ${esc(s.sending.region)}` : ""} · up to ${num(s.rate)} emails a second, so 10,000 people take about ${Math.max(1, Math.round(10000 / s.rate / 60))} minutes.</p>
@@ -693,7 +712,7 @@ async function sending(head = "") {
 		<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
 		<div class="helplinks"><a class="btn ghost small" href="${CF_TOKEN_URL}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
 		<div class="row"><input id="cft" class="grow" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token" style="width:auto"><button class="btn small" id="cfSave">${icon("save")}Save</button></div><p class="err" id="cfe"></p></details>`}
-	<div class="row"><button class="btn" id="sesSetup">${icon("cog")}Set up Amazon SES for me</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check where it's up to</button></div><div id="sesOut">${s.ses ? (s.sending.cloudflareDns ? `<details class="embed"><summary>${icon("list")}The DNS records for Amazon SES</summary>${recs(s.ses.records)}</details>` : `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(s.ses.records)}`) : ""}</div>`
+	<div class="row"><a class="btn" href="#ses/3">${icon("wand")}Open the set up wizard</a><button class="btn ghost" id="sesSetup">${icon("cog")}Set up Amazon SES for me</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check where it's up to</button></div><div id="sesOut">${s.ses ? (s.sending.cloudflareDns ? `<details class="embed"><summary>${icon("list")}The DNS records for Amazon SES</summary>${recs(s.ses.records)}</details>` : `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(s.ses.records)}`) : ""}</div>`
 	: `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>Add this address as a webhook in ${esc(s.sending.name)}, for bounces and spam complaints, so we stop emailing them:</p><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code>`}</div>` : ""}
 	<div class="card"><h2>${s.sending ? "Change how you send" : "Choose how to send"}</h2><div class="tiles">${PROVIDERS.map(([id, n, t]) => `<button class="tile ${id === pick ? "on" : ""}" data-p="${id}">${logo(id)}<span><b>${n}</b><span>${t}</span></span></button>`).join("")}</div><div id="pf"></div></div>
 	<div class="card"><h2>Sign up confirmations</h2>${s.cloudflareEmail ? `<p>${icon("check")} Cloudflare's email service sends sign up confirmations and welcome emails. It needs <b>${esc(s.fromEmail.split("@")[1])}</b> set up under Email Sending in your Cloudflare dashboard. Newsletters always go through the service above.</p>` : `<p>Sign up confirmations go through the service above.</p>`}
@@ -701,14 +720,20 @@ async function sending(head = "") {
 	const form = () => {
 		$$(".tile").forEach((t) => t.classList.toggle("on", t.dataset.p === pick));
 		const ses = pick === "ses";
-		$("#pf").innerHTML = helpHtml(pick === "ses" && !SES_STACK ? "ses_manual" : pick) + (ses ? `<label for="region">Region <span class="hint">(eu-west-1 is Ireland, eu-west-2 is London)</span></label><select id="region">${["eu-west-1", "eu-west-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-2", "ap-southeast-2", "ap-south-1", "ca-central-1"].map((r) => `<option>${r}</option>`).join("")}</select>
-		<a class="btn" id="stack" target="_blank" rel="noopener" style="margin-top:14px" ${SES_STACK ? "" : "hidden"}>${icon("ext")}Create the user and keys in AWS</a><p class="hint" ${SES_STACK ? "" : "hidden"}>Opens AWS with everything filled in. It makes a user that can only use Amazon SES and SNS, with one access key.</p>
+		if (ses && !manual) {
+			$("#pf").innerHTML = `<p>How would you like to set up Amazon SES?</p><div class="options">
+			<a class="option" href="#ses/1"><span class="lic">${SES_LOGO(30)}</span><span><b>Use the set up wizard</b><small>Recommended. Five short steps, one at a time, and we do most of it for you.</small></span></a>
+			<button class="option" id="manual"><span class="lic">${icon("cog")}</span><span><b>Set it up myself</b><small>Make the AWS user and keys yourself, then paste them in.</small></span></button></div>`;
+			$("#manual").onclick = () => { manual = true; form(); };
+			return;
+		}
+		$("#pf").innerHTML = helpHtml(ses ? "ses_manual" : pick) + (ses ? `<label for="region">Region <span class="hint">(eu-west-1 is Ireland, eu-west-2 is London)</span></label><select id="region">${REGIONS.map(([r, n]) => `<option value="${r}">${n} (${r})</option>`).join("")}</select>
 		<label>Access key ID</label><input id="kid" name="aws-access-key-id" placeholder="AKIA..." autocomplete="off" data-lpignore="true"><label>Secret access key</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">`
 		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails a second <span class="hint">(your plan's limit; Resend allows 2 unless you've asked for more)</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
-		if (ses) { const setStack = () => ($("#stack").href = stackUrl($("#region").value)); if (s.sending?.region) $("#region").value = s.sending.region; setStack(); $("#region").onchange = setStack; }
+		if (ses && s.sending?.region) $("#region").value = s.sending.region;
 		$("#psave").onclick = (e) => run(e.currentTarget, async () => { try { await api("/api/sending", { body: { provider: pick, key: $("#key").value, accessKeyId: $("#kid")?.value, region: $("#region")?.value, mailgunDomain: $("#mgd")?.value, mailgunRegion: $("#mgr")?.value, rate: $("#rate")?.value } }); toast("Saved"); route(); } catch (err) { $("#pe").textContent = err.message; } });
 	};
-	$$(".tile").forEach((t) => (t.onclick = () => { pick = t.dataset.p; form(); }));
+	$$(".tile").forEach((t) => (t.onclick = () => { pick = t.dataset.p; manual = false; form(); }));
 	form();
 	$("#remove") && ($("#remove").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Remove these keys? Nothing can be sent until you add a service again.")) { await api("/api/sending", { method: "DELETE" }); route(); } }));
 	$("#sesSetup") && ($("#sesSetup").onclick = (e) => run(e.currentTarget, async () => { const r = await api("/api/sending/ses-setup", { body: {} }); $("#sesOut").innerHTML = `<ul class="steps">${r.steps.map((x) => `<li class="done">${icon("check")} ${esc(x)}</li>`).join("")}</ul>${r.warnings.map((w) => `<p class="err">${esc(w)}</p>`).join("")}${r.dnsDone ? `<p>That's everything. Amazon checks the DNS records by itself (usually within an hour): press <b>Check where it's up to</b> later to see.</p><details class="embed"><summary>${icon("list")}The DNS records we added</summary>${recs(r.records)}</details>` : `<h3>Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(r.records)}`}`; }));
@@ -720,6 +745,136 @@ async function sending(head = "") {
 		$("#sesOut").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-top:14px"><ul class="steps"><li class="${good(r.verified) ? "done" : ""}">${good(r.verified) ? icon("check") : icon("clock")} ${esc(r.domain)} ${r.verified ? "can send" : "isn't verified yet (DNS can take up to an hour)"}</li><li class="${good(r.dkim) ? "done" : ""}">${good(r.dkim) ? icon("check") : icon("clock")} Signing (DKIM): ${esc(r.dkim.toLowerCase().replace("_", " "))}</li><li class="${good(r.bounceDomain) ? "done" : ""}">${good(r.bounceDomain) ? icon("check") : icon("clock")} Bounce address: ${esc(r.bounceDomain.toLowerCase().replace("_", " "))}</li><li class="${r.production ? "done" : ""}">${r.production ? icon("check") + " Out of the sandbox" : icon("clock") + " Still in the SES sandbox: <a href=\"https://newslettersender.com/help/amazon-ses/#sandbox\" target=\"_blank\" rel=\"noopener\">how to ask Amazon for production access</a>"}</li><li>Up to ${num(r.rate)} emails a second and ${num(r.max24)} a day (${num(r.sent24)} sent in the last 24 hours)</li></ul></div>`);
 	}));
 	$("#ctest").onclick = (e) => run(e.currentTarget, async () => { await api("/api/sending/test", { body: { to: $("#ct").value } }); toast("Test sent"); });
+}
+
+// -- Amazon SES set up wizard: one clear step a page, in order ------------------------------------------------------
+const REGIONS = [["eu-west-1", "Ireland"], ["eu-west-2", "London"], ["eu-central-1", "Frankfurt"], ["us-east-1", "North Virginia"], ["us-east-2", "Ohio"], ["us-west-2", "Oregon"], ["ca-central-1", "Canada"], ["ap-southeast-2", "Sydney"], ["ap-south-1", "Mumbai"]];
+const brandSvg = (d, fill, n = 28) => `<svg class="blogo" viewBox="0 0 24 24" width="${n}" height="${n}" aria-hidden="true"><path fill="${fill}" d="${d}"/></svg>`;
+const CF_LOGO = (n, fill = "#F38020") => brandSvg("M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268zm2.7568-5.5634c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727", fill, n);
+const AWS_LOGO = (n, fill = "#232F3E") => brandSvg("M6.763 10.036c0 .296.032.535.088.71.064.176.144.368.256.576.04.063.056.127.056.183 0 .08-.048.16-.152.24l-.503.335a.383.383 0 0 1-.208.072c-.08 0-.16-.04-.239-.112a2.47 2.47 0 0 1-.287-.375 6.18 6.18 0 0 1-.248-.471c-.622.734-1.405 1.101-2.347 1.101-.67 0-1.205-.191-1.596-.574-.391-.384-.59-.894-.59-1.533 0-.678.239-1.23.726-1.644.487-.415 1.133-.623 1.955-.623.272 0 .551.024.846.064.296.04.6.104.918.176v-.583c0-.607-.127-1.03-.375-1.277-.255-.248-.686-.367-1.3-.367-.28 0-.568.031-.863.103-.295.072-.583.16-.862.272a2.287 2.287 0 0 1-.28.104.488.488 0 0 1-.127.023c-.112 0-.168-.08-.168-.247v-.391c0-.128.016-.224.056-.28a.597.597 0 0 1 .224-.167c.279-.144.614-.264 1.005-.36a4.84 4.84 0 0 1 1.246-.151c.95 0 1.644.216 2.091.647.439.43.662 1.085.662 1.963v2.586zm-3.24 1.214c.263 0 .534-.048.822-.144.287-.096.543-.271.758-.51.128-.152.224-.32.272-.512.047-.191.08-.423.08-.694v-.335a6.66 6.66 0 0 0-.735-.136 6.02 6.02 0 0 0-.75-.048c-.535 0-.926.104-1.19.32-.263.215-.39.518-.39.917 0 .375.095.655.295.846.191.2.47.296.838.296zm6.41.862c-.144 0-.24-.024-.304-.08-.064-.048-.12-.16-.168-.311L7.586 5.55a1.398 1.398 0 0 1-.072-.32c0-.128.064-.2.191-.2h.783c.151 0 .255.025.31.08.065.048.113.16.16.312l1.342 5.284 1.245-5.284c.04-.16.088-.264.151-.312a.549.549 0 0 1 .32-.08h.638c.152 0 .256.025.32.08.063.048.12.16.151.312l1.261 5.348 1.381-5.348c.048-.16.104-.264.16-.312a.52.52 0 0 1 .311-.08h.743c.127 0 .2.065.2.2 0 .04-.009.08-.017.128a1.137 1.137 0 0 1-.056.2l-1.923 6.17c-.048.16-.104.263-.168.311a.51.51 0 0 1-.303.08h-.687c-.151 0-.255-.024-.32-.08-.063-.056-.119-.16-.15-.32l-1.238-5.148-1.23 5.14c-.04.16-.087.264-.15.32-.065.056-.177.08-.32.08zm10.256.215c-.415 0-.83-.048-1.229-.143-.399-.096-.71-.2-.918-.32-.128-.071-.215-.151-.247-.223a.563.563 0 0 1-.048-.224v-.407c0-.167.064-.247.183-.247.048 0 .096.008.144.024.048.016.12.048.2.08.271.12.566.215.878.279.319.064.63.096.95.096.502 0 .894-.088 1.165-.264a.86.86 0 0 0 .415-.758.777.777 0 0 0-.215-.559c-.144-.151-.416-.287-.807-.415l-1.157-.36c-.583-.183-1.014-.454-1.277-.813a1.902 1.902 0 0 1-.4-1.158c0-.335.073-.63.216-.886.144-.255.335-.479.575-.654.24-.184.51-.32.83-.415.32-.096.655-.136 1.006-.136.175 0 .359.008.535.032.183.024.35.056.518.088.16.04.312.08.455.127.144.048.256.096.336.144a.69.69 0 0 1 .24.2.43.43 0 0 1 .071.263v.375c0 .168-.064.256-.184.256a.83.83 0 0 1-.303-.096 3.652 3.652 0 0 0-1.532-.311c-.455 0-.815.071-1.062.223-.248.152-.375.383-.375.71 0 .224.08.416.24.567.159.152.454.304.877.44l1.134.358c.574.184.99.44 1.237.767.247.327.367.702.367 1.117 0 .343-.072.655-.207.926-.144.272-.336.511-.583.703-.248.2-.543.343-.886.447-.36.111-.734.167-1.142.167zM21.698 16.207c-2.626 1.94-6.442 2.969-9.722 2.969-4.598 0-8.74-1.7-11.87-4.526-.247-.223-.024-.527.272-.351 3.384 1.963 7.559 3.153 11.877 3.153 2.914 0 6.114-.607 9.06-1.852.439-.2.814.287.383.607zM22.792 14.961c-.336-.43-2.22-.207-3.074-.103-.255.032-.295-.192-.063-.36 1.5-1.053 3.967-.75 4.254-.399.287.36-.08 2.826-1.485 4.007-.215.184-.423.088-.327-.151.32-.79 1.03-2.57.695-2.994z", fill, n);
+const SES_LOGO = (n) => `<img class="blogo" src="${PROVIDERS[0][3]}" alt="" width="${n}" height="${n}" style="border-radius:${Math.round(n / 5)}px">`;
+const WIZ = ["Region", "Keys", "Domain", "Set up", "Check"];
+const wiz = {}; // what's been chosen so far, kept while you move between steps
+const sesRecs = (r) => r.map((x) => `<div class="rec"><b>${x.type}${x.priority ? ` ${x.priority}` : ""}</b><code><span class="grow">${esc(x.name)}</span>${copyBtn(x.name)}</code><code><span class="grow">${esc(x.value)}</span>${copyBtn(x.value)}</code><span class="hint" style="grid-column:1/-1">${esc(x.why)}${x.optional ? " Optional." : ""}</span></div>`).join("");
+async function sesWizard(stepArg) {
+	const s = await api("/api/sending");
+	const ses = s.sending?.provider === "ses";
+	let step = Math.min(5, Math.max(1, Number(stepArg) || 1));
+	if (step > 2 && !ses) step = 2; // the keys come first
+	if (!wiz.region) wiz.region = (ses && s.sending.region) || "eu-west-1";
+	const domain = s.fromEmail.split("@")[1];
+	const go = (n) => (location.hash = `#ses/${n}`);
+	const page = (title, body, next = "", back = step > 1) => {
+		main.innerHTML = `<div class="wiz"><div class="whead"><h1 class="wtitle">${SES_LOGO(40)}Set up Amazon SES</h1><a class="btn ghost small" href="#settings/sending">${icon("x")}Close</a></div>
+		<ol class="wsteps">${WIZ.map((n, i) => `<li class="${i + 1 === step ? "on" : i + 1 < step ? "done" : ""}"><span>${n}</span></li>`).join("")}</ol>
+		<div class="card wcard"><p class="wnum">Step ${step} of ${WIZ.length}</p><h2>${title}</h2>${body}<p class="err" id="we"></p>
+		<div class="wnav">${back ? `<a class="btn ghost" href="#ses/${step - 1}">${icon("back")}Back</a>` : "<span></span>"}${next}</div></div></div>`;
+	};
+	const fail = (e) => ($("#we").textContent = e.message);
+
+	if (step === 1) {
+		page("Where should Amazon send from?", `<p>Pick the Amazon region nearest most of your readers. Ireland suits the UK and Europe.</p>
+		<div class="options regions">${REGIONS.map(([id, n]) => `<button class="option ${id === wiz.region ? "on" : ""}" data-r="${id}"><span class="lic aws">${AWS_LOGO(26)}</span><span><b>${n}</b><small>${id}</small></span></button>`).join("")}</div>`,
+		`<button class="btn" id="wnext">Next${icon("next")}</button>`, false);
+		$$("[data-r]").forEach((b) => (b.onclick = () => { wiz.region = b.dataset.r; $$("[data-r]").forEach((x) => x.classList.toggle("on", x === b)); }));
+		$("#wnext").onclick = () => go(2);
+	}
+
+	if (step === 2) {
+		const have = ses && s.sending.region === wiz.region;
+		page("Make your Amazon keys", `<div class="found">${AWS_LOGO(44)}<div><b>Amazon Web Services</b><small>Amazon needs a user just for Newsletter Sender, with its own keys. We've made it one press.</small></div></div>
+		<ol class="wlist">
+			<li><b>Press the button below.</b> AWS opens with everything filled in. Sign in if it asks.<br><a class="btn" href="${stackUrl(wiz.region)}" target="_blank" rel="noopener">${AWS_LOGO(22, "#fff")}Create the user and keys in AWS${icon("ext")}</a></li>
+			<li><b>Scroll to the bottom</b>, tick <i>I acknowledge that AWS CloudFormation might create IAM resources</i> and press <b>Create stack</b>.</li>
+			<li><b>Wait about a minute</b> until it says CREATE_COMPLETE, then open the <b>Outputs</b> tab.</li>
+			<li><b>Copy the two keys</b> into the boxes here.</li>
+		</ol>
+		${have ? `<p class="okmsg">${icon("check")} Keys saved (ending ${esc(s.sending.keyEnd)}). Press Next to keep them, or paste new ones.</p>` : ""}
+		<label for="kid">Access key ID <span class="hint">(AccessKeyId)</span></label><input id="kid" placeholder="AKIA..." autocomplete="off" data-lpignore="true">
+		<label for="key">Secret access key <span class="hint">(SecretAccessKey)</span></label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">
+		<p class="hint"><a href="https://newslettersender.com/help/amazon-ses/" target="_blank" rel="noopener">Step by step guide, with screen grabs</a></p>`,
+		`<button class="btn" id="wnext">${icon("check")}Check the keys and go on</button>`);
+		$("#wnext").onclick = (e) => run(e.currentTarget, async () => {
+			const kid = $("#kid").value.trim(), key = $("#key").value.trim();
+			if (have && !kid && !key) return go(3);
+			try { await api("/api/sending", { body: { provider: "ses", key, accessKeyId: kid, region: wiz.region } }); toast("Keys checked and saved"); go(3); } catch (err) { fail(err); }
+		});
+	}
+
+	if (step === 3) {
+		let mode = "self";
+		page(`Where is ${esc(domain)}'s DNS?`, `<p>Your newsletters go from <b>${esc(s.fromEmail)}</b>, so Amazon needs a few DNS records on <b>${esc(domain)}</b>.</p><div id="wdns"><p class="muted">${icon("clock")} Looking up ${esc(domain)}…</p></div>`,
+		`<button class="btn" id="wnext" hidden>Next${icon("next")}</button>`);
+		const box = $("#wdns"), next = $("#wnext");
+		const showCf = () => {
+			mode = "cf";
+			box.innerHTML = `<div class="found">${CF_LOGO(44)}<div><b>${esc(domain)} is on Cloudflare</b><small>So we can add the records for you. It needs a Cloudflare token that can edit DNS.</small></div></div>
+			<ol class="wlist">
+				<li><b>Press the button below.</b> Cloudflare opens with the right permissions filled in.<br><a class="btn" href="${CF_TOKEN_URL}" target="_blank" rel="noopener">${CF_LOGO(22, "#fff")}Make a Cloudflare token${icon("ext")}</a></li>
+				<li>Under <b>Zone Resources</b>, choose <b>${esc(domain)}</b>.</li>
+				<li>Press <b>Continue to summary</b>, then <b>Create Token</b>.</li>
+				<li><b>Copy the token</b> and paste it here.</li></ol>
+			<label for="cft">Cloudflare token</label><input id="cft" type="password" autocomplete="off" data-lpignore="true">
+			<p class="hint"><a href="#ses/4" id="wself">I'd rather add the records myself</a></p>`;
+			next.hidden = false; next.innerHTML = `${icon("check")}Check the token and go on`;
+		};
+		const showOther = (host) => {
+			box.innerHTML = `<div class="found"><span class="lic">${icon("list")}</span><div><b>${esc(domain)}'s DNS is ${host ? `with ${esc(host)}` : "not on Cloudflare"}</b><small>No problem. On the next step we show you each record to add${host ? ` in ${esc(host)}` : ""}, with copy buttons.</small></div></div>`;
+			next.hidden = false;
+		};
+		if (s.sending.cloudflareDns) {
+			mode = "done";
+			box.innerHTML = `<div class="found">${CF_LOGO(44)}<div><b>Connected to Cloudflare</b><small>We'll add the records to ${esc(domain)} for you.</small></div><span class="okmsg">${icon("check")}</span></div>`;
+			next.hidden = false;
+		} else api("/api/sending/dns-host").then((h) => (h.cloudflare ? showCf() : showOther(h.host)), () => {
+			box.innerHTML = `<p class="muted">We couldn't check where ${esc(domain)}'s DNS is just now.</p><div class="options"><button class="option" id="wcf"><span class="lic">${CF_LOGO(26)}</span><span><b>It's on Cloudflare</b><small>Add the records for me.</small></span></button><a class="option" href="#ses/4"><span class="lic">${icon("list")}</span><span><b>Somewhere else</b><small>Show me the records to add.</small></span></a></div>`;
+			$("#wcf").onclick = showCf;
+		});
+		next.onclick = (e) => run(e.currentTarget, async () => {
+			if (mode !== "cf") return go(4);
+			try { const r = await api("/api/sending/cloudflare", { body: { token: $("#cft").value.trim() } }); toast(`Connected to ${r.zone} in Cloudflare`); go(4); } catch (err) { fail(err); }
+		});
+	}
+
+	if (step === 4) {
+		page("Set up Amazon SES", `<div class="found">${SES_LOGO(44)}<div><b>Amazon SES in ${esc((REGIONS.find((r) => r[0] === s.sending.region) || [, s.sending.region])[1])}</b><small>Sending from ${esc(s.fromEmail)}</small></div></div><div id="wintro"><p>One press and we do the rest:</p>
+		<ul class="wlist plain"><li>${icon("check")} Add ${esc(domain)} to Amazon SES, with email signing (DKIM)</li><li>${icon("check")} Send bounces to bounce.${esc(domain)}</li><li>${icon("check")} Bring bounces and spam complaints straight back here</li>
+		${s.sending.cloudflareDns ? `<li>${icon("check")} Add the DNS records to ${esc(domain)} in Cloudflare</li>` : ""}<li>${icon("check")} Ask Amazon to let you send to anyone</li></ul>
+		<button class="btn big" id="wrun">${icon("cog")}Set up Amazon SES</button></div><div id="wout"></div>`,
+		`<button class="btn" id="wnext" hidden>Next${icon("next")}</button>`);
+		$("#wrun").onclick = (e) => run(e.currentTarget, async () => {
+			try {
+				const r = await api("/api/sending/ses-setup", { body: {} });
+				$("#wintro").hidden = true;
+				$("#wout").innerHTML = `<ul class="steps">${r.steps.map((x) => `<li class="done">${icon("check")} ${esc(x)}</li>`).join("")}</ul>${r.warnings.map((w) => `<p class="err">${esc(w)}</p>`).join("")}
+				${r.dnsDone ? "" : `<h3>Now add these to ${esc(domain)}'s DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${sesRecs(r.records)}`}`;
+				$("#wnext").hidden = false;
+			} catch (err) { fail(err); }
+		});
+		$("#wnext").onclick = () => go(5);
+	}
+
+	if (step === 5) {
+		page("Wait for Amazon to check", `<p>Amazon checks the DNS records by itself, usually within an hour. This page checks every 30 seconds, so you can leave it open or come back later.</p><div id="wstat"><p class="muted">${icon("clock")} Checking…</p></div>`,
+		`<a class="btn" href="#settings/sending" id="wdone">${icon("check")}Done</a>`);
+		const check = async () => {
+			try {
+				const r = await api("/api/sending/ses-status");
+				const good = (x) => x === "SUCCESS" || x === true;
+				const line = (ok, yes, no) => `<li class="${ok ? "done" : ""}">${ok ? icon("check") : icon("clock")} ${ok ? yes : no}</li>`;
+				const ready = good(r.verified) && r.production;
+				$("#wstat").innerHTML = `${ready ? `<p class="wready">${icon("check")} You're ready to send</p>` : ""}<ul class="steps big">
+				${line(good(r.verified), `${esc(r.domain)} is verified`, `${esc(r.domain)} isn't verified yet`)}
+				${line(good(r.dkim), "Email signing (DKIM) is working", "Email signing (DKIM) is waiting for the DNS records")}
+				${line(good(r.bounceDomain), "Bounce address is working", "Bounce address is waiting for the DNS records")}
+				${line(r.production, "Out of the sandbox, so you can send to anyone", `Amazon is looking at your request to send to anyone (usually a day). <a href="https://newslettersender.com/help/amazon-ses/#sandbox" target="_blank" rel="noopener">More about this</a>`)}</ul>
+				<p class="muted">Up to ${num(r.rate)} emails a second and ${num(r.max24)} a day.</p>${ready ? `<div class="row"><a class="btn" href="#new">${icon("pencil")}Write your first email</a></div>` : ""}`;
+				if (ready) { clearInterval(timer); $(".wcard h2").textContent = "All done"; }
+			} catch (err) { $("#wstat").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+		};
+		check();
+		timer = setInterval(check, 30000);
+	}
 }
 
 // -- Blocklist: a suppression list of addresses, and blocked domains ----------------------------------------------

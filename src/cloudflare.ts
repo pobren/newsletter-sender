@@ -49,3 +49,31 @@ export async function addRecords(token: string, zoneId: string, records: DnsReco
 
 /** The Cloudflare page that makes a token with just DNS editing filled in. */
 export const TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }]))}&name=${encodeURIComponent("Newsletter Sender DNS")}`;
+
+/** Well known DNS hosts, by the end of their nameserver names. */
+const HOSTS: [RegExp, string][] = [
+	[/\.ns\.cloudflare\.com$/, "Cloudflare"], [/domaincontrol\.com$/, "GoDaddy"], [/awsdns/, "Amazon Route 53"], [/googledomains\.com$|\.google\.com$/, "Google"],
+	[/registrar-servers\.com$/, "Namecheap"], [/ui-dns\.|ionos/, "IONOS"], [/123-reg\.co\.uk$/, "123 Reg"], [/fasthosts\.net\.uk$|fasthosts\.co\.uk$/, "Fasthosts"],
+	[/porkbun\.com$/, "Porkbun"], [/hover\.com$/, "Hover"], [/name\.com$/, "Name.com"], [/dnsimple\.com$/, "DNSimple"], [/digitalocean\.com$/, "DigitalOcean"],
+	[/squarespacedns\.com$/, "Squarespace"], [/wixdns\.net$/, "Wix"], [/gandi\.net$/, "Gandi"], [/ovh\.net$/, "OVH"], [/hetzner/, "Hetzner"], [/vercel-dns\.com$/, "Vercel"], [/nsone\.net$/, "NS1"],
+];
+
+/**
+ * Who runs a domain's DNS, from its nameservers (looked up over DNS over HTTPS, walking up from a subdomain).
+ * Lets the wizard say "your domain is on Cloudflare" instead of asking.
+ */
+export async function dnsHost(domain: string, fetcher: typeof fetch = fetch): Promise<{ zone: string; nameservers: string[]; host: string | null; cloudflare: boolean } | { error: string }> {
+	const labels = domain.toLowerCase().split(".");
+	for (let i = 0; i < labels.length - 1; i++) {
+		const name = labels.slice(i).join(".");
+		const res = await fetcher(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=NS`, { headers: { accept: "application/dns-json" } }).catch(() => null);
+		if (!res || !res.ok) return { error: "We couldn't look up your domain's DNS just now." };
+		const data: any = await res.json().catch(() => null);
+		const ns = (data?.Answer ?? []).filter((a: any) => a.type === 2).map((a: any) => String(a.data).toLowerCase().replace(/\.$/, ""));
+		if (ns.length) {
+			const host = HOSTS.find(([re]) => ns.some((n: string) => re.test(n)))?.[1] ?? null;
+			return { zone: name, nameservers: ns, host, cloudflare: host === "Cloudflare" };
+		}
+	}
+	return { error: `We couldn't find the DNS for ${domain}.` };
+}
