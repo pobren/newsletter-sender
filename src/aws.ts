@@ -82,8 +82,13 @@ export async function ses(keys: AwsKeys, method: string, path: string, body: unk
 	try {
 		data = out ? JSON.parse(out) : null;
 	} catch {}
-	return { ok: res.ok, status: res.status, data, text: out };
+	// SESv2 puts the error name in a header and only a sentence in the body, so keep the name with the text.
+	const kind = res.headers.get("x-amzn-errortype")?.split(":")[0] ?? "";
+	return { ok: res.ok, status: res.status, data, text: kind ? `${kind} ${out}` : out };
 }
+
+/** Amazon already has this (a domain, configuration set or event destination), which is fine when setting up again. */
+export const alreadyThere = (a: AwsAnswer) => !a.ok && /AlreadyExists|already exist/i.test(a.text);
 
 /** One signed SNS call (form in, XML out). */
 export async function sns(keys: AwsKeys, params: Record<string, string>, fetcher: typeof fetch = fetch): Promise<AwsAnswer> {
