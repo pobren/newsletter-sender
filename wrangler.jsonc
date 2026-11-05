@@ -3,9 +3,11 @@
 	"name": "newsletter-sender",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-01-15",
-	// One D1 database. Wrangler and the Deploy to Cloudflare button make it on the first deploy; Newsletter Sender
-	// makes its own tables the first time it runs.
-	"d1_databases": [{ "binding": "DB", "database_name": "newsletter-sender" }],
+	// One D1 database. Cloudflare makes it on the first deploy and keeps it linked after that (so you can also point
+	// DB at a database of your own in the dashboard); Newsletter Sender makes its own tables the first time it runs.
+	"d1_databases": [{ "binding": "DB" }],
+	// Runs the Worker near the database when that's quicker, since each page asks the database a few things.
+	"placement": { "mode": "smart" },
 	// The send queue: one batch of 50 emails per worker (a slow SES account takes about four minutes a batch, inside
 	// the queue's 15 minute limit), up to 10 workers at once. Keep max_concurrency the same as CONCURRENCY
 	// in src/sending.ts.

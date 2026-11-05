@@ -174,7 +174,11 @@ function route() {
 	view.abort(); view = new AbortController(); window.onbeforeunload = null;
 	const [tab, id] = (location.hash.slice(1) || "overview").split("/");
 	$$("nav.tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === (tab === "email" ? "emails" : tab)));
-	main.innerHTML = `<p class="muted">Loading…</p>`;
+	// Keep the last page on screen while the next one loads, and only say Loading if it takes a while.
+	main.style.opacity = "0.6";
+	const slow = setTimeout(() => { main.innerHTML = `<p class="muted">Loading…</p>`; }, 600);
+	view.signal.addEventListener("abort", () => clearTimeout(slow));
+	new MutationObserver((_m, o) => { clearTimeout(slow); main.style.opacity = ""; o.disconnect(); }).observe(main, { childList: true });
 	const views = { overview, emails, email: () => editor(id), people, lists, sending, settings };
 	(views[tab] || overview)().catch((e) => { main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
