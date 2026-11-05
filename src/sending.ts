@@ -18,11 +18,11 @@ import { checkCampaign } from "./health.ts";
 import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
 
 /** Send rows in one queue message. Bigger batches spend less of each second waiting on the queue between
- * messages: the 100k load test on Cloudflare reached about 67 a second (of 100) with 50, as each message
+ * messages: the 100k load test on Cloudflare reached about 65 a second (of 100) with 10 workers, as each message
  * costs a second or two on top of its sending time. */
 export const BATCH = 200;
 /** Queue workers at once: keep the same as max_concurrency in wrangler.jsonc. */
-export const CONCURRENCY = 10;
+export const CONCURRENCY = 20;
 /** Requests one worker may have open at once (Cloudflare allows six). */
 const OPEN = 6;
 /** Tries before a batch's unsent rows are marked failed. */
