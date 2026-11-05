@@ -17,13 +17,13 @@ export function troubleWhy(r: { sent: number; bounced: number; complained: numbe
 }
 
 /** After a bounce or complaint: pause the campaign if too many of its emails are bouncing or being marked as spam. */
-export async function checkCampaign(db: D1Database, id: string): Promise<boolean> {
+export async function checkCampaign(db: D1Database, id: string, force = false): Promise<boolean> {
 	const c = await db.prepare("SELECT id, brand_id, status, health FROM campaigns WHERE id = ?").bind(id).first<{ id: string; brand_id: string; status: string; health: number }>();
 	if (!c || c.status !== "sending" || c.health) return false; // health 2: the owner chose to carry on
 	const ev = await db.prepare("SELECT COUNT(DISTINCT CASE WHEN kind = 'bounced' THEN subscriber_id END) AS bounced, COUNT(DISTINCT CASE WHEN kind = 'complained' THEN subscriber_id END) AS complained FROM events WHERE campaign_id = ? AND kind IN ('bounced', 'complained')").bind(id).first<{ bounced: number; complained: number }>();
 	if (!ev) return false;
 	// Counting the sent emails reads every row, so only do it when the bounces or complaints could tip it over.
-	if (ev.complained < LIMITS.complaintMin && (ev.bounced < LIMITS.bounceMin || ev.bounced % 5)) return false;
+	if (!force && ev.complained < LIMITS.complaintMin && (ev.bounced < LIMITS.bounceMin || ev.bounced % 5)) return false;
 	const sent = await db.prepare("SELECT COUNT(*) AS n FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(id).first<{ n: number }>();
 	const why = troubleWhy({ sent: sent?.n ?? 0, bounced: ev.bounced, complained: ev.complained });
 	if (!why) return false;

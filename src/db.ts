@@ -65,6 +65,8 @@ export interface BrandRow {
 	track_domain: string | null;
 	/** 1: a person can only be on one list. */
 	one_list: number;
+	/** Footer links: 1 = Manage your subscription, 2 = Forward to a friend (added together). */
+	footer_links: number;
 	/** "all": unsubscribing leaves every list. "list": only the lists that email went to. */
 	unsub_scope: "all" | "list";
 	/** The name at the top of the app; empty shows Newsletter Sender. */
@@ -187,8 +189,10 @@ const MIGRATIONS = [
 	"ALTER TABLE sends ADD COLUMN country TEXT",
 	// Sending health: 1 = paused for safety (too many bounces or spam complaints), 2 = the owner chose to carry on anyway.
 	"ALTER TABLE campaigns ADD COLUMN health INTEGER NOT NULL DEFAULT 0",
+	// Footer links: 1 = Manage your subscription (on to start with), 2 = Forward to a friend.
+	"ALTER TABLE brands ADD COLUMN footer_links INTEGER NOT NULL DEFAULT 1",
 ];
-const SCHEMA_VERSION = "6";
+const SCHEMA_VERSION = "7";
 
 let ready: Promise<void> | null = null;
 

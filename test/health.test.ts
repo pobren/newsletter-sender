@@ -34,3 +34,14 @@ test("Sendy and Mailchimp merge tags work in designs brought over", () => {
 	assert.equal(foreignTags("*|FNAME|* *|EMAIL|* *|UNSUB|* *|ARCHIVE|* *|LNAME|*"), "{{first_name}} {{email}} {{unsubscribe_url}} {{web_url}} *|LNAME|*");
 	assert.equal(foreignTags("[Read more]"), "[Read more]");
 });
+
+test("the footer shows Manage your subscription by default, and Forward to a friend when switched on", async () => {
+	const { renderEmail } = await import("../src/render.ts");
+	const look = { brandName: "B", colour: "#a3195b", unsubscribeUrl: "https://x/u/t", manageUrl: "https://x/p/t", forwardUrl: "https://x/f/c.s" };
+	const a = renderEmail("Hi", "<p>Hello</p>", { ...look, footerLinks: 1 }, { email: "a@b.c" }).html;
+	assert.match(a, /Manage your subscription/);
+	assert.doesNotMatch(a, /Forward to a friend/);
+	const b = renderEmail("Hi", "<p>Hello {{manage_url}}</p>", { ...look, footerLinks: 3 }, { email: "a@b.c" }).html;
+	assert.match(b, /Forward to a friend/);
+	assert.match(b, /Hello https:\/\/x\/p\/t/);
+});
