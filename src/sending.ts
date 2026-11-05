@@ -13,7 +13,7 @@ import { sesAccount } from "./aws.ts";
 import { BLOCKED_SQL, iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
 import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
-import { loadProvider, sealSecret } from "./settings.ts";
+import { canSendFrom, loadProvider, sealSecret } from "./settings.ts";
 import { checkCampaign } from "./health.ts";
 import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
 
@@ -141,6 +141,9 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 	const audience = parseAudience(c.audience);
 	if (!audience.lists.length) return { error: "Please choose at least one list to send to." };
 	if (!hasContent(campaignContent(c))) return { error: "This email is empty. Please write something first." };
+	const from = senderOf(brand, c);
+	const allowed = await canSendFrom(provider, from.email);
+	if (allowed.ok === false) return { error: allowed.message };
 
 	// Amazon SES: send at the account's current rate, and don't start what the day's allowance can't finish.
 	if (provider.provider === "ses") {
@@ -263,6 +266,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const content = campaignContent(c);
 	const tb = trackBase(brand, base);
 	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
+	const from = senderOf(brand, c);
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
 	// Every 50 emails we look again, so pressing Pause (or Stop) takes effect within seconds, not at the end of the batch.
@@ -291,10 +295,10 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 			text: out.text,
 			html: out.html,
 			headers: listHeaders(unsub, `${brand.id}.${new URL(base || "https://example.com").hostname}`),
-			replyTo: brand.reply_to,
+			replyTo: from.replyTo,
 			tags: { ns_campaign: c.id, ns_sub: r.sub },
 		};
-		const sent = test ? await pretendSend(test, r.email) : await sendOne(provider, brand.from_name, brand.from_email, email, fetcher);
+		const sent = test ? await pretendSend(test, r.email) : await sendOne(provider, from.name, from.email, email, fetcher);
 		record(r.id, sent);
 		if (pending.length >= 10) await flush();
 		return sent;
@@ -446,12 +450,18 @@ export async function startDue(env: Env, now = new Date()): Promise<void> {
 }
 
 /** A test of a campaign to a few addresses, straight away (not through the queue). */
-export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; content: Content }, to: string[], sample: Reader): Promise<Sent[]> {
+/** Who a campaign comes from: its own From name, address and Reply to, or the brand's from Settings. */
+export function senderOf(brand: BrandRow, c: Pick<CampaignRow, "from_name" | "from_email" | "reply_to">): { name: string; email: string; replyTo: string | null } {
+	return { name: c.from_name || brand.from_name, email: c.from_email || brand.from_email, replyTo: c.reply_to || brand.reply_to || null };
+}
+
+export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; content: Content; from_name?: string | null; from_email?: string | null; reply_to?: string | null }, to: string[], sample: Reader): Promise<Sent[]> {
 	const base = await origin(env.DB);
 	const look: Look = { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null };
 	const out = renderEmail(c.subject, c.content, look, sample);
 	const subject = `[Test] ${mergeSubject(c.subject, sample)}`;
-	return Promise.all(to.map((addr) => sendOne(provider, brand.from_name, brand.from_email, { to: addr, subject, text: out.text, html: out.html, headers: listHeaders(`${base}/u/test`, `${brand.id}.test`), replyTo: brand.reply_to }, fetch)));
+	const from = senderOf(brand, c);
+	return Promise.all(to.map((addr) => sendOne(provider, from.name, from.email, { to: addr, subject, text: out.text, html: out.html, headers: listHeaders(`${base}/u/test`, `${brand.id}.test`), replyTo: from.replyTo }, fetch)));
 }
 
 export const newCampaignId = () => newId(8);

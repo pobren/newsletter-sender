@@ -7,7 +7,7 @@ import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
-import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
+import { canSendFrom, loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
@@ -78,7 +78,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const name = str(b.brand, 80) || DEFAULT_BRAND;
 			const brandId = newId(8);
 			await db.batch([
-				db.prepare("INSERT INTO brands (id, name, from_name, from_email, hook_key, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(brandId, name, str(b.name, 80) || name, email, newId(16), now),
+				db.prepare("INSERT INTO brands (id, name, from_name, from_email, hook_key, unsub_scope, created_at) VALUES (?, ?, ?, ?, ?, 'list', ?)").bind(brandId, name, str(b.name, 80) || name, email, newId(16), now),
 				db.prepare("INSERT INTO lists (id, brand_id, name, slug, description, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(newId(8), brandId, "Newsletter", await freeSlug(db, "newsletter"), null, now),
 			]);
 		}
@@ -254,6 +254,11 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const r = await sesStatus(p, brand.from_email.split("@")[1]);
 		if (!("error" in r)) await db.prepare("UPDATE brands SET rate = ? WHERE id = ?").bind(r.rate, brand.id).run();
 		return "error" in r ? bad(r.error) : ok(r);
+	}
+	if (path === "/api/sending/can-send" && method === "GET") {
+		const email = cleanEmail(url.searchParams.get("email"));
+		if (!email) return bad("Please enter a whole email address, such as news@yourdomain.com.");
+		return ok(await canSendFrom(await loadProvider(db, brand), email));
 	}
 	if (path === "/api/sending/test" && method === "POST") {
 		const b = await body(request);
@@ -508,7 +513,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -516,6 +521,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const slug = b.slug ? slugify(String(b.slug)) : slugify(str(b.subject, 200));
 			const clash = await db.prepare("SELECT id FROM campaigns WHERE slug = ? AND id != ?").bind(slug, c.id).first();
 			const html = typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : c.html;
+			// From name, address and Reply to: blank means "use Settings".
+			const own = (v: string | null | undefined, d: string | null) => (v && v !== d ? v : null);
+			await db.prepare("UPDATE campaigns SET from_name = ?, from_email = ?, reply_to = ? WHERE id = ?")
+				.bind(own(str(b.from_name, 80), brand.from_name), own(cleanEmail(b.from_email), brand.from_email), own(cleanEmail(b.reply_to), brand.reply_to), c.id).run();
 			await db.prepare("UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, audience = ?, public = ?, slug = ?, updated_at = ? WHERE id = ?")
 				.bind(str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", str(b.preheader, 200) || null, html, JSON.stringify(parseAudience(b.audience)), b.public === false ? 0 : 1, clash ? `${slug}-${c.id.slice(0, 4)}` : slug, iso(), c.id).run();
 			return ok();
@@ -537,7 +546,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if (!provider) return bad("Please choose how to send first, under Settings, Sending.");
 			const to = (Array.isArray(b.to) ? b.to : String(b.to ?? me.email).split(/[,\s]+/)).map(cleanEmail).filter((e): e is string => !!e).slice(0, 5);
 			if (!to.length) return bad("Please enter an address to send the test to.");
-			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c) }, to, { email: me.email, name: me.name });
+			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c), from_name: c.from_name, from_email: c.from_email, reply_to: c.reply_to }, to, { email: me.email, name: me.name });
 			const failed = res.find((r) => !r.ok);
 			return failed ? bad(`The test didn't go: ${failed.error}`) : ok({ sent: to.length });
 		}
@@ -577,7 +586,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "duplicate") {
 			const id = newId(8);
-			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, iso(), iso()).run();
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, iso(), iso()).run();
 			return ok({ id });
 		}
 	}
