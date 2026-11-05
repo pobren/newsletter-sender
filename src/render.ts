@@ -68,6 +68,12 @@ export interface Look {
 	unsubscribeUrl: string;
 	/** The web version, when the archive is on. */
 	webUrl?: string | null;
+	/** The reader's own page to change their name and lists. */
+	manageUrl?: string | null;
+	/** A page to share this email with a friend (it signs them up, never emails them). */
+	forwardUrl?: string | null;
+	/** Which of those links the footer shows: 1 = manage, 2 = forward. */
+	footerLinks?: number;
 	/** Opens and clicks, each only when switched on: links go through `link`, and `pixel` is an invisible picture. */
 	track?: { link?: ((url: string, n: number) => string) | null; pixel?: string | null } | null;
 }
@@ -158,12 +164,20 @@ export function htmlToText(html: string): string {
 	return s.split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Merge tags from Sendy and Mailchimp, turned into ours, so a design brought over from either works as it is. */
+export function foreignTags(h: string): string {
+	return h
+		.replace(/\[Name,\s*fallback=([^\]]*)\]/gi, "{{first_name|$1}}").replace(/\[Name\]/gi, "{{first_name}}").replace(/\[Email\]/gi, "{{email}}")
+		.replace(/\[unsubscribe\]/gi, "{{unsubscribe_url}}").replace(/\[webversion\]/gi, "{{web_url}}")
+		.replace(/\*\|FNAME\|\*/g, "{{first_name}}").replace(/\*\|EMAIL\|\*/g, "{{email}}").replace(/\*\|UNSUB\|\*/g, "{{unsubscribe_url}}").replace(/\*\|ARCHIVE\|\*/g, "{{web_url}}");
+}
+
 /** The email for one reader. Pass a reader of { email: "" } with no tracking for the archive and previews. */
 export function renderEmail(subject: string, content: Content, look: Look, reader: Reader): Rendered {
 	const colour = /^#[0-9a-f]{6}$/i.test(look.colour) ? look.colour : "#a3195b";
-	let body = sanitise(typeof content === "string" ? content : blocksToHtml(content, colour));
+	let body = foreignTags(sanitise(typeof content === "string" ? content : blocksToHtml(content, colour)));
 	const whole = isDocument(body);
-	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? ""));
+	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? "")).replace(/\{\{\s*manage_url\s*\}\}/gi, esc(look.manageUrl ?? look.unsubscribeUrl)).replace(/\{\{\s*forward_url\s*\}\}/gi, esc(look.forwardUrl ?? look.webUrl ?? ""));
 	// The plain text version shows the real links, not the click counting ones.
 	const bodyText = htmlToText(mergeHtml(specials(body), reader));
 	// Every web link, counted when clicks are on. Links with merge tags in them stay as they are.
@@ -181,7 +195,12 @@ export function renderEmail(subject: string, content: Content, look: Look, reade
 	const foot = [
 		look.footer ? esc(look.footer) : "",
 		`You're getting this because you signed up to ${esc(look.brandName)}.`,
-		`<a href="${esc(look.unsubscribeUrl)}" style="color:#6b5a73">Unsubscribe</a>${look.webUrl ? ` · <a href="${esc(look.webUrl)}" style="color:#6b5a73">View in your browser</a>` : ""}`,
+		[
+			`<a href="${esc(look.unsubscribeUrl)}" style="color:#6b5a73">Unsubscribe</a>`,
+			look.manageUrl && (look.footerLinks ?? 1) & 1 ? `<a href="${esc(look.manageUrl)}" style="color:#6b5a73">Manage your subscription</a>` : "",
+			look.webUrl ? `<a href="${esc(look.webUrl)}" style="color:#6b5a73">View in your browser</a>` : "",
+			look.forwardUrl && (look.footerLinks ?? 1) & 2 ? `<a href="${esc(look.forwardUrl)}" style="color:#6b5a73">Forward to a friend</a>` : "",
+		].filter(Boolean).join(" · "),
 	].filter(Boolean).join("<br>");
 	const footHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto"><tr><td style="padding:20px 28px;font:13px/1.6 Helvetica,Arial,sans-serif;color:#6b5a73;text-align:center">${foot}</td></tr></table>`;
 	const pixel = look.track?.pixel ? `<img src="${esc(look.track.pixel)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px">` : "";

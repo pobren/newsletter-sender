@@ -9,6 +9,7 @@ import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./ren
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
+import { brandHealth } from "./health.ts";
 import { dnsHost, findZone, TOKEN_URL } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
@@ -151,7 +152,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if (!str(b.name, 80)) return bad("Please give your company or newsletter a name.");
 				if (!fromEmail) return bad("Please enter the address your newsletter comes from, such as news@yourdomain.com.");
 				const logo = typeof b.logo === "string" && /^https:\/\/\S{1,1000}$/.test(b.logo.trim()) ? b.logo.trim() : null;
-				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1, app_name: str(b.app_name, 60) || null });
+				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1, app_name: str(b.app_name, 60) || null, footer_links: (b.manage_link === false ? 0 : 1) | (b.forward_link ? 2 : 0) });
 			}
 			if ("track_opens" in b) {
 				let domain: string | null = null;
@@ -238,6 +239,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if (p?.provider !== "ses") return bad("Please save your Amazon SES keys first.");
 		const r = await setUpSes(db, brand, p, request);
 		return "error" in r ? bad(r.error) : ok(r);
+	}
+	if (path === "/api/health") {
+		const h = await brandHealth(db, brand.id);
+		const p = await loadProvider(db, brand);
+		const acct = p?.provider === "ses" ? await sesAccount(sesKeys(p)).catch((e) => ({ error: (e as Error).message })) : null;
+		return ok({ ...h, provider: p?.provider ?? null, region: p?.region ?? null, ses: acct });
 	}
 	if (path === "/api/sending/ses-status") {
 		const p = await loadProvider(db, brand);
@@ -518,7 +525,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "preview") {
 			const base = await origin(db, request);
-			const out = renderEmail(c.subject, campaignContent(c), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null }, { email: me.email, name: me.name });
+			const out = renderEmail(c.subject, campaignContent(c), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, manageUrl: `${base}/p/test`, forwardUrl: `${base}/f/test`, footerLinks: brand.footer_links, webUrl: null, track: null }, { email: me.email, name: me.name });
 			return new Response(out.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": EMAIL_CSP } });
 		}
 		if (method !== "POST") return bad("Not found.", 404);

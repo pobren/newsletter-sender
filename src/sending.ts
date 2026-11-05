@@ -12,8 +12,10 @@
 import { sesAccount } from "./aws.ts";
 import { BLOCKED_SQL, iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
-import { cleanBlocks, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
+import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
+import { checkCampaign } from "./health.ts";
+import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
 
 /** Send rows in one queue message. */
 export const BATCH = 50;
@@ -86,6 +88,12 @@ export async function audienceCount(db: D1Database, brandId: string, a: Audience
 }
 
 /** Signs a send row id, so open and click addresses can't be guessed. */
+/** The signature on a campaign's share page link, so people can't guess other campaigns. */
+export async function shareSig(secret: string, id: string): Promise<string> {
+	const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ns-share:${secret}:${id}`));
+	return [...new Uint8Array(d).slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function sendSig(secret: string, id: number): Promise<string> {
 	const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ns-send:${secret}:${id}`));
 	return [...new Uint8Array(d).slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -157,7 +165,7 @@ export async function enqueue(env: Env, campaign: string, lo: number, hi: number
 
 /** Carries on a paused campaign: the rows still queued go back on the queue. */
 export async function resume(env: Env, c: CampaignRow): Promise<{ ok: true } | { error: string }> {
-	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'paused' RETURNING id").bind(iso(), c.id).first();
+	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', health = CASE WHEN health = 1 THEN 2 ELSE health END, updated_at = ? WHERE id = ? AND status = 'paused' RETURNING id").bind(iso(), c.id).first();
 	if (!claim) return { error: "Only a paused campaign can carry on." };
 	const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
 	if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi);
@@ -209,7 +217,8 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const c = await db.prepare("SELECT * FROM campaigns WHERE id = ?").bind(b.campaign).first<CampaignRow>();
 	if (!c || c.status !== "sending") return 0; // cancelled or paused: leave the rows as they are
 	const brand = await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>();
-	const provider = brand ? await loadProvider(db, brand) : null;
+	const test = await loadTestFor(db, c.id);
+	const provider = brand ? (test ? ({ provider: "ses", key: "" } as ProviderConfig) : await loadProvider(db, brand)) : null;
 	if (!brand || !provider) {
 		await pause(db, c, "The sending service was removed, so sending stopped. Add it again under Settings, Sending, then carry on.");
 		return 0;
@@ -230,6 +239,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const secret = await sealSecret(db);
 	const content = campaignContent(c);
 	const tb = trackBase(brand, base);
+	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
 	const flush = async () => {
@@ -239,11 +249,11 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		if (s.ok) pending.push(db.prepare("UPDATE sends SET status = 'sent', message_id = ?, sent_at = ? WHERE id = ?").bind(s.id ?? null, iso(), id));
 		else if (!s.throttled) pending.push(db.prepare("UPDATE sends SET status = 'failed', error = ? WHERE id = ?").bind((s.error ?? "Failed").slice(0, 240), id));
 	};
-	const outcome = await paced(rows, shareOfRate(brand.rate), async (r) => {
+	const outcome = await paced(rows, shareOfRate(test?.rate ?? brand.rate), async (r) => {
 		const sig = brand.track_opens || brand.track_clicks ? await sendSig(secret, r.id) : "";
 		const unsub = `${base}/u/${r.token}?c=${c.id}`;
 		const track: Look["track"] = { link: brand.track_clicks ? (_url, n) => `${tb}/l/${r.id}.${sig}/${n}` : null, pixel: brand.track_opens ? `${tb}/o/${r.id}.${sig}` : null };
-		const look = await lookFor(env, brand, c, unsub, track);
+		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links };
 		const reader: Reader = { email: r.email, name: r.name, fields: safeJson(r.fields) ?? {} };
 		const out = renderEmail(c.subject, content, look, reader);
 		const email: OutEmail = {
@@ -255,13 +265,24 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 			replyTo: brand.reply_to,
 			tags: { ns_campaign: c.id, ns_sub: r.sub },
 		};
-		const sent = await sendOne(provider, brand.from_name, brand.from_email, email, fetcher);
+		const sent = test ? await pretendSend(test, r.email) : await sendOne(provider, brand.from_name, brand.from_email, email, fetcher);
 		record(r.id, sent);
 		if (pending.length >= 10) await flush();
 		return sent;
 	});
 	await flush();
+	if (test) {
+		const replies = pretendReplies(db, brand.id, c.id, test, outcome.done.filter(([, s]) => s.ok).map(([r]) => r));
+		if (replies.length) {
+			await db.batch(replies);
+			await checkCampaign(db, c.id, true);
+		}
+	}
 
+	if (outcome.done.some(([, s]) => s.quota)) {
+		await pause(db, c, "Paused: you've used up today's sending limit with your sending service. The rest are still waiting. Press Carry on sending once the limit frees up (Amazon SES counts the last 24 hours), or ask for a higher limit.");
+		return 0;
+	}
 	// Every email failing the same way (an unverified domain, a revoked key) means stop and tell the owner.
 	const failed = outcome.done.filter(([, s]) => !s.ok && !s.throttled && !s.permanent);
 	if (failed.length >= 5 && failed.length === outcome.done.length) {
@@ -280,7 +301,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	return 0;
 }
 
-const mergeSubject = (subject: string, r: Reader) => subject.replace(/\{\{\s*([a-z0-9_]+)\s*(?:\|([^}]*))?\}\}/gi, (_a, k: string, fb = "") => {
+const mergeSubject = (subject: string, r: Reader) => foreignTags(subject).replace(/\{\{\s*([a-z0-9_]+)\s*(?:\|([^}]*))?\}\}/gi, (_a, k: string, fb = "") => {
 	const name = (r.name ?? "").trim();
 	const v = k.toLowerCase() === "first_name" ? name.split(/\s+/)[0] ?? "" : k.toLowerCase() === "name" ? name : k.toLowerCase() === "email" ? r.email : r.fields?.[k.toLowerCase()] ?? "";
 	return v.trim() || fb.trim();

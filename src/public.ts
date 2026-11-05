@@ -6,9 +6,10 @@ import { csvLine, cleanEmail } from "./csv.ts";
 import { getMeta, isBlocked, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
 import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
-import { campaignContent, safeJson, sendSig } from "./sending.ts";
+import { campaignContent, safeJson, sendSig, shareSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
+import { checkCampaign } from "./health.ts";
 
 export { csvLine };
 
@@ -24,7 +25,7 @@ export function publicPage(brand: Pick<BrandRow, "name" | "colour" | "logo">, ti
 label{display:block;font-weight:600;margin:16px 0 6px}input{width:100%;min-height:50px;padding:0 14px;border:2px solid #e6cfdb;border-radius:10px;font:inherit}input:focus{outline:3px solid #fbe6f0;border-color:var(--c)}
 button,.btn{display:inline-flex;align-items:center;gap:8px;margin-top:20px;min-height:50px;padding:0 22px;border:0;border-radius:10px;background:var(--c);color:#fff;font:600 17px system-ui,sans-serif;cursor:pointer;text-decoration:none}
 button svg,.btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.hp{position:absolute;left:-9999px}.small{font-size:14px;color:#6b5a73}.err{color:#a1122e;font-weight:600}ul.issues{list-style:none;padding:0;margin:0}ul.issues li{padding:14px 0;border-bottom:1px solid #efe2e9}ul.issues a{color:#1d1424;font-weight:600;text-decoration:none}ul.issues span{display:block;font-size:14px;color:#6b5a73}
+.hp{position:absolute;left:-9999px}.opt{display:flex;gap:12px;align-items:flex-start;font-weight:400;margin:0;padding:12px 0;border-bottom:1px solid #efe2e9;cursor:pointer}.opt input{width:22px;height:22px;min-height:0;margin:3px 0 0;accent-color:var(--c);flex:none}.opt span{display:block}.btns{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.btn.ghost{background:#fff;color:var(--c);border:2px solid #e6cfdb}.okmsg{display:flex;gap:8px;align-items:center;color:#166534;font-weight:600;background:#dcfce7;padding:10px 14px;border-radius:10px}.okmsg svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2}.small{font-size:14px;color:#6b5a73}.err{color:#a1122e;font-weight:600}ul.issues{list-style:none;padding:0;margin:0}ul.issues li{padding:14px 0;border-bottom:1px solid #efe2e9}ul.issues a{color:#1d1424;font-weight:600;text-decoration:none}ul.issues span{display:block;font-size:14px;color:#6b5a73}
 </style>${opts.turnstile ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ""}</head><body><main>
 <a class="brand" href="/archive">${brand.logo ? `<img src="${esc(brand.logo)}" alt="${esc(brand.name)}">` : esc(brand.name)}</a>${body}</main></body></html>`;
 }
@@ -219,6 +220,75 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		return html(publicPage(b, "Unsubscribe", `<div class="card"><h1>Unsubscribe?</h1><p>Stop ${names.length ? "" : "all "}emails from ${esc(what)} to ${esc(s.email)}.</p><form method="post"><button type="submit">${ICON_X}Unsubscribe</button></form></div>`));
 	}
 
+	// -- Manage my subscription: change your name and which lists you're on ------------------------
+	const pm = /^\/p\/([0-9a-f]{32}|test)\/?$/.exec(path);
+	if (pm) {
+		const s = pm[1] === "test" ? null : await db.prepare("SELECT * FROM subscribers WHERE token = ?").bind(pm[1]).first<SubscriberRow>();
+		const b = s ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(s.brand_id).first<BrandRow>() : await db.prepare("SELECT * FROM brands LIMIT 1").first<BrandRow>();
+		const brand = b ?? { name: "Newsletter", colour: "#a3195b", logo: null };
+		if (pm[1] === "test") return html(publicPage(brand, "Manage your subscription", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link lets the reader change their name and choose which lists they're on.</p></div>`));
+		if (!s || !b) return html(publicPage(brand, "Manage your subscription", `<div class="card"><h1>We couldn't find you</h1><p>The link may be old. Use the newest email you have from us.</p></div>`), 404);
+		const load = async () => (await db.prepare("SELECT l.id, l.name, l.description, m.status FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.subscriber_id = ? AND l.brand_id = ? ORDER BY l.name").bind(s.id, b.id).all<{ id: string; name: string; description: string | null; status: string }>()).results;
+		let lists = await load();
+		let note = "";
+		if (request.method === "POST") {
+			const f = await request.formData().catch(() => new FormData());
+			const want = new Set(f.getAll("list").map(String));
+			const name = String(f.get("name") ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+			const now = iso();
+			const stmts: D1PreparedStatement[] = [];
+			if (name !== (s.name ?? "")) stmts.push(db.prepare("UPDATE subscribers SET name = ? WHERE id = ?").bind(name || null, s.id));
+			for (const l of lists) {
+				const on = l.status === "active" || l.status === "pending";
+				if (on && !want.has(l.id)) {
+					stmts.push(db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE list_id = ? AND subscriber_id = ?").bind(now, l.id, s.id));
+					stmts.push(logEvent(db, b.id, "unsubscribed", s.id, null, `subscription page, ${l.name}`));
+				} else if (!on && want.has(l.id) && !s.suppressed) {
+					stmts.push(db.prepare("UPDATE memberships SET status = 'active', left_at = NULL, confirmed_at = COALESCE(confirmed_at, ?) WHERE list_id = ? AND subscriber_id = ?").bind(now, l.id, s.id));
+					stmts.push(logEvent(db, b.id, "subscribed", s.id, null, `${l.name} (back, from the subscription page)`));
+				}
+			}
+			if (stmts.length) await db.batch(stmts);
+			s.name = name || null;
+			lists = await load();
+			note = `<p class="okmsg">${ICON_CHECK}Saved. Thanks for letting us know.</p>`;
+		}
+		const one = Boolean(b.one_list) && lists.length > 1;
+		const row = (l: (typeof lists)[number]) => {
+			const on = l.status === "active" || l.status === "pending";
+			return `<label class="opt"><input type="${one ? "radio" : "checkbox"}" name="list" value="${esc(l.id)}" ${on ? "checked" : ""} ${s.suppressed && !on ? "disabled" : ""}><span><b>${esc(l.name)}</b>${l.description ? `<span class="small">${esc(l.description)}</span>` : ""}${l.status === "pending" ? `<span class="small">Waiting for you to confirm by email</span>` : ""}</span></label>`;
+		};
+		return html(publicPage(b, "Manage your subscription", `<div class="card"><h1>Your subscription</h1><p>For ${esc(s.email)}. Change anything you like, then press Save.</p>${note}
+			<form method="post"><label for="n">Your name</label><input id="n" name="name" value="${esc(s.name ?? "")}" maxlength="80" autocomplete="name">
+			<p style="margin:22px 0 8px;font-weight:600">${one ? "The list you'd like" : "The emails you'd like"}</p>${lists.map(row).join("")}${one ? `<label class="opt"><input type="radio" name="list" value=""><span><b>None</b></span></label>` : ""}
+			${s.suppressed ? `<p class="small">We can't email this address at the moment (it bounced or was marked as spam), so lists can't be turned back on here.</p>` : ""}
+			<div class="btns"><button type="submit">${ICON_CHECK}Save</button><a class="btn ghost" href="/u/${esc(s.token)}">${ICON_X}Unsubscribe from everything</a></div></form></div>`));
+	}
+
+	// -- Forward to a friend: the email on a page with share buttons, and a sign up button for the friend ---------------
+	const fm = /^\/f\/(?:([0-9a-f]{16})\.([0-9a-f]{12})|test)\/?$/.exec(path);
+	if (fm) {
+		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		if (!b) return null;
+		if (!fm[1]) return html(publicPage(b, "Forward to a friend", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link opens a page where the reader can share the email with a friend, and the friend can sign up.</p></div>`));
+		if ((await shareSig(await sealSecret(db), fm[1])) !== fm[2]) return null;
+		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ? AND status IN ('sent', 'sending', 'paused')").bind(fm[1], b.id).first<CampaignRow>();
+		if (!c) return null;
+		const form = await db.prepare("SELECT slug FROM lists WHERE brand_id = ? AND id IN (SELECT value FROM json_each(?)) ORDER BY created_at LIMIT 1").bind(b.id, JSON.stringify(safeJson(c.audience)?.lists ?? [])).first<{ slug: string }>()
+			?? await db.prepare("SELECT slug FROM lists WHERE brand_id = ? ORDER BY created_at LIMIT 1").bind(b.id).first<{ slug: string }>();
+		const here = `${await origin(db, request)}${path}`;
+		const subject = c.subject.replace(/\{\{[^}]*\}\}/g, "").replace(/\s+/g, " ").trim();
+		const out = renderEmail(c.subject, campaignContent(c), { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: here, track: null }, { email: "" });
+		const colour = /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : "#a3195b";
+		const ico = (d: string) => `<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:6px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" aria-hidden="true"><path d="${d}"/></svg>`;
+		const btn = `display:inline-block;margin:4px;padding:10px 16px;border-radius:10px;font:600 15px system-ui,sans-serif;text-decoration:none`;
+		const bar = `<div style="background:#fff;border-bottom:1px solid #efe2e9;padding:14px 16px;text-align:center;font:16px/1.5 system-ui,sans-serif;color:#1d1424">
+			<b>${esc(b.name)}</b>: someone thought you'd like this.<br>
+			${form ? `<a href="/s/${esc(form.slug)}" style="${btn};background:${colour};color:#fff">${ico("M12 5v14M5 12h14")}Subscribe</a>` : ""}<a href="mailto:?subject=${encodeURIComponent(subject)}&amp;body=${encodeURIComponent(`I thought you'd like this: ${here}`)}" style="${btn};background:#f3e8ee;color:${colour}">${ico("M3 6h18v12H3zM3 7l9 6 9-6")}Email it to a friend</a></div>`;
+		const page = out.html.replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>(\s*·\s*)?/, "").replace(/(<body[^>]*>)/i, `$1${bar}`);
+		return html(page, 200, { "content-security-policy": "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:" });
+	}
+
 	// -- The archive of past issues ------------------------------------------------------
 	const am = /^\/archive(?:\/([a-z0-9-]{1,80}))?\/?$/.exec(path);
 	if (am) {
@@ -305,4 +375,5 @@ export async function recordMailEvent(db: D1Database, b: BrandRow, e: MailEvent)
 		if (e.permanent) stmts.push(db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE id = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(e.kind === "complaint" ? "complained" : "bounced", iso(), s.id));
 		await db.batch(stmts);
 	}
+	if (e.campaign && (e.permanent || e.kind === "complaint")) await checkCampaign(db, e.campaign);
 }

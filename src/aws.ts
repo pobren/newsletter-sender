@@ -114,11 +114,11 @@ export function awsError(a: AwsAnswer): string {
 export const isThrottle = (a: { status: number; text: string }) => a.status === 429 || /Throttl|TooManyRequests|Maximum sending rate exceeded/i.test(a.text);
 
 /** The SES account: how fast it may send, how many a day, and whether it's still in the sandbox. */
-export async function sesAccount(keys: AwsKeys, fetcher: typeof fetch = fetch): Promise<{ rate: number; max24: number; sent24: number; production: boolean } | { error: string }> {
+export async function sesAccount(keys: AwsKeys, fetcher: typeof fetch = fetch): Promise<{ rate: number; max24: number; sent24: number; production: boolean; enabled: boolean; enforcement: string } | { error: string }> {
 	const a = await ses(keys, "GET", "/account", null, fetcher);
 	if (!a.ok) return { error: awsError(a) };
 	const q = a.data?.SendQuota ?? {};
-	return { rate: Number(q.MaxSendRate) || 1, max24: Number(q.Max24HourSend) || 200, sent24: Number(q.SentLast24Hours) || 0, production: Boolean(a.data?.ProductionAccessEnabled) };
+	return { rate: Number(q.MaxSendRate) || 1, max24: Number(q.Max24HourSend) || 200, sent24: Number(q.SentLast24Hours) || 0, production: Boolean(a.data?.ProductionAccessEnabled), enabled: a.data?.SendingEnabled !== false, enforcement: String(a.data?.EnforcementStatus ?? "HEALTHY") };
 }
 
 /** The AWS regions SES runs in that people pick most. Any valid region name works. */
