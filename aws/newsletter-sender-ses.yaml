@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Newsletter Sender: makes an AWS user that can send through Amazon SES and report bounces through Amazon SNS,
+  with an access key for Newsletter Sender. Copy the two keys from the Outputs tab into Newsletter Sender.
+  Delete this stack to remove the user and its key.
+
+Resources:
+  SenderUser:
+    Type: AWS::IAM::User
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSESFullAccess
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+      Tags:
+        - Key: made-by
+          Value: newsletter-sender
+
+  SenderKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref SenderUser
+
+Outputs:
+  AccessKeyId:
+    Description: Paste this into Newsletter Sender as the Access key ID
+    Value: !Ref SenderKey
+  SecretAccessKey:
+    Description: Paste this into Newsletter Sender as the Secret access key
+    Value: !GetAtt SenderKey.SecretAccessKey
+  Region:
+    Description: Choose this region in Newsletter Sender
+    Value: !Ref AWS::Region

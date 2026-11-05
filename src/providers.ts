@@ -27,6 +27,8 @@ export interface ProviderConfig {
 	region?: string;
 	/** Amazon SES only: the configuration set that reports bounces and complaints back to us. */
 	configSet?: string;
+	/** Amazon SES only: a Cloudflare API token that can edit DNS, so we add the records ourselves. */
+	cfToken?: string;
 	/** Mailgun only: the sending domain, and whether the account is in Mailgun's EU region. */
 	mailgunDomain?: string;
 	mailgunRegion?: "us" | "eu";
@@ -60,7 +62,7 @@ export function parseProvider(input: Record<string, unknown>, fromEmail: string)
 /** What the owner sees about their sending set-up: never the key itself. */
 export function providerSummary(c: ProviderConfig | null) {
 	if (!c) return null;
-	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : null };
+	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : null, cloudflareDns: Boolean(c.cfToken) };
 }
 
 export interface OutEmail {

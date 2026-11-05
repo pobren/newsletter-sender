@@ -3,6 +3,7 @@
 // complaint straight back to this Worker through Amazon SNS.
 
 import { awsError, ses, sesAccount, sns, xmlValue } from "./aws.ts";
+import { addRecords, findZone } from "./cloudflare.ts";
 import { getMeta, iso, newId, origin, setMeta, type BrandRow } from "./db.ts";
 import { seal, sesKeys, unseal, type ProviderConfig } from "./providers.ts";
 
@@ -68,7 +69,7 @@ export async function sesSetup(db: D1Database, brandId: string): Promise<SesSetu
  * Sets Amazon SES up for the brand's sending domain. Safe to run again: anything already there is kept.
  * Returns the DNS records to add, or what went wrong.
  */
-export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfig, request: Request, fetcher: typeof fetch = fetch): Promise<{ records: DnsRecord[]; steps: string[] } | { error: string }> {
+export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfig, request: Request, fetcher: typeof fetch = fetch): Promise<{ records: DnsRecord[]; steps: string[]; dnsDone: boolean; warnings: string[] } | { error: string }> {
 	const keys = sesKeys(c);
 	const domain = brand.from_email.split("@")[1]?.toLowerCase();
 	if (!domain) return { error: "Please set the address you send from first." };
@@ -109,7 +110,51 @@ export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfi
 
 	await saveProvider(db, brand.id, { ...c, configSet: CONFIG_SET }, brand.rate);
 	await setMeta(db, setupKey(brand.id), JSON.stringify({ domain, region: keys.region, tokens, topicArn, at: iso() } satisfies SesSetup));
-	return { records: sesRecords(domain, tokens, keys.region), steps };
+	const records = sesRecords(domain, tokens, keys.region);
+	const warnings: string[] = [];
+
+	// 4. The DNS records, when the domain is on Cloudflare and we have a token for it.
+	let dnsDone = false;
+	if (c.cfToken) {
+		const zone = await findZone(c.cfToken, domain, fetcher);
+		if ("error" in zone) warnings.push(`We couldn't add the DNS records: ${zone.error} Add them yourself below.`);
+		else {
+			const r = await addRecords(c.cfToken, zone.id, records, fetcher);
+			if (r.failed.length) warnings.push(`Some DNS records didn't go in: ${r.failed.join("; ")}. Add those yourself below.`);
+			else dnsDone = true;
+			steps.push(`Added ${r.added} DNS record${r.added === 1 ? "" : "s"} to ${zone.name} in Cloudflare${r.there ? ` (${r.there} already there)` : ""}`);
+		}
+	}
+
+	// 5. Out of the sandbox: ask Amazon for production access, unless the account already has it.
+	const asked = await askForProduction(keys, brand, domain, fetcher);
+	if ("error" in asked) warnings.push(asked.error);
+	else steps.push(asked.step);
+	return { records, steps, dnsDone, warnings };
+}
+
+/** What we tell Amazon when asking for production access. Short, true and specific is what gets approved. */
+export function useCase(brand: Pick<BrandRow, "name">, website: string): string {
+	return [
+		`${brand.name} sends its own email newsletter, using Newsletter Sender (self hosted) with Amazon SES.`,
+		`Everyone on the list signed up on ${website} or on our sign up page, and confirmed by email (double opt in), or gave us their consent directly. We never buy or rent lists.`,
+		"Every email has a one click unsubscribe link and List-Unsubscribe headers, and unsubscribes take effect straight away.",
+		"Bounces and complaints come back to us through an SES configuration set and Amazon SNS. Hard bounces and complaints are suppressed automatically and never emailed again, and we keep a suppression list.",
+		"We send a newsletter campaign a few times a month, plus sign up confirmations.",
+	].join(" ");
+}
+
+/** Asks Amazon to move the account out of the SES sandbox, filling in the form for the owner. */
+export async function askForProduction(keys: ReturnType<typeof sesKeys>, brand: Pick<BrandRow, "name">, domain: string, fetcher: typeof fetch = fetch): Promise<{ step: string } | { error: string }> {
+	const acct = await ses(keys, "GET", "/account", null, fetcher);
+	if (!acct.ok) return { error: awsError(acct) };
+	if (acct.data?.ProductionAccessEnabled) return { step: "Your Amazon account can already send to anyone (out of the sandbox)" };
+	const review = acct.data?.Details?.ReviewDetails?.Status;
+	if (review === "PENDING") return { step: "Amazon is already looking at your request to leave the sandbox. They reply by email, usually within a day" };
+	const website = `https://${domain}`;
+	const put = await ses(keys, "POST", "/account/details", { MailType: "MARKETING", WebsiteURL: website, ContactLanguage: "EN", UseCaseDescription: useCase(brand, website), ProductionAccessEnabled: true }, fetcher);
+	if (!put.ok) return { error: `We couldn't ask Amazon to take you out of the sandbox: ${awsError(put)} You can ask in the SES console instead (Account dashboard, Request production access).` };
+	return { step: "Asked Amazon to take your account out of the sandbox. They reply by email, usually within a day" };
 }
 
 export interface SesStatus {
