@@ -149,14 +149,14 @@ function setupScreen(state, code) {
 	}
 	main.innerHTML = `<form class="center card" id="f"><h1>${state.setUp ? "Reset your sign in" : "Make your account"}</h1><p class="muted">${state.setUp ? "Choose a new password. Everything else stays as it is." : "This is the only account. You can change everything later."}</p>
 	<label for="email">Your email address</label><input id="email" type="email" required autocomplete="email">
-	${state.setUp ? "" : `<label for="name">Your name</label><input id="name" autocomplete="name"><label for="brand">Your newsletter's name</label><input id="brand" placeholder="Such as The Friday Letter">`}
+	${state.setUp ? "" : `<label for="name">Your name</label><input id="name" autocomplete="name">`}
 	<label for="pw">Password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password"><p class="hint">At least 10 characters.</p>${robot(state)}
 	<p class="err" id="e"></p><button class="btn">${icon("check")}${state.setUp ? "Save and sign in" : "Make my account"}</button></form>`;
 	loadTurnstile(state);
 	$("#f").onsubmit = async (e) => {
 		e.preventDefault();
 		try {
-			await api("/api/setup", { body: { code, email: $("#email").value, name: $("#name")?.value, brand: $("#brand")?.value, password: $("#pw").value, ts: $("[name=ts]")?.value } });
+			await api("/api/setup", { body: { code, email: $("#email").value, name: $("#name")?.value, password: $("#pw").value, ts: $("[name=ts]")?.value } });
 			history.replaceState(null, "", "/#overview"); boot();
 		} catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); }
 	};
