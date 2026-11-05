@@ -456,6 +456,37 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const n = await audienceCount(db, brand.id, a);
 		return ok({ count: n, time: sendTime(n, brand.rate) });
 	}
+	// The people behind each number in a report: download them, or add them to a list (to send again to people who didn't open, say).
+	const pm = /^\/api\/campaigns\/([0-9a-f]{16})\/people$/.exec(path);
+	if (pm) {
+		const c = await db.prepare("SELECT id, name, subject FROM campaigns WHERE id = ? AND brand_id = ?").bind(pm[1], brand.id).first<{ id: string; name: string | null; subject: string }>();
+		if (!c) return bad("That email has gone.", 404);
+		const b = method === "POST" ? await body(request) : null;
+		const who = String(b?.who ?? url.searchParams.get("who") ?? "");
+		const n = Number(b?.n ?? url.searchParams.get("n") ?? 0);
+		const pick = usesLink(reportPeople(who));
+		if (!pick) return bad("Please choose who.");
+		const sel = `SELECT x.subscriber_id FROM sends x WHERE x.campaign_id = ?1 AND ${pick}`;
+		if (method === "POST") {
+			const l = await db.prepare("SELECT id, name FROM lists WHERE id = ? AND brand_id = ?").bind(String(b?.list ?? ""), brand.id).first<{ id: string; name: string }>();
+			if (!l) return bad("Please choose a list.");
+			const now = iso();
+			// The same rules as an import: never re-add people who unsubscribed, bounced, complained or are blocked.
+			const r = await db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
+				SELECT ?3, s.id, 'active', 'report', ?4, ?4 FROM subscribers s WHERE s.id IN (${sel}) AND s.brand_id = ?5 AND s.suppressed IS NULL
+				AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'unsubscribed' AND (?6 = 'all' OR m.list_id = ?3))
+				AND NOT EXISTS (SELECT 1 FROM blocklist bl WHERE bl.brand_id = ?5 AND bl.email = s.email) AND NOT EXISTS (SELECT 1 FROM blocked_domains d WHERE d.brand_id = ?5 AND d.domain = substr(s.email, instr(s.email, '@') + 1))
+				AND NOT (?7 = 1 AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id != ?3 AND m.status IN ('active', 'pending')))
+				ON CONFLICT (list_id, subscriber_id) DO NOTHING`).bind(c.id, n, l.id, now, brand.id, brand.unsub_scope, brand.one_list).run();
+			return ok({ added: r.meta.changes ?? 0, list: l.name });
+		}
+		const { results } = await db.prepare(`SELECT s.email, s.name, x.opened_at, x.clicked_at, x.opens, x.country FROM sends x JOIN subscribers s ON s.id = x.subscriber_id
+			WHERE x.campaign_id = ?1 AND ${pick} ORDER BY s.email`).bind(c.id, n).all<any>();
+		const lines = [csvLine(["email", "name", "opened", "clicked", "times opened", "country"])];
+		for (const r of results) lines.push(csvLine([r.email, r.name, r.opened_at, r.clicked_at, r.opens, r.country]));
+		const file = `${slugify(c.name || c.subject) || "campaign"}-${who}${who === "link" ? `-${n}` : ""}.csv`;
+		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" } });
+	}
 	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|resume|duplicate|preview))?$/.exec(path);
 	if (cm) {
 		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<CampaignRow>();
@@ -464,10 +495,11 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const editable = c.status === "draft" || c.status === "scheduled";
 		if (!action && method === "GET") {
 			const stats = await campaignStats(db, c.id);
-			const links = brand.track_clicks ? (await db.prepare("SELECT n, url, clicks FROM links WHERE campaign_id = ? ORDER BY clicks DESC LIMIT 20").bind(c.id).all()).results : [];
+			const links = brand.track_clicks ? (await db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(c.id).all()).results : [];
+			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, pausedWhy: paused?.detail ?? null, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -691,12 +723,31 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	return bad("Not found.", 404);
 }
 
+/** Which emails a report number stands for (x is the sends row, ?1 the campaign, ?2 the link number). */
+export function reportPeople(who: string): string | null {
+	const ev = (kind: string) => `EXISTS (SELECT 1 FROM events e WHERE e.campaign_id = ?1 AND e.subscriber_id = x.subscriber_id AND e.kind = '${kind}')`;
+	const sent = "x.status = 'sent'";
+	return ({
+		opened: `${sent} AND x.opened_at IS NOT NULL`,
+		unopened: `${sent} AND x.opened_at IS NULL AND NOT ${ev("bounced")} AND NOT ${ev("complained")}`,
+		clicked: `${sent} AND x.clicked_at IS NOT NULL`,
+		link: `EXISTS (SELECT 1 FROM link_clicks k WHERE k.campaign_id = ?1 AND k.n = ?2 AND k.send_id = x.id)`,
+		unsubscribed: ev("unsubscribed"),
+		bounced: ev("bounced"),
+		complained: ev("complained"),
+	} as Record<string, string>)[who] ?? null;
+}
+/** Every report query binds the link number, so it always appears (SQLite wants every bound value used). */
+function usesLink(sql: string | null): string | null {
+	return sql && (sql.includes("?2") ? sql : `${sql} AND ?2 IS ?2`);
+}
+
 /** What happened to a campaign's emails. */
 export async function campaignStats(db: D1Database, id: string) {
 	const [byStatus, byEvent, engaged] = await db.batch([
 		db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(id),
 		db.prepare("SELECT kind, COUNT(DISTINCT subscriber_id) AS n FROM events WHERE campaign_id = ? GROUP BY kind").bind(id),
-		db.prepare("SELECT COUNT(opened_at) AS opens, COUNT(clicked_at) AS clicks FROM sends WHERE campaign_id = ?").bind(id),
+		db.prepare("SELECT COUNT(opened_at) AS opens, COUNT(clicked_at) AS clicks, COALESCE(SUM(opens), 0) AS allOpens FROM sends WHERE campaign_id = ?").bind(id),
 	]);
 	const s = Object.fromEntries((byStatus.results as any[]).map((r) => [r.status, r.n]));
 	const e = Object.fromEntries((byEvent.results as any[]).map((r) => [r.kind, r.n]));
@@ -712,6 +763,7 @@ export async function campaignStats(db: D1Database, id: string) {
 		unsubscribed: e.unsubscribed ?? 0,
 		opens: g.opens ?? 0,
 		clicks: g.clicks ?? 0,
+		allOpens: Math.max(g.allOpens ?? 0, g.opens ?? 0),
 	};
 }
 

@@ -168,6 +168,8 @@ const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS blocklist (brand_id TEXT NOT NULL, email TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (brand_id, email))`,
 	`CREATE TABLE IF NOT EXISTS blocked_domains (brand_id TEXT NOT NULL, domain TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (brand_id, domain))`,
 	`CREATE TABLE IF NOT EXISTS links (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, url TEXT NOT NULL, clicks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (campaign_id, n))`,
+	// Who clicked which link (one row per person per link), for unique clicks and "add these people to a list".
+	`CREATE TABLE IF NOT EXISTS link_clicks (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, send_id INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, n, send_id))`,
 ];
 // Columns added after the first version. Each runs once; "duplicate column" means it's already there.
 const MIGRATIONS = [
@@ -180,8 +182,11 @@ const MIGRATIONS = [
 	"ALTER TABLE brands ADD COLUMN unsub_scope TEXT NOT NULL DEFAULT 'all'",
 	"ALTER TABLE lists ADD COLUMN also_lists TEXT NOT NULL DEFAULT '[]'",
 	"ALTER TABLE brands ADD COLUMN app_name TEXT",
+	// Reports: every open counted (not just the first), and the reader's country (two letters from Cloudflare, never the IP address).
+	"ALTER TABLE sends ADD COLUMN opens INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE sends ADD COLUMN country TEXT",
 ];
-const SCHEMA_VERSION = "4";
+const SCHEMA_VERSION = "5";
 
 let ready: Promise<void> | null = null;
 
