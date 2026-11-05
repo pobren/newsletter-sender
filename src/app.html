@@ -611,7 +611,8 @@ async function editor(id, kind) {
 	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
 }
 // -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
-const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes" };
+const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
+const hourText = (h) => (h === 0 ? "midnight" : h === 12 ? "midday" : `${h % 12}${h < 12 ? "am" : "pm"}`);
 const ACT = { email: "Send them an email", add_list: "Add them to a list", remove_list: "Take them off a list", tag: "Tag them", notify: "Email me", webhook: "Tell another app (webhook)" };
 const ACT_ICON = { email: "send", add_list: "plus", remove_list: "minus", tag: "tag", notify: "mail", webhook: "link" };
 const waitText = (h) => (!h ? "Straight away" : h % 24 ? `After ${h} hour${h === 1 ? "" : "s"}` : `After ${h / 24} day${h === 24 ? "" : "s"}`);
@@ -620,12 +621,15 @@ function autoSentence(a, ls, cs) {
 	if (!t) return "Not set up yet";
 	const ln = (id) => (id ? `"${(ls.find((l) => l.id === id) || {}).name || "a list"}"` : "any list");
 	const cn = (id) => (id ? `"${(cs.find((c) => c.id === id) || {}).name || "an email"}"` : "any email");
+	const steps = `${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
+	if (t.kind === "yearly") return `Each year on their ${t.field || "date"}, at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
+	if (t.kind === "date") return `On ${t.date ? new Date(t.date + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "a day to choose"} at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
 	const when = t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
-	return `When someone ${when}: ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
+	return `When someone ${when}: ${steps}`;
 }
 async function automations() {
 	const [as, ls, cs] = await Promise.all([api("/api/automations"), api("/api/lists"), api("/api/campaigns").then((r) => r.campaigns)]);
-	main.innerHTML = `<h1>Automations</h1><p class="muted">Do things by themselves when people join, open, click or leave. Each person goes through an automation once.</p>
+	main.innerHTML = `<h1>Automations</h1><p class="muted">Do things by themselves when people join, open, click or leave, or on a date such as a birthday. Each person goes through an automation once, or once a year for yearly dates.</p>
 	<div class="row toolbar-row"><button class="btn" id="anew">${icon("plus")}New automation</button></div>
 	<div class="card flush">${as.length ? `<div class="scroll"><table class="data"><thead><tr><th>Automation</th><th>On</th><th>Waiting</th><th>Finished</th><th class="c">Delete</th></tr></thead><tbody>${as.map((a) => `<tr data-id="${a.id}"><td><a href="#automation/${a.id}"><b>${esc(a.name)}</b></a><br><span class="muted small">${esc(autoSentence(a, ls, cs))}</span></td>
 	<td><label class="switch" title="${a.enabled ? "On" : "Off"}"><input type="checkbox" data-on ${a.enabled ? "checked" : ""}><span></span></label></td><td>${num(a.waiting)}</td><td>${num(a.finished)}</td><td class="c"><button class="icon-btn" data-del title="Delete" aria-label="Delete">${icon("trash")}</button></td></tr>`).join("")}</tbody></table></div>`
@@ -642,6 +646,14 @@ async function automation(id) {
 	const listSel = (cur, any) => `${any ? opt("", "Any list", cur) : ""}${ls.map((l) => opt(l.id, l.name, cur)).join("")}`;
 	const waitFields = (h) => { const days = h && h % 24 === 0; return [days ? h / 24 : h, days ? "days" : "hours"]; };
 	const trigHtml = () => {
+		const hourSel = `<span class="aword">at</span><select data-t="hour" aria-label="Time">${Array.from({ length: 24 }, (_, h) => opt(String(h), `${hourText(h)} UK time`, String(trig.hour ?? 9))).join("")}</select>`;
+		const fields = [...new Map(ls.flatMap((l) => l.fields || []).map((f) => [f.key, f.label])).entries()];
+		if (trig.kind === "yearly") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select></div>
+			<div class="arow"><span class="aword">Their date is in</span><select data-t="field"><option value="">Choose a field</option>${fields.map(([k, l]) => opt(k, l, trig.field || "")).join("")}</select><span class="aword">on</span><select data-t="list">${listSel(trig.list || "", true)}</select>${hourSel}</div>
+			${fields.length ? `<p class="hint">Dates like 1990-03-05, 05/03/1990 or 05/03 all work. People born on 29 February get theirs on the 28th in other years.</p>` : `<p class="hint">Add a field such as Birthday to a list's sign up form first, under <a href="#lists">Lists</a>.</p>`}`;
+		if (trig.kind === "date") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select></div>
+			<div class="arow"><span class="aword">On</span><input type="date" data-t="date" value="${esc(trig.date || "")}" aria-label="Day"><span class="aword">for</span><select data-t="list">${listSel(trig.list || "", true)}</select>${hourSel}</div>
+			<p class="hint">Everyone on the list that day starts it. For one email to a whole list, a scheduled campaign is quicker.</p>`;
 		const which = trig.kind === "joined" || trig.kind === "unsubscribed"
 			? `<select data-t="list">${listSel(trig.list || "", true)}</select>`
 			: `<select data-t="campaign">${opt("", "Any email", trig.campaign || "")}${cs.map((c) => opt(c.id, c.name || c.subject, trig.campaign || "")).join("")}</select>${trig.kind === "clicked" ? `<select data-t="link" ${trig.campaign ? "" : "disabled"}><option value="0">Any link</option></select>` : ""}`;
@@ -676,7 +688,7 @@ async function automation(id) {
 		return { wait: g("unit") === "days" ? n * 24 : n, do: g("do"), template: g("template"), subject: g("subject"), list: g("list"), tag: g("tag"), url: g("url") };
 	});
 	const redrawSteps = () => { steps = readSteps(); $("#steps").innerHTML = steps.map(stepHtml).join(""); };
-	$("#trig").addEventListener("change", (e) => { const k = e.target.dataset.t; if (!k) return; trig = { ...trig, [k]: k === "link" ? Number(e.target.value) : e.target.value }; if (k === "kind") trig = { kind: trig.kind }; if (k === "kind" || k === "campaign") { $("#trig").innerHTML = trigHtml(); loadLinks(); } });
+	$("#trig").addEventListener("change", (e) => { const k = e.target.dataset.t; if (!k) return; trig = { ...trig, [k]: k === "link" || k === "hour" ? Number(e.target.value) : e.target.value }; if (k === "kind") trig = { kind: trig.kind, ...(trig.kind === "yearly" || trig.kind === "date" ? { hour: 9 } : {}) }; if (k === "kind" || k === "campaign") { $("#trig").innerHTML = trigHtml(); loadLinks(); } });
 	$("#steps").addEventListener("change", (e) => { if (e.target.dataset.s === "do") redrawSteps(); });
 	$("#steps").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; steps = readSteps(); steps.splice(Number(b.closest(".astep").dataset.i), 1); $("#steps").innerHTML = steps.map(stepHtml).join(""); });
 	$("#addStep").onclick = () => { steps = readSteps(); steps.push({ wait: 24, do: "email", template: "", subject: "" }); $("#steps").innerHTML = steps.map(stepHtml).join(""); };

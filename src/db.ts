@@ -203,8 +203,9 @@ const MIGRATIONS = [
 	"ALTER TABLE brands ADD COLUMN footer_links INTEGER NOT NULL DEFAULT 1",
 	"ALTER TABLE campaigns ADD COLUMN run INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE brands ADD COLUMN done_email INTEGER NOT NULL DEFAULT 1",
+	"ALTER TABLE automations ADD COLUMN last_day TEXT",
 ];
-const SCHEMA_VERSION = "9";
+const SCHEMA_VERSION = "10";
 
 let ready: Promise<void> | null = null;
 
