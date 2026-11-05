@@ -55,12 +55,16 @@ To try it on your computer first: copy `.dev.vars.example` to `.dev.vars`, choos
 
 ## Amazon SES
 
-1. In AWS, open **IAM › Users › Create user** (no console access). Attach **AmazonSESFullAccess** and **AmazonSNSFullAccess**.
-2. Open the user, then **Security credentials › Create access key** (Application running outside AWS).
-3. In Newsletter Sender, open **Sending**, choose **Amazon SES**, paste the two keys and choose your region.
-4. Press **Set up Amazon SES for me**. It adds your domain with DKIM signing, a `bounce.` subdomain for bounces, and sends every bounce and complaint back to Newsletter Sender.
-5. Add the DNS records it shows (each has a copy button). In Cloudflare, turn the orange cloud off for the CNAMEs.
-6. Press **Check where it's up to**. New SES accounts start in the sandbox: ask Amazon for production access under **SES › Account dashboard**.
+The full guide, with screen grabs, is at [newslettersender.com/help/amazon-ses](https://newslettersender.com/help/amazon-ses/).
+
+1. In Newsletter Sender, open **Settings › Sending**, choose **Amazon SES** and your region, then press **Create the user and keys in AWS**. AWS opens with [aws/newsletter-sender-ses.yaml](aws/newsletter-sender-ses.yaml) filled in: tick the box and press **Create stack**. It makes a user that can only use SES and SNS, with one access key.
+2. When the stack says CREATE_COMPLETE, copy the two keys from its **Outputs** tab into Newsletter Sender and press Save.
+3. Optional: if your domain is on Cloudflare, paste a Cloudflare API token that can edit its DNS, and Newsletter Sender adds the DNS records itself.
+4. Press **Set up Amazon SES for me**. It adds your domain with DKIM signing, a `bounce.` subdomain for bounces, sends every bounce and complaint back to Newsletter Sender, adds the DNS records (on Cloudflare) and asks Amazon to take the account out of the sandbox.
+5. Not on Cloudflare? Add the DNS records it shows (each has a copy button).
+6. Press **Check where it's up to**. Amazon replies to the sandbox request by email, usually within a day.
+
+To remove the AWS user later, delete the `newsletter-sender` stack in CloudFormation.
 
 <img src="docs/sending.png" alt="The Sending tab: choosing a service, keys and the bounce webhook" width="100%">
 

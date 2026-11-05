@@ -9,6 +9,7 @@ import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./ren
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
+import { findZone, TOKEN_URL } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
 const DEFAULT_BRAND = "My newsletter";
@@ -188,6 +189,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if ("error" in acct) return bad(acct.error);
 				rate = acct.rate;
 				if (provider?.provider === "ses" && provider.configSet) c.configSet = provider.configSet;
+				if (provider?.provider === "ses" && provider.cfToken) c.cfToken = provider.cfToken;
 			} else {
 				// Check the key works with a real email to the owner before saving it.
 				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${c.provider}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${c.provider}. Your newsletters will go out the same way.</p>`, headers: {} });
@@ -205,6 +207,27 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			ses: setup ? { ...setup, records: sesRecords(setup.domain, setup.tokens, setup.region) } : null,
 			cloudflareEmail: Boolean(env.EMAIL),
 		});
+	}
+	// A Cloudflare token so we can add the Amazon SES DNS records ourselves.
+	if (path === "/api/sending/cloudflare") {
+		const p = await loadProvider(db, brand);
+		if (p?.provider !== "ses") return bad("Please save your Amazon SES keys first.");
+		if (method === "DELETE") {
+			delete p.cfToken;
+			await saveProvider(db, brand.id, p, brand.rate);
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			const token = typeof b.token === "string" ? b.token.trim() : "";
+			if (token.length < 20 || token.length > 200 || /\s/.test(token)) return bad("Please paste the whole Cloudflare token, with no spaces.");
+			const domain = brand.from_email.split("@")[1] ?? "";
+			const zone = await findZone(token, domain);
+			if ("error" in zone) return bad(zone.error);
+			await saveProvider(db, brand.id, { ...p, cfToken: token }, brand.rate);
+			return ok({ zone: zone.name });
+		}
+		return ok({ tokenUrl: TOKEN_URL });
 	}
 	if (path === "/api/sending/ses-setup" && method === "POST") {
 		const p = await loadProvider(db, brand);
