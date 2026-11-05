@@ -9,7 +9,7 @@ import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./ren
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
-import { findZone, TOKEN_URL } from "./cloudflare.ts";
+import { dnsHost, findZone, TOKEN_URL } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
 const DEFAULT_BRAND = "My newsletter";
@@ -209,6 +209,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		});
 	}
 	// A Cloudflare token so we can add the Amazon SES DNS records ourselves.
+	if (path === "/api/sending/dns-host") {
+		const r = await dnsHost(brand.from_email.split("@")[1]);
+		return "error" in r ? bad(r.error) : ok(r);
+	}
 	if (path === "/api/sending/cloudflare") {
 		const p = await loadProvider(db, brand);
 		if (p?.provider !== "ses") return bad("Please save your Amazon SES keys first.");
