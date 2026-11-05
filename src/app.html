@@ -146,7 +146,7 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 
 <header id="top" hidden>
 	<div class="bar">
-		<a class="mark" href="#campaigns"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="9" fill="#a3195b"/><path d="M8 18 L27 9 L22 27 L17 20 Z" fill="#fff"/><path d="M17 20 L27 9" stroke="#a3195b" stroke-width="1.5"/></svg><span id="brandName">Newsletter Sender</span></a>
+		<a class="mark" href="#campaigns"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="9" fill="#a3195b"/><path d="M8 18 L27 9 L22 27 L17 20 Z" fill="#fff"/><path d="M17 20 L27 9" stroke="#a3195b" stroke-width="1.5"/></svg><span id="appName">Newsletter Sender</span></a>
 		<span class="grow"></span>
 		<a class="btn ghost small" href="#settings" id="settingsLink"><svg class="ico"><use href="#i-cog"/></svg><span class="lbl">Settings</span></a>
 		<button class="btn ghost small" id="signout"><svg class="ico"><use href="#i-out"/></svg><span class="lbl">Sign out</span></button>
@@ -185,6 +185,7 @@ const when = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "numeric", m
 const STATUS = { draft: "Draft", scheduled: "Scheduled", sending: "Sending", paused: "Paused", sent: "Sent", cancelled: "Stopped", active: "Subscribed", pending: "Unconfirmed", blocked: "Blocked", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam" };
 const pill = (s) => `<span class="pill ${esc(s)}">${esc(STATUS[s] || s)}</span>`;
 let timer = null;
+const showName = (b) => { const n = (b && b.app_name) || "Newsletter Sender"; $("#appName").textContent = n; document.title = n; };
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
 const fold = (mini) => { document.body.classList.toggle("slim", mini); const b = $("#fold"); const t = mini ? "Make the menu bigger" : "Make the menu smaller"; b.title = t; b.setAttribute("aria-label", t); };
 fold(store.get("ns.menu") === "mini");
@@ -217,6 +218,7 @@ async function boot() {
 	if (code || !state.setUp) return setupScreen(state, code);
 	if (!state.signedIn) return signinScreen(state);
 	$("#top").hidden = $("#side").hidden = false;
+	api("/api/brand").then(showName).catch(() => {});
 	window.onhashchange = route;
 	route();
 }
@@ -292,7 +294,6 @@ const rate = (n, of, cls) => (of ? `<span class="rate ${cls}">${(Math.round((n /
 // -- All campaigns ---------------------------------------------------------------------------------------
 async function campaigns() {
 	const [r, o] = await Promise.all([api("/api/campaigns"), api("/api/overview")]);
-	$("#brandName").textContent = o.brand;
 	const tr = r.tracking;
 	const todo = [[!!o.named, "Add your company or newsletter name", "#settings"], [!!o.sending, "Choose how to send", "#settings/sending"], [o.subscribers > 0, "Add your first subscribers", "#lists"], [!!o.last, "Send your first campaign", "#new"]];
 	main.innerHTML = `<h1>All campaigns</h1>
@@ -745,14 +746,14 @@ async function settings(section) {
 	const b = await api("/api/brand");
 	if (sec === "company") {
 		main.innerHTML = `${head}<form class="card" id="f"><h2>Your company or newsletter</h2>
-		<label>Company or newsletter name <span class="hint">(shown at the top of the app and of every email)</span></label><input id="name" value="${esc(b.name === "My newsletter" ? "" : b.name)}" placeholder="Such as Acme Ltd or The Friday Letter"><label>From name <span class="hint">(who emails come from)</span></label><input id="from_name" value="${esc(b.from_name)}">
+		<label>Company or newsletter name <span class="hint">(shown at the top of the app and of every email)</span></label><input id="name" value="${esc(b.name === "My newsletter" ? "" : b.name)}" placeholder="Such as Acme Ltd or The Friday Letter"><label>Name at the top of this app <span class="hint">(optional)</span></label><input id="app_name" value="${esc(b.app_name || "")}" placeholder="Newsletter Sender"><label>From name <span class="hint">(who emails come from)</span></label><input id="from_name" value="${esc(b.from_name)}">
 		<label>From address</label><input id="from_email" type="email" value="${esc(b.from_email)}"><p class="hint">On a domain you've set up for sending, such as news@yourdomain.com.</p>
 		<label>Reply to <span class="hint">(optional)</span></label><input id="reply_to" type="email" value="${esc(b.reply_to || "")}">
 		<label>Footer <span class="hint">(your postal address or company details; the law in many countries asks for one)</span></label><textarea id="footer" rows="2">${esc(b.footer || "")}</textarea>
 		<div class="row"><div><label>Colour</label><input id="colour" type="color" value="${esc(b.colour)}" style="width:90px;padding:4px"></div><div class="grow"><label>Logo address <span class="hint">(optional, https://...)</span></label><input id="logo" value="${esc(b.logo || "")}"></div></div>
 		<label class="check"><input type="checkbox" id="archive" ${b.archive ? "checked" : ""}> Public archive of past campaigns at <a href="/archive" target="_blank">/archive</a></label>
 		<p class="err" id="e"></p><button class="btn">${icon("save")}Save</button></form>`;
-		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked } }); toast("Saved"); $("#brandName").textContent = $("#name").value || "My newsletter"; $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
+		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, app_name: $("#app_name").value } }); toast("Saved"); showName({ app_name: $("#app_name").value }); $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
 	}
 	if (sec === "lists") {
 		main.innerHTML = `${head}<form class="card" id="rules"><h2>How your lists work</h2>

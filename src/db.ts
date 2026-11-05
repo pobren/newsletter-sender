@@ -67,6 +67,8 @@ export interface BrandRow {
 	one_list: number;
 	/** "all": unsubscribing leaves every list. "list": only the lists that email went to. */
 	unsub_scope: "all" | "list";
+	/** The name at the top of the app; empty shows Newsletter Sender. */
+	app_name: string | null;
 	/** The secret part of the bounce and complaint webhook addresses for this brand. */
 	hook_key: string;
 	created_at: string;
@@ -177,8 +179,9 @@ const MIGRATIONS = [
 	"ALTER TABLE brands ADD COLUMN one_list INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE brands ADD COLUMN unsub_scope TEXT NOT NULL DEFAULT 'all'",
 	"ALTER TABLE lists ADD COLUMN also_lists TEXT NOT NULL DEFAULT '[]'",
+	"ALTER TABLE brands ADD COLUMN app_name TEXT",
 ];
-const SCHEMA_VERSION = "3";
+const SCHEMA_VERSION = "4";
 
 let ready: Promise<void> | null = null;
 
