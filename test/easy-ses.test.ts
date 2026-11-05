@@ -53,3 +53,11 @@ test("asks Amazon for production access only when still in the sandbox", async (
 	const r2 = await askForProduction(keys, { name: "x" }, "example.com", live);
 	assert.ok("step" in r2 && /already send to anyone/.test(r2.step));
 });
+
+test("counts a domain Amazon already has as there, from the error header", async () => {
+	const { alreadyThere, ses } = await import("../src/aws.ts");
+	const f = (async () => new Response(JSON.stringify({ message: "Email identity example.com already exist." }), { status: 400, headers: { "x-amzn-ErrorType": "AlreadyExistsException:http://internal.amazon.com/coral/com.amazonaws.sesv2/" } })) as typeof fetch;
+	assert.ok(alreadyThere(await ses(keys, "POST", "/identities", { EmailIdentity: "example.com" }, f)));
+	const other = (async () => new Response(JSON.stringify({ message: "Nope" }), { status: 400, headers: { "x-amzn-ErrorType": "BadRequestException" } })) as typeof fetch;
+	assert.ok(!alreadyThere(await ses(keys, "POST", "/identities", { EmailIdentity: "example.com" }, other)));
+});

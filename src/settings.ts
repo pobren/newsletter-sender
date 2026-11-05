@@ -2,7 +2,7 @@
 // the domain with its DKIM signing, a bounce subdomain, and a configuration set that reports every bounce and spam
 // complaint straight back to this Worker through Amazon SNS.
 
-import { awsError, ses, sesAccount, sns, xmlValue } from "./aws.ts";
+import { alreadyThere, awsError, ses, sesAccount, sns, xmlValue } from "./aws.ts";
 import { addRecords, findZone } from "./cloudflare.ts";
 import { getMeta, iso, newId, origin, setMeta, type BrandRow } from "./db.ts";
 import { seal, sesKeys, unseal, type ProviderConfig } from "./providers.ts";
@@ -81,7 +81,7 @@ export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfi
 	if (made.ok) {
 		tokens = made.data?.DkimAttributes?.Tokens ?? [];
 		steps.push(`Added ${domain} to Amazon SES`);
-	} else if (/AlreadyExists/i.test(made.text)) {
+	} else if (alreadyThere(made)) {
 		const got = await ses(keys, "GET", `/identities/${encodeURIComponent(domain)}`, null, fetcher);
 		if (!got.ok) return { error: awsError(got) };
 		tokens = got.data?.DkimAttributes?.Tokens ?? [];
@@ -95,7 +95,7 @@ export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfi
 
 	// 3. A configuration set whose bounces and complaints go to an SNS topic, and the topic to this Worker.
 	const cs = await ses(keys, "POST", "/configuration-sets", { ConfigurationSetName: CONFIG_SET }, fetcher);
-	if (!cs.ok && !/AlreadyExists/i.test(cs.text)) return { error: awsError(cs) };
+	if (!cs.ok && !alreadyThere(cs)) return { error: awsError(cs) };
 	const topic = await sns(keys, { Action: "CreateTopic", Name: TOPIC }, fetcher);
 	const topicArn = xmlValue(topic.text, "TopicArn");
 	if (!topic.ok || !topicArn) return { error: awsError(topic) };
@@ -104,7 +104,7 @@ export async function setUpSes(db: D1Database, brand: BrandRow, c: ProviderConfi
 	if (!sub.ok) return { error: awsError(sub) };
 	const dest = { EventDestinationName: "newsletter-sender", EventDestination: { Enabled: true, MatchingEventTypes: ["BOUNCE", "COMPLAINT"], SnsDestination: { TopicArn: topicArn } } };
 	let ed = await ses(keys, "POST", `/configuration-sets/${CONFIG_SET}/event-destinations`, dest, fetcher);
-	if (!ed.ok && /AlreadyExists/i.test(ed.text)) ed = await ses(keys, "PUT", `/configuration-sets/${CONFIG_SET}/event-destinations/newsletter-sender`, { EventDestination: dest.EventDestination }, fetcher);
+	if (alreadyThere(ed)) ed = await ses(keys, "PUT", `/configuration-sets/${CONFIG_SET}/event-destinations/newsletter-sender`, { EventDestination: dest.EventDestination }, fetcher);
 	if (!ed.ok) return { error: awsError(ed) };
 	steps.push("Bounces and spam complaints now come straight back to Newsletter Sender");
 
