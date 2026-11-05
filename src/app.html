@@ -120,6 +120,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
 .hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
 @media(max-width:900px){.htiles{grid-template-columns:repeat(2,1fr)}}
+.act select{width:auto;flex:1 1 200px}
 .rcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0}
 .rcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden}
 .rcard::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--rc)}
@@ -431,6 +432,10 @@ async function editor(id, kind) {
 			<div class="choices">${ls.map((l) => `<label class="choice"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}><span><b>${esc(l.name)}</b><small>${num(l.active)} subscribed</small></span></label>`).join("")}</div>
 			<p class="step"><b>2</b>Only people with these tags <span class="hint">(optional)</span></p>
 			${allTags.length ? `<div class="chips" id="tagChips">${allTags.map((t) => `<button type="button" class="chip ${tags.has(t) ? "on" : ""}" data-tag="${esc(t)}">${icon(tags.has(t) ? "check" : "tag")}${esc(t)}</button>`).join("")}</div><p class="hint">Leave them all off to send to everyone on the lists.</p>` : `<p class="hint">No tags yet. Tag people from a list or when you import a list, then you can send to just them.</p>`}
+			<p class="step"><b>3</b><label for="act" style="display:inline;margin:0;font-size:inherit">Only people who did something lately</label> <span class="hint">(optional)</span></p>
+			<div class="row act"><select id="act"><option value="">Everyone on the lists</option>${c.tracking?.opens ? `<option value="opened">Opened an email</option><option value="not_opened">Didn't open any email</option>` : ""}${c.tracking?.clicks ? `<option value="clicked">Clicked a link</option><option value="not_clicked">Didn't click any link</option>` : ""}<option value="joined">Joined</option></select>
+			<select id="actDays" aria-label="How far back">${[7, 14, 30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === 90 ? "selected" : ""}>in the last ${d === 365 ? "year" : `${d} days`}</option>`).join("")}</select></div>
+			${c.tracking?.opens || c.tracking?.clicks ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to pick people by what they read.</p>`}
 			<p id="count" class="count"></p>
 			<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past issues</label>
 		</div>
@@ -527,7 +532,7 @@ async function editor(id, kind) {
 		toast(/src=["'](?!https?:|data:|cid:)/i.test(text) ? "Design loaded. Some pictures use short addresses: upload them, or use full https:// addresses." : "Design loaded");
 	};
 
-	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags] }, public: $("#public").checked });
+	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
 	let saving = null;
 	const save = async () => {
 		clearTimeout(t);
@@ -539,6 +544,13 @@ async function editor(id, kind) {
 	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")} Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.`; } catch {} };
 	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code"].includes(e.target.id)) changed(); }, { signal });
 	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public") changed(); }, { signal });
+	if (!isT) {
+		const act = c.audience.activity;
+		if (act && $(`#act option[value=${act.kind}]`)) { $("#act").value = act.kind; $("#actDays").value = String(act.days); }
+		$("#actDays").disabled = !$("#act").value;
+		$("#act").onchange = () => { $("#actDays").disabled = !$("#act").value; recount(); changed(); };
+		$("#actDays").onchange = () => { recount(); changed(); };
+	}
 	$("#tagChips") && $("#tagChips").addEventListener("click", (e) => { const b = e.target.closest("[data-tag]"); if (!b) return; const tg = b.dataset.tag; tags.has(tg) ? tags.delete(tg) : tags.add(tg); b.classList.toggle("on", tags.has(tg)); b.innerHTML = `${icon(tags.has(tg) ? "check" : "tag")}${esc(tg)}`; recount(); changed(); });
 	$("#asT") && ($("#asT").onclick = (e) => run(e.currentTarget, async () => { await save(); await api("/api/templates", { body: { from: id, name: $("#cname").value || $("#subject").value || "Untitled template" } }); toast("Saved as a template. Find it under All templates."); }));
 	$("#unschedule") && ($("#unschedule").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${id}/unschedule`, { body: {} }); route(); }));
@@ -629,7 +641,7 @@ function addToList(c, ls, b) {
 }
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
-	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}</p>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	${c.stats.queued ? `<div class="progress"><i style="width:${c.total ? Math.round(((c.stats.sent + c.stats.failed + c.stats.skipped) / c.total) * 100) : 0}%"></i></div><p class="muted">${num(c.stats.sent + c.stats.failed + c.stats.skipped)} of ${num(c.total)} done</p>` : ""}${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}
 	<div class="row">${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>

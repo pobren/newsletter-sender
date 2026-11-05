@@ -51,13 +51,23 @@ export function sendTime(count: number, rate: number): string {
 export interface Audience {
 	lists: string[];
 	tags: string[];
+	/** Only people who did (or didn't do) something lately, such as opened an email in the last 90 days. */
+	activity?: Activity | null;
+}
+
+export const ACTIVITY_KINDS = ["opened", "not_opened", "clicked", "not_clicked", "joined"] as const;
+export interface Activity {
+	kind: (typeof ACTIVITY_KINDS)[number];
+	days: number;
 }
 
 export function parseAudience(x: unknown): Audience {
 	const a = (typeof x === "string" ? safeJson(x) : x) as any;
 	const ids = (v: unknown) => (Array.isArray(v) ? v.filter((s) => typeof s === "string" && /^[0-9a-f]{8,40}$/.test(s)).slice(0, 50) : []);
 	const tags = Array.isArray(a?.tags) ? a.tags.filter((t: unknown) => typeof t === "string" && /^[a-z0-9_-]{1,40}$/.test(t)).slice(0, 20) : [];
-	return { lists: ids(a?.lists), tags };
+	const act = a?.activity;
+	const activity = act && (ACTIVITY_KINDS as readonly string[]).includes(act.kind) && [7, 14, 30, 60, 90, 180, 365].includes(Number(act.days)) ? { kind: act.kind, days: Number(act.days) } : null;
+	return { lists: ids(a?.lists), tags, ...(activity ? { activity } : {}) };
 }
 
 export function safeJson(s: string | null | undefined): any {
@@ -76,6 +86,16 @@ function audienceSql(brandId: string, a: Audience): { sql: string; binds: unknow
 	if (a.tags.length) {
 		sql += ` AND EXISTS (SELECT 1 FROM json_each(s.tags) t WHERE t.value IN (${a.tags.map(() => "?").join(", ")}))`;
 		binds.push(...a.tags);
+	}
+	if (a.activity) {
+		const since = new Date(Date.now() - a.activity.days * 86_400_000).toISOString();
+		const did = (col: string) => `EXISTS (SELECT 1 FROM sends x WHERE x.subscriber_id = s.id AND x.sent_at >= ? AND x.${col} IS NOT NULL)`;
+		const got = "EXISTS (SELECT 1 FROM sends x WHERE x.subscriber_id = s.id AND x.status = 'sent' AND x.sent_at >= ?)";
+		const k = a.activity.kind;
+		if (k === "joined") (sql += " AND s.created_at >= ?"), binds.push(since);
+		else if (k === "opened" || k === "clicked") (sql += ` AND ${did(k === "opened" ? "opened_at" : "clicked_at")}`), binds.push(since);
+		// "Didn't open" only counts people we actually emailed in that time, not people who just joined.
+		else (sql += ` AND ${got} AND NOT ${did(k === "not_opened" ? "opened_at" : "clicked_at")}`), binds.push(since, since);
 	}
 	return { sql, binds };
 }
