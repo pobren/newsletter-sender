@@ -636,6 +636,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const steps = b.steps === undefined ? cleanSteps(safeJson(a.steps)) : cleanSteps(b.steps);
 			const enabled = b.enabled === undefined ? Boolean(a.enabled) : Boolean(b.enabled);
 			if (enabled && (!trigger || !steps.length)) return bad("Choose what starts it and add at least one step before switching it on.");
+			if (enabled && trigger?.kind === "yearly" && !trigger.field) return bad("Choose the field that holds each person's date, like their birthday.");
+			if (enabled && trigger?.kind === "date" && !trigger.date) return bad("Choose the day it should run.");
 			await db.prepare("UPDATE automations SET name = ?, trigger = ?, steps = ?, enabled = ?, updated_at = ? WHERE id = ?")
 				.bind(str(b.name, 120) || a.name, JSON.stringify(trigger ?? {}), JSON.stringify(steps), enabled ? 1 : 0, iso(), a.id).run();
 			return ok({ trigger, steps, enabled });

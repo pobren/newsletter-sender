@@ -1,13 +1,14 @@
 // Automations: "when someone does this, then do that", with waits in between. A trigger (joining a list, opening or
 // clicking an email, unsubscribing) starts a run for that person; the minute cron carries each run on when its next
-// step is due. Each person goes through an automation once.
+// step is due. Each person goes through an automation once, except yearly ones (like a birthday), which start again
+// each year. Date triggers are checked once a day, from the hour chosen (UK time).
 import { iso, logEvent, newId, origin, type BrandRow, type Env, type SubscriberRow } from "./db.ts";
 import { sendOne } from "./providers.ts";
 import { listHeaders, renderEmail } from "./render.ts";
 import { mergeSubject } from "./sending.ts";
 import { loadProvider } from "./settings.ts";
 
-export const TRIGGERS = ["joined", "opened", "clicked", "unsubscribed"] as const;
+export const TRIGGERS = ["joined", "opened", "clicked", "unsubscribed", "yearly", "date"] as const;
 export const ACTIONS = ["email", "add_list", "remove_list", "tag", "notify", "webhook"] as const;
 
 export interface Trigger {
@@ -18,6 +19,12 @@ export interface Trigger {
 	campaign?: string;
 	/** clicked: this link number in the campaign (0 for any). */
 	link?: number;
+	/** yearly: the custom field holding each person's date, like birthday. */
+	field?: string;
+	/** date: the day it runs, YYYY-MM-DD. */
+	date?: string;
+	/** yearly / date: the hour (UK time) it starts, 0 to 23. */
+	hour?: number;
 }
 
 export interface Step {
@@ -37,6 +44,9 @@ const hex = (v: unknown, n = 16) => (typeof v === "string" && new RegExp(`^[0-9a
 export function cleanTrigger(t: any): Trigger | null {
 	if (!t || !(TRIGGERS as readonly string[]).includes(t.kind)) return null;
 	if (t.kind === "joined" || t.kind === "unsubscribed") return { kind: t.kind, list: hex(t.list) };
+	const hour = Math.max(0, Math.min(23, Math.floor(Number(t.hour ?? 9)) || 0));
+	if (t.kind === "yearly") return { kind: t.kind, list: hex(t.list), field: typeof t.field === "string" ? t.field.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 40) : "", hour };
+	if (t.kind === "date") return { kind: t.kind, list: hex(t.list), date: typeof t.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : "", hour };
 	return { kind: t.kind, campaign: hex(t.campaign), ...(t.kind === "clicked" ? { link: Math.max(0, Math.min(500, Math.floor(Number(t.link) || 0))) } : {}) };
 }
 
@@ -120,9 +130,70 @@ export async function fireSafely(db: D1Database, brandId: string, subscriberId: 
 	}
 }
 
+/** The day of the year in a date someone typed: 1990-03-05, 05/03/1990, 5.3.90 or 05/03 all give "03-05". */
+export function monthDay(v: unknown): string | null {
+	const s = String(v ?? "").trim();
+	let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+	let mo: number, d: number;
+	if (m) [mo, d] = [Number(m[2]), Number(m[3])];
+	else if ((m = /^(\d{1,2})[/.\-](\d{1,2})(?:[/.\-]\d{2,4})?$/.exec(s))) [d, mo] = [Number(m[1]), Number(m[2])];
+	else return null;
+	if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+	return `${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Today in the UK, and the hour there. */
+export function ukNow(now: Date): { day: string; hour: number } {
+	const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(now).map((x) => [x.type, x.value]));
+	return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
+}
+
+/** Is a date trigger due today (and not yet run today)? */
+export function dateDue(t: Trigger, lastDay: string | null, uk: { day: string; hour: number }): boolean {
+	if (lastDay && lastDay >= uk.day) return false;
+	if (uk.hour < (t.hour ?? 9)) return false;
+	if (t.kind === "date") return Boolean(t.date) && t.date === uk.day;
+	return t.kind === "yearly" && Boolean(t.field);
+}
+
+/** Once a day: start date automations for everyone whose day it is. People already part way through are left be. */
+export async function runDates(db: D1Database, now = new Date()): Promise<number> {
+	const { results } = await db.prepare("SELECT * FROM automations WHERE enabled = 1 AND json_extract(trigger, '$.kind') IN ('yearly', 'date')").all<AutomationRow & { last_day: string | null }>();
+	const uk = ukNow(now);
+	let started = 0;
+	for (const a of results) {
+		const t = cleanTrigger(parse(a.trigger));
+		const steps = cleanSteps(parse(a.steps));
+		if (!t || !steps.length || !dateDue(t, a.last_day, uk)) continue;
+		// Mark the day first, so a slow run can't start twice.
+		const claim = await db.prepare("UPDATE automations SET last_day = ? WHERE id = ? AND (last_day IS NULL OR last_day < ?) RETURNING id").bind(uk.day, a.id, uk.day).first();
+		if (!claim) continue;
+		const who = `FROM subscribers s WHERE s.brand_id = ?1 AND s.suppressed IS NULL AND EXISTS (SELECT 1 FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.subscriber_id = s.id AND m.status = 'active' AND l.brand_id = ?1 AND (?2 = '' OR m.list_id = ?2))`;
+		let ids: string[];
+		if (t.kind === "yearly") {
+			const md = uk.day.slice(5);
+			const rows = (await db.prepare(`SELECT s.id, json_extract(s.fields, '$.' || ?3) AS v ${who} AND json_extract(s.fields, '$.' || ?3) IS NOT NULL`).bind(a.brand_id, t.list ?? "", t.field).all<{ id: string; v: string }>()).results;
+			// 29 February birthdays come round on 28 February in other years.
+			const leap = md === "02-28" && !isLeap(Number(uk.day.slice(0, 4)));
+			ids = rows.filter((r) => { const x = monthDay(r.v); return x === md || (leap && x === "02-29"); }).map((r) => r.id);
+		} else {
+			ids = (await db.prepare(`SELECT s.id ${who}`).bind(a.brand_id, t.list ?? "").all<{ id: string }>()).results.map((r) => r.id);
+		}
+		const due = iso(new Date(now.getTime() + steps[0].wait * 3_600_000));
+		const stmts = ids.map((id) => db.prepare(`INSERT INTO automation_runs (automation_id, subscriber_id, step, due_at, status, created_at) VALUES (?, ?, 0, ?, 'waiting', ?)
+			ON CONFLICT (automation_id, subscriber_id) DO UPDATE SET step = 0, due_at = excluded.due_at, status = 'waiting', created_at = excluded.created_at WHERE automation_runs.status != 'waiting'`).bind(a.id, id, due, iso(now)));
+		for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+		started += ids.length;
+	}
+	return started;
+}
+
+const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
 /** The minute cron: carry on every run whose next step is due. */
 export async function runDue(env: Env, fetcher: typeof fetch = fetch, now = new Date()): Promise<number> {
 	const db = env.DB;
+	await runDates(db, now).catch((e) => console.error("date automations", e));
 	const { results: runs } = await db.prepare("SELECT id, automation_id, subscriber_id, step FROM automation_runs WHERE status = 'waiting' AND due_at <= ? ORDER BY due_at LIMIT 100").bind(iso(now)).all<{ id: number; automation_id: string; subscriber_id: string; step: number }>();
 	if (!runs.length) return 0;
 	const autos = new Map<string, AutomationRow | null>();
