@@ -24,6 +24,8 @@ export interface SendBatch {
 	campaign: string;
 	from: number;
 	to: number;
+	/** Which go at sending this is: each carry on after a pause starts a new one, so older queue messages stand down. */
+	run?: number;
 }
 
 export type SubStatus = "pending" | "active" | "unsubscribed";
@@ -67,6 +69,7 @@ export interface BrandRow {
 	one_list: number;
 	/** Footer links: 1 = Manage your subscription, 2 = Forward to a friend (added together). */
 	footer_links: number;
+	done_email?: number;
 	/** "all": unsubscribing leaves every list. "list": only the lists that email went to. */
 	unsub_scope: "all" | "list";
 	/** The name at the top of the app; empty shows Newsletter Sender. */
@@ -108,6 +111,7 @@ export interface SubscriberRow {
 
 export interface CampaignRow {
 	id: string;
+	run?: number;
 	brand_id: string;
 	/** What the owner calls it (only they see it). */
 	name: string | null;
@@ -162,6 +166,10 @@ const SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS sends_message ON sends (message_id)`,
 	// Segments by activity: what each person did with recent emails.
 	`CREATE INDEX IF NOT EXISTS sends_subscriber ON sends (subscriber_id, sent_at)`,
+	// Automations: "when someone does this, then do that", and where each person is up to in each one.
+	`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, name TEXT NOT NULL, trigger TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS automation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, automation_id TEXT NOT NULL, subscriber_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, due_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', created_at TEXT NOT NULL, UNIQUE (automation_id, subscriber_id))`,
+	`CREATE INDEX IF NOT EXISTS automation_runs_due ON automation_runs (status, due_at)`,
 	`CREATE TABLE IF NOT EXISTS events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, brand_id TEXT NOT NULL, at TEXT NOT NULL, kind TEXT NOT NULL, subscriber_id TEXT, campaign_id TEXT, detail TEXT)`,
 	`CREATE INDEX IF NOT EXISTS events_brand_at ON events (brand_id, at)`,
@@ -193,8 +201,10 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN health INTEGER NOT NULL DEFAULT 0",
 	// Footer links: 1 = Manage your subscription (on to start with), 2 = Forward to a friend.
 	"ALTER TABLE brands ADD COLUMN footer_links INTEGER NOT NULL DEFAULT 1",
+	"ALTER TABLE campaigns ADD COLUMN run INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE brands ADD COLUMN done_email INTEGER NOT NULL DEFAULT 1",
 ];
-const SCHEMA_VERSION = "8";
+const SCHEMA_VERSION = "9";
 
 let ready: Promise<void> | null = null;
 

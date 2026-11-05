@@ -12,6 +12,7 @@
 // The queue (sending.ts) sends each campaign in batches at the sending service's full speed. Every minute the cron
 // starts campaigns whose time has come.
 
+import { runDue } from "./automations.ts";
 import { handleApi } from "./api.ts";
 import { ensureSchema, type Env, type SendBatch } from "./db.ts";
 import { handlePublic } from "./public.ts";
@@ -71,6 +72,7 @@ export default {
 		await ensureSchema(env.DB);
 		ctx.waitUntil(Promise.all([
 			startDue(env),
+			runDue(env).catch((e) => console.error("automations", e)),
 			// Sign up rate limits only matter for ten minutes.
 			env.DB.prepare("DELETE FROM meta WHERE key LIKE 'rl:%' AND key < ?").bind(`rl:${Math.floor(Date.now() / 600_000) - 1}:`).run(),
 		]));

@@ -123,6 +123,10 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .act select{width:auto;flex:1 1 200px}
 .live{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:16px 0}.live .lhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.live .lbig{font-size:40px;font-weight:800;color:var(--c);line-height:1}.live.paused .lbig{color:#d97706}
 .lspeed{display:inline-flex;gap:6px;align-items:center;font-weight:600;font-size:14px}.progress.big{height:16px;margin:12px 0 0}.progress i{transition:width .8s ease}.live.paused .progress i{background:#d97706}.lpct{font-weight:700;color:var(--c)}
+.arow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0}.arow select,.arow input{width:auto;flex:1 1 180px;margin:0}.arow input[type=number]{flex:0 0 80px}.aword{font-weight:600}
+.astep{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-bottom:1px solid var(--line)}.anum{flex:none;width:30px;height:30px;border-radius:50%;background:var(--c);color:#fff;font-weight:700;display:grid;place-items:center;margin-top:8px}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;margin:0;font-weight:600}.switch input{position:absolute;opacity:0;width:0;height:0}.switch span{width:44px;height:26px;border-radius:99px;background:var(--line);position:relative;transition:background .2s}.switch span::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s}.switch input:checked+span{background:#16a34a}.switch input:checked+span::after{transform:translateX(18px)}.switch input:focus-visible+span{outline:3px solid var(--pink)}
+.empty{text-align:center;padding:32px 20px}
 .rcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0}
 .rcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden}
 .rcard::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--rc)}
@@ -164,6 +168,8 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
 <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
 <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+<symbol id="i-rss" viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h3v16H7zM14 4h3v16h-3z"/></symbol>
 <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
 <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol><symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol><symbol id="i-next" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol><symbol id="i-wand" viewBox="0 0 24 24"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8l1.4 1.4M17.8 6.2l1.4-1.4M12.2 6.2l-1.4-1.4M3 21l9-9"/></symbol>
@@ -210,6 +216,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 			<p>Campaigns</p>
 			<a href="#campaigns" data-v="campaigns" title="All campaigns"><svg class="ico"><use href="#i-home"/></svg><span>All campaigns</span></a>
 			<a href="#new" data-v="new" title="New campaign"><svg class="ico"><use href="#i-pencil"/></svg><span>New campaign</span></a>
+			<a href="#automations" data-v="automations" title="Automations"><svg class="ico"><use href="#i-wand"/></svg><span>Automations</span></a>
 			<p>Templates</p>
 			<a href="#templates" data-v="templates" title="All templates"><svg class="ico"><use href="#i-mail"/></svg><span>All templates</span></a>
 			<a href="#templates/new" data-v="templates-new" title="New template"><svg class="ico"><use href="#i-plus"/></svg><span>New template</span></a>
@@ -308,14 +315,14 @@ function route() {
 	if (v === "overview" || v === "emails") v = "campaigns";
 	if (v === "people") v = id ? "list" : "lists";
 	if (v === "sending") { v = "settings"; id = "sending"; }
-	const side = v === "email" ? "campaigns" : v === "template" ? "templates" : v === "list" ? "lists" : v === "templates" && id === "new" ? "templates-new" : v;
+	const side = v === "automation" ? "automations" : v === "email" ? "campaigns" : v === "template" ? "templates" : v === "list" ? "lists" : v === "templates" && id === "new" ? "templates-new" : v;
 	$$("nav.side a").forEach((a) => a.classList.toggle("on", a.dataset.v === side));
 	$("#settingsLink").classList.toggle("on", v === "settings" || v === "ses");
 	document.body.classList.toggle("focus", v === "ses"); // the wizard gets the whole page, no menu
 	// The page you're on stays put until the next one is ready (no flicker); a thin bar shows if it takes a moment.
 	const busy = $("#busy"); const slow = setTimeout(() => (busy.hidden = false), 250);
 	const done = () => { clearTimeout(slow); busy.hidden = true; };
-	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), reports, settings: () => settings(id), ses: () => sesWizard(id) };
+	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), automations, automation: () => automation(id), reports, settings: () => settings(id), ses: () => sesWizard(id) };
 	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
@@ -350,7 +357,7 @@ async function campaigns() {
 	main.innerHTML = `<h1>All campaigns</h1>
 	${todo.some((t) => !t[0]) && !store.get("ns.gs") ? `<div class="card gs" style="margin-top:16px"><button class="icon-btn close" id="gsx" title="Close" aria-label="Close getting started">${icon("x")}</button><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
 	<div id="health"></div>
-	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span><input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
+	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past issues">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
 	<div class="card flush">${r.campaigns.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th><th>Unique opens</th><th>Unique clicks</th><th class="c">Duplicate</th><th class="c">Delete</th></tr></thead><tbody>${r.campaigns.map((c) => {
 		const sent = ["sent", "sending", "paused", "cancelled"].includes(c.status);
 		const subj = c.subject === "Untitled email" ? "" : c.subject;
@@ -365,6 +372,17 @@ async function campaigns() {
 	$("#gsx") && ($("#gsx").onclick = () => { store.set("ns.gs", "1"); $("#gsx").closest(".card").remove(); toast("Hidden. Bring it back any time under Settings, Account."); });
 	$$("[data-dup]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { const x = await api(`/api/campaigns/${b.closest("tr").dataset.id}/duplicate`, { body: {} }); location.hash = `email/${x.id}`; })));
 	$$("[data-del]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this campaign and its stats for good?")) return; await api(`/api/campaigns/${b.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));
+	// While anything is sending, its % ticks up in place every few seconds.
+	if (r.campaigns.some((c) => c.status === "sending")) timer = setInterval(async () => {
+		const fresh = await api("/api/campaigns").catch(() => null);
+		if (!fresh) return;
+		for (const c of fresh.campaigns) {
+			const old = r.campaigns.find((x) => x.id === c.id);
+			if (old && old.status === "sending" && c.status !== "sending") return route();
+			const el = $(`tr[data-id="${c.id}"] .lpct`);
+			if (el && c.total) el.textContent = `${Math.floor((Math.min(c.sent ?? 0, c.total) / c.total) * 100)}%`;
+		}
+	}, 5000);
 }
 
 // -- New campaign: blank, an HTML file, a web page or a template ---------------------------------------------
@@ -578,6 +596,82 @@ async function editor(id, kind) {
 	recount();
 	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
 }
+// -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
+const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes" };
+const ACT = { email: "Send them an email", add_list: "Add them to a list", remove_list: "Take them off a list", tag: "Tag them", notify: "Email me", webhook: "Tell another app (webhook)" };
+const ACT_ICON = { email: "send", add_list: "plus", remove_list: "minus", tag: "tag", notify: "mail", webhook: "link" };
+const waitText = (h) => (!h ? "Straight away" : h % 24 ? `After ${h} hour${h === 1 ? "" : "s"}` : `After ${h / 24} day${h === 24 ? "" : "s"}`);
+function autoSentence(a, ls, cs) {
+	const t = a.trigger;
+	if (!t) return "Not set up yet";
+	const ln = (id) => (id ? `"${(ls.find((l) => l.id === id) || {}).name || "a list"}"` : "any list");
+	const cn = (id) => (id ? `"${(cs.find((c) => c.id === id) || {}).name || "an email"}"` : "any email");
+	const when = t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
+	return `When someone ${when}: ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
+}
+async function automations() {
+	const [as, ls, cs] = await Promise.all([api("/api/automations"), api("/api/lists"), api("/api/campaigns").then((r) => r.campaigns)]);
+	main.innerHTML = `<h1>Automations</h1><p class="muted">Do things by themselves when people join, open, click or leave. Each person goes through an automation once.</p>
+	<div class="row toolbar-row"><button class="btn" id="anew">${icon("plus")}New automation</button></div>
+	<div class="card flush">${as.length ? `<div class="scroll"><table class="data"><thead><tr><th>Automation</th><th>On</th><th>Waiting</th><th>Finished</th><th class="c">Delete</th></tr></thead><tbody>${as.map((a) => `<tr data-id="${a.id}"><td><a href="#automation/${a.id}"><b>${esc(a.name)}</b></a><br><span class="muted small">${esc(autoSentence(a, ls, cs))}</span></td>
+	<td><label class="switch" title="${a.enabled ? "On" : "Off"}"><input type="checkbox" data-on ${a.enabled ? "checked" : ""}><span></span></label></td><td>${num(a.waiting)}</td><td>${num(a.finished)}</td><td class="c"><button class="icon-btn" data-del title="Delete" aria-label="Delete">${icon("trash")}</button></td></tr>`).join("")}</tbody></table></div>`
+	: `<div class="pad empty"><p><b>No automations yet.</b></p><p class="muted">For example: when someone joins your list, send a welcome series over a week. Or when someone clicks a link about prices, tag them and email you.</p></div>`}</div>`;
+	$("#anew").onclick = (e) => run(e.currentTarget, async () => { const r = await api("/api/automations", { body: { name: "New automation" } }); location.hash = `automation/${r.id}`; });
+	$$("[data-on]").forEach((x) => (x.onchange = async () => { try { await api(`/api/automations/${x.closest("tr").dataset.id}`, { body: { enabled: x.checked } }); toast(x.checked ? "Switched on" : "Switched off"); } catch (err) { x.checked = !x.checked; toast(err.message); } }));
+	$$("[data-del]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this automation? Anyone part way through it stops where they are.")) return; await api(`/api/automations/${b.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));
+}
+async function automation(id) {
+	const [a, ls, cs, ts] = await Promise.all([api(`/api/automations/${id}`), api("/api/lists"), api("/api/campaigns").then((r) => r.campaigns.filter((c) => ["sent", "sending", "paused"].includes(c.status))), api("/api/templates")]);
+	let trig = a.trigger || { kind: "joined", list: "" };
+	let steps = a.steps.length ? a.steps : [{ wait: 0, do: "email", template: "", subject: "" }];
+	const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
+	const listSel = (cur, any) => `${any ? opt("", "Any list", cur) : ""}${ls.map((l) => opt(l.id, l.name, cur)).join("")}`;
+	const waitFields = (h) => { const days = h && h % 24 === 0; return [days ? h / 24 : h, days ? "days" : "hours"]; };
+	const trigHtml = () => {
+		const which = trig.kind === "joined" || trig.kind === "unsubscribed"
+			? `<select data-t="list">${listSel(trig.list || "", true)}</select>`
+			: `<select data-t="campaign">${opt("", "Any email", trig.campaign || "")}${cs.map((c) => opt(c.id, c.name || c.subject, trig.campaign || "")).join("")}</select>${trig.kind === "clicked" ? `<select data-t="link" ${trig.campaign ? "" : "disabled"}><option value="0">Any link</option></select>` : ""}`;
+		return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select>${which}</div>`;
+	};
+	const stepHtml = (s, i) => {
+		const [n, unit] = waitFields(s.wait);
+		const fields = s.do === "email" ? `<select data-s="template"><option value="">Choose a template</option>${ts.map((t) => opt(t.id, t.name, s.template || "")).join("")}</select><input data-s="subject" placeholder="Subject line" value="${esc(s.subject || "")}">`
+			: s.do === "add_list" || s.do === "remove_list" ? `<select data-s="list"><option value="">Choose a list</option>${listSel(s.list || "", false)}</select>`
+			: s.do === "tag" ? `<input data-s="tag" placeholder="A tag, like interested" value="${esc(s.tag || "")}">`
+			: s.do === "webhook" ? `<input data-s="url" placeholder="https://" value="${esc(s.url || "")}">`
+			: `<span class="muted small">We email you their name and address.</span>`;
+		return `<div class="astep" data-i="${i}"><span class="anum">${i + 1}</span><div class="grow"><div class="arow"><input type="number" min="0" max="365" data-s="n" value="${n}" aria-label="Wait" style="width:80px"><select data-s="unit">${opt("hours", "hours", unit)}${opt("days", "days", unit)}</select><span class="aword">later,</span><select data-s="do">${Object.entries(ACT).map(([k, v]) => opt(k, v, s.do)).join("")}</select></div><div class="arow">${fields}</div></div><button class="icon-btn" data-rm title="Remove this step" aria-label="Remove this step">${icon("trash")}</button></div>`;
+	};
+	const counts = (i) => a.counts.filter((c) => c.step > i || (c.step === i && c.status === "done")).reduce((x, c) => x + c.n, 0);
+	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#automations">${icon("back")}Automations</a><span class="grow"></span><label class="switch big"><input type="checkbox" id="aon" ${a.enabled ? "checked" : ""}><span></span><b id="aonl">${a.enabled ? "On" : "Off"}</b></label></div>
+	<div class="card"><label for="aname">Name <span class="hint">(only you see it)</span></label><input id="aname" value="${esc(a.name)}" maxlength="120"></div>
+	<div class="card"><h2>${icon("wand")}What starts it</h2><div id="trig">${trigHtml()}</div>${trig.kind === "opened" || trig.kind === "clicked" ? `<p class="hint">Needs opens or clicks switched on in <a href="#settings/tracking">Settings</a>.</p>` : ""}</div>
+	<div class="card"><h2>${icon("list")}Then</h2><div id="steps">${steps.map(stepHtml).join("")}</div><button class="btn ghost small" id="addStep">${icon("plus")}Add a step</button>
+	${a.counts.length ? `<p class="hint" style="margin-top:12px">${steps.map((s, i) => `Step ${i + 1}: ${num(counts(i))} done`).join(" · ")}</p>` : ""}</div>
+	<p class="err" id="ae"></p><div class="row"><button class="btn" id="asave">${icon("save")}Save</button></div>`;
+	const loadLinks = async () => {
+		const sel = $("[data-t=link]"); if (!sel) return;
+		sel.disabled = !trig.campaign;
+		if (!trig.campaign) return;
+		const c = await api(`/api/campaigns/${trig.campaign}`).catch(() => null);
+		sel.innerHTML = `<option value="0">Any link</option>${(c?.links || []).slice().sort((x, y) => x.n - y.n).map((l) => `<option value="${l.n}" ${Number(trig.link) === l.n ? "selected" : ""}>${esc(l.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60))}</option>`).join("")}`;
+	};
+	const readSteps = () => $$(".astep").map((el) => {
+		const g = (k) => $(`[data-s=${k}]`, el)?.value ?? "";
+		const n = Math.max(0, Number(g("n")) || 0);
+		return { wait: g("unit") === "days" ? n * 24 : n, do: g("do"), template: g("template"), subject: g("subject"), list: g("list"), tag: g("tag"), url: g("url") };
+	});
+	const redrawSteps = () => { steps = readSteps(); $("#steps").innerHTML = steps.map(stepHtml).join(""); };
+	$("#trig").addEventListener("change", (e) => { const k = e.target.dataset.t; if (!k) return; trig = { ...trig, [k]: k === "link" ? Number(e.target.value) : e.target.value }; if (k === "kind") trig = { kind: trig.kind }; if (k === "kind" || k === "campaign") { $("#trig").innerHTML = trigHtml(); loadLinks(); } });
+	$("#steps").addEventListener("change", (e) => { if (e.target.dataset.s === "do") redrawSteps(); });
+	$("#steps").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; steps = readSteps(); steps.splice(Number(b.closest(".astep").dataset.i), 1); $("#steps").innerHTML = steps.map(stepHtml).join(""); });
+	$("#addStep").onclick = () => { steps = readSteps(); steps.push({ wait: 24, do: "email", template: "", subject: "" }); $("#steps").innerHTML = steps.map(stepHtml).join(""); };
+	const save = async (enabled) => api(`/api/automations/${id}`, { body: { name: $("#aname").value, trigger: trig, steps: readSteps(), enabled } });
+	$("#asave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await save($("#aon").checked); $("#ae").textContent = r.steps.length < readSteps().length ? "Some steps weren't saved because they're missing something (a template and subject, a list, a tag or a web address)." : ""; toast("Saved"); } catch (err) { $("#ae").textContent = err.message; } });
+	$("#aon").onchange = async (e) => { try { await save(e.target.checked); $("#aonl").textContent = e.target.checked ? "On" : "Off"; toast(e.target.checked ? "Switched on" : "Switched off"); } catch (err) { e.target.checked = !e.target.checked; $("#ae").textContent = err.message; } };
+	loadLinks();
+}
+
 // -- Sending health: bounces, spam complaints and the sending service's limits, at a glance ------------------------
 const LV = { good: ["Good", "good"], ok: ["Keep an eye on it", "ok"], bad: ["Too high", "bad"], few: ["Not enough sent yet to tell", "few"] };
 const pc2 = (n, of) => (of ? `${((n / of) * 100).toLocaleString("en-GB", { maximumFractionDigits: 2 })}%` : "0%");
@@ -656,9 +750,10 @@ async function report(c, ls) {
 	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
-	<div class="row">${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
+	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
+	$("#pause") && ($("#pause").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/pause`, { body: {} }); toast("Paused. Nothing more goes until you carry on."); route(); }));
 	$("#resume") && ($("#resume").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/resume`, { body: {} }); route(); }));
 	main.addEventListener("click", (e) => { const b = e.target.closest("[data-addto]"); if (b) addToList(c, ls, b); }, { signal: view.signal });
 	$("#dup").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/duplicate`, { body: {} }); location.hash = `email/${r.id}`; });
@@ -1075,9 +1170,10 @@ async function settings(section) {
 		<label class="check"><input type="checkbox" id="manage_link" ${(b.footer_links ?? 1) & 1 ? "checked" : ""}> Add a "Manage your subscription" link <span class="hint">(readers change their name and lists, so fewer unsubscribe completely)</span></label>
 		<label class="check"><input type="checkbox" id="forward_link" ${(b.footer_links ?? 1) & 2 ? "checked" : ""}> Add a "Forward to a friend" link <span class="hint">(a page to share the email, with a sign up button for the friend)</span></label>
 		<div class="row"><div><label>Colour</label><input id="colour" type="color" value="${esc(b.colour)}" style="width:90px;padding:4px"></div><div class="grow"><label>Logo address <span class="hint">(optional, https://...)</span></label><input id="logo" value="${esc(b.logo || "")}"></div></div>
+		<label class="check"><input type="checkbox" id="done_email" ${(b.done_email ?? 1) ? "checked" : ""}> Email me when a campaign finishes sending <span class="hint">(a short summary and a link to the report)</span></label>
 		<label class="check"><input type="checkbox" id="archive" ${b.archive ? "checked" : ""}> Public archive of past campaigns at <a href="/archive" target="_blank">/archive</a></label>
 		<p class="err" id="e"></p><button class="btn">${icon("save")}Save</button></form>`;
-		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, app_name: $("#app_name").value, manage_link: $("#manage_link").checked, forward_link: $("#forward_link").checked } }); toast("Saved"); showName({ app_name: $("#app_name").value }); $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
+		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, app_name: $("#app_name").value, manage_link: $("#manage_link").checked, forward_link: $("#forward_link").checked, done_email: $("#done_email").checked } }); toast("Saved"); showName({ app_name: $("#app_name").value }); $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
 	}
 	if (sec === "lists") {
 		main.innerHTML = `${head}<form class="card" id="rules"><h2>How your lists work</h2>

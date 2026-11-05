@@ -10,6 +10,7 @@ import { campaignContent, safeJson, sendSig, shareSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkCampaign } from "./health.ts";
+import { fireSafely } from "./automations.ts";
 
 export { csvLine };
 
@@ -30,6 +31,7 @@ button svg,.btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-
 <a class="brand" href="/archive">${brand.logo ? `<img src="${esc(brand.logo)}" alt="${esc(brand.name)}">` : esc(brand.name)}</a>${body}</main></body></html>`;
 }
 
+const ICON_RSS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>`;
 const ICON_SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>';
 const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
@@ -109,6 +111,7 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 	// A bounced address that signs up again gets another chance.
 	if (s.suppressed === "bounced") await db.prepare("UPDATE subscribers SET suppressed = NULL, suppressed_at = NULL WHERE id = ?").bind(s.id).run();
 	await logEvent(db, b.id, direct ? "subscribed" : "signed_up", s.id, null, `${l.name} (${source})`).run();
+	if (direct) for (const id of [l.id, ...also]) await fireSafely(db, b.id, s.id, { kind: "joined", list: id });
 	const base = await origin(db);
 	if (!direct) await oneOff(env, b, email, `Please confirm: ${l.name}`, [`Hello${name ? ` ${name.split(" ")[0]}` : ""},`, `Please confirm you'd like to get ${l.name === b.name ? b.name : `${l.name} from ${b.name}`}. Just press the button below.`, `If you didn't ask for this, you can ignore this email and you won't hear from us again.`], { label: "Yes, sign me up", href: `${base}/c/${token}` });
 	else if (l.welcome_subject && l.welcome_text) await oneOff(env, b, email, l.welcome_subject, l.welcome_text.split(/\n{2,}/));
@@ -136,6 +139,12 @@ export async function oneOff(env: Env, b: BrandRow, to: string, subject: string,
 	if (!p) return false;
 	const r = await sendOne(p, b.from_name, b.from_email, { to, subject, text, html: out.html, headers: {}, replyTo: b.reply_to });
 	return r.ok;
+}
+
+/** An open or click: start any automations it triggers (never stopping the reader getting where they're going). */
+async function fireForCampaign(db: D1Database, campaign: string, subscriber: string, e: Parameters<typeof fireSafely>[3]): Promise<void> {
+	const c = await db.prepare("SELECT brand_id FROM campaigns WHERE id = ?").bind(campaign).first<{ brand_id: string }>().catch(() => null);
+	if (c) await fireSafely(db, c.brand_id, subscriber, e);
 }
 
 /** The reader's country as two letters, from Cloudflare. Only the country is kept, never the IP address. */
@@ -191,6 +200,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			db.prepare("UPDATE memberships SET status = 'active', confirmed_at = ? WHERE subscriber_id = ? AND status = 'pending' AND confirm_token IS NULL AND list_id IN (SELECT value FROM json_each(?))").bind(iso(), m.subscriber_id, m.also_lists || "[]"),
 		]);
 		await logEvent(db, b.id, "subscribed", m.subscriber_id, null, `${m.list_name} (confirmed)`).run();
+		for (const id of [m.list_id, ...((safeJson(m.also_lists) ?? []) as string[])]) await fireSafely(db, b.id, m.subscriber_id, { kind: "joined", list: id });
 		const s = await db.prepare("SELECT email FROM subscribers WHERE id = ?").bind(m.subscriber_id).first<{ email: string }>();
 		if (s && m.welcome_subject && m.welcome_text) await oneOff(env, b, s.email, m.welcome_subject, String(m.welcome_text).split(/\n{2,}/));
 		return html(publicPage(b, "Confirmed", `<div class="card"><h1>You're on the list</h1><p>Thanks for confirming. ${esc(m.list_name)} will arrive in your inbox.</p></div>`));
@@ -211,9 +221,11 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		const names = only.length ? (await db.prepare("SELECT name FROM lists WHERE id IN (SELECT value FROM json_each(?)) AND brand_id = ?").bind(JSON.stringify(only), b.id).all<{ name: string }>()).results.map((r) => r.name) : [];
 		const what = names.length ? names.join(", ") : b.name;
 		if (request.method === "POST") {
+			const was = (await db.prepare("SELECT list_id FROM memberships WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(s.id).all<{ list_id: string }>()).results.map((r) => r.list_id).filter((x) => !only.length || only.includes(x));
 			const changed = only.length
 				? await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed' AND list_id IN (SELECT value FROM json_each(?))").bind(iso(), s.id, JSON.stringify(only)).run()
 				: await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id).run();
+			for (const id of was) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: id });
 			if (changed.meta.changes) await logEvent(db, b.id, "unsubscribed", s.id, campaign, `${request.headers.get("content-type")?.includes("form") && (await request.clone().text()).includes("One-Click") ? "one click" : "page"}${names.length ? `, ${names.join(", ")}` : ""}`).run();
 			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(what)}.</p><p class="small">Changed your mind? You can sign up again on the website.</p></div>`));
 		}
@@ -249,6 +261,11 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 				}
 			}
 			if (stmts.length) await db.batch(stmts);
+			for (const l of lists) {
+				const on = l.status === "active" || l.status === "pending";
+				if (on && !want.has(l.id)) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: l.id });
+				else if (!on && want.has(l.id) && !s.suppressed) await fireSafely(db, b.id, s.id, { kind: "joined", list: l.id });
+			}
 			s.name = name || null;
 			lists = await load();
 			note = `<p class="okmsg">${ICON_CHECK}Saved. Thanks for letting us know.</p>`;
@@ -289,6 +306,19 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		return html(page, 200, { "content-security-policy": "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:" });
 	}
 
+	// -- The archive as an RSS feed, so readers and other apps can follow new issues -----
+	if (path === "/archive/feed.xml") {
+		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		if (!b || !b.archive) return null;
+		const base = await origin(db, request);
+		const { results } = await db.prepare("SELECT subject, preheader, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 50").bind(b.id).all<CampaignRow>();
+		const x = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		const clean = (v: string) => v.replace(/\{\{[^}]*\}\}/g, "").replace(/\s+/g, " ").trim();
+		const items = results.map((c) => `<item><title>${x(clean(c.subject))}</title><link>${x(`${base}/archive/${c.slug}`)}</link><guid>${x(`${base}/archive/${c.slug}`)}</guid><pubDate>${new Date(c.started_at!).toUTCString()}</pubDate>${c.preheader ? `<description>${x(clean(c.preheader))}</description>` : ""}</item>`).join("");
+		const xml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>${x(b.name || "Newsletter")}</title><link>${x(`${base}/archive`)}</link><atom:link href="${x(`${base}/archive/feed.xml`)}" rel="self" type="application/rss+xml"/><description>${x(`Past issues of ${b.name || "the newsletter"}`)}</description><language>en-gb</language>${items}</channel></rss>`;
+		return new Response(xml, { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=600" } });
+	}
+
 	// -- The archive of past issues ------------------------------------------------------
 	const am = /^\/archive(?:\/([a-z0-9-]{1,80}))?\/?$/.exec(path);
 	if (am) {
@@ -298,7 +328,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			const { results } = await db.prepare("SELECT subject, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 200").bind(b.id).all<CampaignRow>();
 			const items = results.map((c) => `<li><a href="/archive/${esc(c.slug!)}">${esc(c.subject.replace(/\{\{[^}]*\}\}/g, "").trim())}</a><span>${new Date(c.started_at!).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></li>`).join("");
 			const forms = (await db.prepare("SELECT slug, name FROM lists WHERE brand_id = ? ORDER BY created_at LIMIT 1").bind(b.id).first<{ slug: string; name: string }>());
-			return html(publicPage(b, "Past issues", `<div class="card"><h1>Past issues</h1>${items ? `<ul class="issues">${items}</ul>` : "<p>Nothing here yet.</p>"}${forms ? `<a class="btn" href="/s/${esc(forms.slug)}">${ICON_SEND}Subscribe</a>` : ""}</div>`, { index: true }));
+			return html(publicPage(b, "Past issues", `<div class="card"><h1>Past issues</h1>${items ? `<ul class="issues">${items}</ul>` : "<p>Nothing here yet.</p>"}${forms ? `<a class="btn" href="/s/${esc(forms.slug)}">${ICON_SEND}Subscribe</a>` : ""}<p class="small" style="margin-top:16px"><a href="/archive/feed.xml">${ICON_RSS}Follow by RSS</a></p></div>`, { index: true }));
 		}
 		const c = await db.prepare("SELECT * FROM campaigns WHERE slug = ? AND brand_id = ? AND status IN ('sent', 'sending') AND public = 1").bind(am[1], b.id).first<CampaignRow>();
 		if (!c) return null;
@@ -317,13 +347,16 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	// -- Opens and clicks (only in emails sent with them switched on) -------------------------------
 	const om = /^\/o\/(\d+)\.([0-9a-f]{12})$/.exec(path);
 	if (om) {
-		if ((await sendSig(await sealSecret(db), Number(om[1]))) === om[2]) await db.prepare("UPDATE sends SET opened_at = COALESCE(opened_at, ?), opens = opens + 1, country = COALESCE(country, ?) WHERE id = ?").bind(iso(), countryOf(request), Number(om[1])).run();
+		if ((await sendSig(await sealSecret(db), Number(om[1]))) === om[2]) {
+			const r = await db.prepare("UPDATE sends SET opened_at = COALESCE(opened_at, ?), opens = opens + 1, country = COALESCE(country, ?) WHERE id = ? RETURNING campaign_id, subscriber_id, opens").bind(iso(), countryOf(request), Number(om[1])).first<{ campaign_id: string; subscriber_id: string; opens: number }>();
+			if (r && r.opens === 1) await fireForCampaign(db, r.campaign_id, r.subscriber_id, { kind: "opened", campaign: r.campaign_id });
+		}
 		return new Response(Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (ch) => ch.charCodeAt(0)), { headers: { "content-type": "image/gif", "cache-control": "no-store" } });
 	}
 	const lm = /^\/l\/(\d+)\.([0-9a-f]{12})\/(\d{1,3})$/.exec(path);
 	if (lm) {
 		const id = Number(lm[1]);
-		const send = await db.prepare("SELECT campaign_id FROM sends WHERE id = ?").bind(id).first<{ campaign_id: string }>();
+		const send = await db.prepare("SELECT campaign_id, subscriber_id FROM sends WHERE id = ?").bind(id).first<{ campaign_id: string; subscriber_id: string }>();
 		const link = send ? await db.prepare("SELECT url FROM links WHERE campaign_id = ? AND n = ?").bind(send.campaign_id, Number(lm[3])).first<{ url: string }>() : null;
 		if (!link) return new Response("That link has expired.", { status: 404 });
 		if ((await sendSig(await sealSecret(db), id)) === lm[2]) {
@@ -332,6 +365,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 				db.prepare("UPDATE links SET clicks = clicks + 1 WHERE campaign_id = ? AND n = ?").bind(send!.campaign_id, Number(lm[3])),
 				db.prepare("INSERT INTO link_clicks (campaign_id, n, send_id, at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING").bind(send!.campaign_id, Number(lm[3]), id, iso()),
 			]);
+			await fireForCampaign(db, send!.campaign_id, send!.subscriber_id, { kind: "clicked", campaign: send!.campaign_id, link: Number(lm[3]) });
 		}
 		return Response.redirect(link.url, 302);
 	}
