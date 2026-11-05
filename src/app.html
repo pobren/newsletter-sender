@@ -678,7 +678,7 @@ const HELP = {
 };
 // The CloudFormation template (aws/newsletter-sender-ses.yaml in the repo). AWS only takes templates from S3.
 // Empty until the template is on S3: then the one button replaces the manual steps.
-const SES_STACK = "";
+const SES_STACK = "https://newsletter-sender-public.s3.eu-west-1.amazonaws.com/newsletter-sender-ses.yaml";
 const stackUrl = (region) => `https://console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?templateURL=${encodeURIComponent(SES_STACK)}&stackName=newsletter-sender`;
 const CF_TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%5D&name=Newsletter%20Sender%20DNS";
 const helpHtml = (id) => `${HELP[id].guide ? `<a class="btn small" href="${HELP[id].guide}" target="_blank" rel="noopener" style="margin:10px 0 4px">${icon("ext")}Step by step guide, with screen grabs</a>` : ""}<ol class="hint">${HELP[id].steps.map((x) => `<li>${x}</li>`).join("")}</ol><div class="helplinks">${HELP[id].links.map(([t, u]) => `<a class="btn ghost small" href="${u}" target="_blank" rel="noopener">${icon("ext")}${t}</a>`).join("")}</div>`;
