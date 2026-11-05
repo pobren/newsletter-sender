@@ -58,6 +58,15 @@ export interface BrandRow {
 	/** Opens and clicks: off unless the owner switches them on. */
 	tracking: number;
 	archive: number;
+	/** Opens (an invisible picture) and clicks (links go through this install), each off unless switched on. */
+	track_opens: number;
+	track_clicks: number;
+	/** Your own address for open and click links, such as https://news.yourdomain.com (a custom domain on this Worker). */
+	track_domain: string | null;
+	/** 1: a person can only be on one list. */
+	one_list: number;
+	/** "all": unsubscribing leaves every list. "list": only the lists that email went to. */
+	unsub_scope: "all" | "list";
 	/** The secret part of the bounce and complaint webhook addresses for this brand. */
 	hook_key: string;
 	created_at: string;
@@ -75,6 +84,8 @@ export interface ListRow {
 	welcome_subject: string | null;
 	welcome_text: string | null;
 	thanks_url: string | null;
+	/** Other lists this list's form adds people to, as JSON: [id, ...]. */
+	also_lists: string;
 	created_at: string;
 }
 
@@ -94,10 +105,14 @@ export interface SubscriberRow {
 export interface CampaignRow {
 	id: string;
 	brand_id: string;
+	/** What the owner calls it (only they see it). */
+	name: string | null;
 	subject: string;
 	preheader: string | null;
-	/** The email as blocks, as JSON (render.ts). */
+	/** The email as blocks, as JSON (render.ts): emails made before the visual editor. */
 	blocks: string;
+	/** The email as HTML, from the visual editor, the HTML box or an uploaded design. */
+	html: string | null;
 	/** Who it goes to, as JSON: { lists: [...], tags: [...] }. */
 	audience: string;
 	status: "draft" | "scheduled" | "sending" | "paused" | "sent" | "cancelled";
@@ -147,7 +162,18 @@ const SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS events_campaign ON events (campaign_id, kind)`,
 	`CREATE TABLE IF NOT EXISTS links (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, url TEXT NOT NULL, clicks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (campaign_id, n))`,
 ];
-const SCHEMA_VERSION = "1";
+// Columns added after the first version. Each runs once; "duplicate column" means it's already there.
+const MIGRATIONS = [
+	"ALTER TABLE campaigns ADD COLUMN name TEXT",
+	"ALTER TABLE campaigns ADD COLUMN html TEXT",
+	"ALTER TABLE brands ADD COLUMN track_opens INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE brands ADD COLUMN track_clicks INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE brands ADD COLUMN track_domain TEXT",
+	"ALTER TABLE brands ADD COLUMN one_list INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE brands ADD COLUMN unsub_scope TEXT NOT NULL DEFAULT 'all'",
+	"ALTER TABLE lists ADD COLUMN also_lists TEXT NOT NULL DEFAULT '[]'",
+];
+const SCHEMA_VERSION = "2";
 
 let ready: Promise<void> | null = null;
 
@@ -157,6 +183,11 @@ export function ensureSchema(db: D1Database): Promise<void> {
 		const have = await db.prepare("SELECT value FROM meta WHERE key = 'schema'").first<{ value: string }>().catch(() => null);
 		if (have?.value === SCHEMA_VERSION) return;
 		await db.batch(SCHEMA.map((s) => db.prepare(s)));
+		for (const m of MIGRATIONS) await db.prepare(m).run().catch((e) => {
+			if (!/duplicate column/i.test(String(e?.message ?? e))) throw e;
+		});
+		// Version 1 had one switch for opens and clicks together.
+		if (have?.value === "1") await db.prepare("UPDATE brands SET track_opens = tracking, track_clicks = tracking").run();
 		await db.prepare("INSERT INTO meta (key, value) VALUES ('schema', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(SCHEMA_VERSION).run();
 	})().catch((e) => {
 		ready = null;

@@ -5,11 +5,13 @@ import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
 import { firstBrand, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
-import { cleanBlocks, renderEmail, slugify } from "./render.ts";
-import { audienceCount, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
+import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
+import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
+
+const DEFAULT_BRAND = "My newsletter";
 
 const ok = (data: unknown = { ok: true }, init: ResponseInit = {}) => Response.json(data, { ...init, headers: { "cache-control": "no-store", ...(init.headers ?? {}) } });
 const bad = (error: string, status = 400) => Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
@@ -69,11 +71,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			await db.prepare("INSERT INTO accounts (id, email, name, password, role, created_at) VALUES (?, ?, ?, ?, 'owner', ?)").bind(newId(8), email, str(b.name, 80) || null, await hashPassword(b.password), now).run();
 		}
 		if (!(await firstBrand(db))) {
-			const name = str(b.brand, 80) || "My newsletter";
+			// The company or newsletter name is chosen later, in Settings.
+			const name = str(b.brand, 80) || DEFAULT_BRAND;
 			const brandId = newId(8);
 			await db.batch([
-				db.prepare("INSERT INTO brands (id, name, from_name, from_email, hook_key, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(brandId, name, name, email, newId(16), now),
-				db.prepare("INSERT INTO lists (id, brand_id, name, slug, description, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(newId(8), brandId, name, await freeSlug(db, name), null, now),
+				db.prepare("INSERT INTO brands (id, name, from_name, from_email, hook_key, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(brandId, name, str(b.name, 80) || name, email, newId(16), now),
+				db.prepare("INSERT INTO lists (id, brand_id, name, slug, description, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(newId(8), brandId, "Newsletter", await freeSlug(db, "newsletter"), null, now),
 			]);
 		}
 		await origin(db, request);
@@ -115,7 +118,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			db.prepare("SELECT COUNT(DISTINCT m.subscriber_id) AS n FROM memberships m JOIN lists l ON l.id = m.list_id WHERE l.brand_id = ? AND m.status = 'pending'").bind(brand.id),
 			db.prepare("SELECT COUNT(*) AS n FROM subscribers WHERE brand_id = ? AND suppressed IS NOT NULL").bind(brand.id),
 			db.prepare("SELECT COUNT(*) AS n FROM lists WHERE brand_id = ?").bind(brand.id),
-			db.prepare("SELECT id, subject, status, total, started_at, finished_at FROM campaigns WHERE brand_id = ? AND status IN ('sending', 'sent', 'paused') ORDER BY started_at DESC LIMIT 1").bind(brand.id),
+			db.prepare("SELECT id, name, subject, status, total, started_at, finished_at FROM campaigns WHERE brand_id = ? AND status IN ('sending', 'sent', 'paused') ORDER BY started_at DESC LIMIT 1").bind(brand.id),
 			db.prepare("SELECT e.at, e.kind, e.detail, s.email, c.subject FROM events e LEFT JOIN subscribers s ON s.id = e.subscriber_id LEFT JOIN campaigns c ON c.id = e.campaign_id WHERE e.brand_id = ? ORDER BY e.id DESC LIMIT 25").bind(brand.id),
 		]);
 		const lastCampaign = (last.results[0] as any) ?? null;
@@ -124,6 +127,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		return ok({
 			name: me.name,
 			brand: brand.name,
+			named: brand.name !== DEFAULT_BRAND,
 			subscribers: (subs.results[0] as any)?.n ?? 0,
 			pending: (pending.results[0] as any)?.n ?? 0,
 			suppressed: (gone.results[0] as any)?.n ?? 0,
@@ -138,14 +142,29 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	// -- Brand ----------------------------------------------------------------------------------
 	if (path === "/api/brand") {
 		if (method === "POST") {
+			// Each settings section saves its own part.
 			const b = await body(request);
-			const fromEmail = cleanEmail(b.from_email);
-			if (!str(b.name, 80)) return bad("Please give your newsletter a name.");
-			if (!fromEmail) return bad("Please enter the address your newsletter comes from, such as news@yourdomain.com.");
-			const colour = /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour;
-			const logo = typeof b.logo === "string" && /^https:\/\/\S{1,1000}$/.test(b.logo.trim()) ? b.logo.trim() : null;
-			await db.prepare("UPDATE brands SET name = ?, from_name = ?, from_email = ?, reply_to = ?, footer = ?, colour = ?, logo = ?, tracking = ?, archive = ? WHERE id = ?")
-				.bind(str(b.name, 80), str(b.from_name, 80) || str(b.name, 80), fromEmail, cleanEmail(b.reply_to), multi(b.footer, 300) || null, colour, logo, b.tracking ? 1 : 0, b.archive === false ? 0 : 1, brand.id).run();
+			const set: Record<string, unknown> = {};
+			if ("name" in b) {
+				const fromEmail = cleanEmail(b.from_email);
+				if (!str(b.name, 80)) return bad("Please give your company or newsletter a name.");
+				if (!fromEmail) return bad("Please enter the address your newsletter comes from, such as news@yourdomain.com.");
+				const logo = typeof b.logo === "string" && /^https:\/\/\S{1,1000}$/.test(b.logo.trim()) ? b.logo.trim() : null;
+				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1 });
+			}
+			if ("track_opens" in b) {
+				let domain: string | null = null;
+				if (typeof b.track_domain === "string" && b.track_domain.trim()) {
+					const d = b.track_domain.trim().replace(/\/+$/, "");
+					const u = /^https?:\/\//i.test(d) ? d : `https://${d}`;
+					if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(u)) return bad("The tracking address should be a web address you've added to this Worker, such as news.yourdomain.com.");
+					domain = u.toLowerCase();
+				}
+				Object.assign(set, { track_opens: b.track_opens ? 1 : 0, track_clicks: b.track_clicks ? 1 : 0, track_domain: domain });
+			}
+			if ("one_list" in b) Object.assign(set, { one_list: b.one_list ? 1 : 0, unsub_scope: b.unsub_scope === "list" ? "list" : "all" });
+			const keys = Object.keys(set);
+			if (keys.length) await db.prepare(`UPDATE brands SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).bind(...keys.map((k) => set[k]), brand.id).run();
 			return ok();
 		}
 		return ok({ ...brand, provider: undefined, hook_key: undefined });
@@ -216,16 +235,18 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const thanks = typeof b.thanks_url === "string" && /^https:\/\/\S{1,500}$/.test(b.thanks_url.trim()) ? b.thanks_url.trim() : null;
 			const fields = JSON.stringify(cleanFields(b.fields));
 			const welcome = [str(b.welcome_subject, 150) || null, multi(b.welcome_text, 5000) || null];
+			const mine = (await db.prepare("SELECT id FROM lists WHERE brand_id = ?").bind(brand.id).all<{ id: string }>()).results.map((r) => r.id);
+			const also = JSON.stringify(Array.isArray(b.also_lists) ? [...new Set(b.also_lists.filter((x: unknown) => typeof x === "string" && mine.includes(x) && x !== b.id))] : []);
 			if (b.id) {
 				const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(b.id, brand.id).first<ListRow>();
 				if (!l) return bad("That list has gone.", 404);
-				await db.prepare("UPDATE lists SET name = ?, slug = ?, description = ?, fields = ?, double_optin = ?, welcome_subject = ?, welcome_text = ?, thanks_url = ? WHERE id = ?")
-					.bind(name, b.slug ? await freeSlug(db, String(b.slug), l.id) : l.slug, multi(b.description, 500) || null, fields, b.double_optin === false ? 0 : 1, ...welcome, thanks, l.id).run();
+				await db.prepare("UPDATE lists SET name = ?, slug = ?, description = ?, fields = ?, double_optin = ?, welcome_subject = ?, welcome_text = ?, thanks_url = ?, also_lists = ? WHERE id = ?")
+					.bind(name, b.slug ? await freeSlug(db, String(b.slug), l.id) : l.slug, multi(b.description, 500) || null, fields, b.double_optin === false ? 0 : 1, ...welcome, thanks, also, l.id).run();
 				return ok({ id: l.id });
 			}
 			const id = newId(8);
-			await db.prepare("INSERT INTO lists (id, brand_id, name, slug, description, fields, double_optin, welcome_subject, welcome_text, thanks_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-				.bind(id, brand.id, name, await freeSlug(db, String(b.slug || name)), multi(b.description, 500) || null, fields, b.double_optin === false ? 0 : 1, ...welcome, thanks, iso()).run();
+			await db.prepare("INSERT INTO lists (id, brand_id, name, slug, description, fields, double_optin, welcome_subject, welcome_text, thanks_url, also_lists, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+				.bind(id, brand.id, name, await freeSlug(db, String(b.slug || name)), multi(b.description, 500) || null, fields, b.double_optin === false ? 0 : 1, ...welcome, thanks, also, iso()).run();
 			return ok({ id });
 		}
 		const { results } = await db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM memberships m JOIN subscribers s ON s.id = m.subscriber_id WHERE m.list_id = l.id AND m.status = 'active' AND s.suppressed IS NULL) AS active,
@@ -233,13 +254,17 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			(SELECT COUNT(*) FROM memberships m WHERE m.list_id = l.id AND m.status = 'unsubscribed') AS left_count FROM lists l WHERE l.brand_id = ? ORDER BY l.created_at`).bind(brand.id).all<ListRow & { active: number; pending: number; left_count: number }>();
 		const base = await origin(db, request);
 		const key = turnstileKey(env);
-		return ok(results.map((l) => ({ ...l, fields: safeJson(l.fields) ?? [], url: `${base}/s/${l.slug}`, embed: formHtml(l, `${base}/s/${l.slug}`, key) })));
+		return ok(results.map((l) => ({ ...l, fields: safeJson(l.fields) ?? [], also_lists: safeJson(l.also_lists) ?? [], url: `${base}/s/${l.slug}`, embed: formHtml(l, `${base}/s/${l.slug}`, key) })));
 	}
 	const ld = /^\/api\/lists\/([0-9a-f]{16})$/.exec(path);
 	if (ld && method === "DELETE") {
 		const n = await db.prepare("SELECT COUNT(*) AS n FROM lists WHERE brand_id = ?").bind(brand.id).first<{ n: number }>();
 		if ((n?.n ?? 0) <= 1) return bad("You need at least one list.");
-		await db.batch([db.prepare("DELETE FROM memberships WHERE list_id = ?").bind(ld[1]), db.prepare("DELETE FROM lists WHERE id = ? AND brand_id = ?").bind(ld[1], brand.id)]);
+		await db.batch([
+			db.prepare("DELETE FROM memberships WHERE list_id = ?").bind(ld[1]),
+			db.prepare("DELETE FROM lists WHERE id = ? AND brand_id = ?").bind(ld[1], brand.id),
+			db.prepare("UPDATE lists SET also_lists = COALESCE((SELECT json_group_array(value) FROM json_each(lists.also_lists) WHERE value != ?), '[]') WHERE brand_id = ?").bind(ld[1], brand.id),
+		]);
 		return ok();
 	}
 
@@ -291,14 +316,19 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const b = await body(request);
 			const tags = Array.isArray(b.tags) ? [...new Set(b.tags.map(cleanTag).filter(Boolean))].slice(0, 30) : safeJson(s.tags) ?? [];
 			await db.prepare("UPDATE subscribers SET name = ?, tags = ? WHERE id = ?").bind(str(b.name, 120) || null, JSON.stringify(tags), s.id).run();
+			const notes: string[] = [];
+			if (Array.isArray(b.removeLists)) for (const lid of b.removeLists) if (typeof lid === "string") await db.prepare("DELETE FROM memberships WHERE subscriber_id = ? AND list_id IN (SELECT id FROM lists WHERE id = ? AND brand_id = ?)").bind(s.id, lid, brand.id).run();
 			if (Array.isArray(b.addLists)) for (const lid of b.addLists) {
 				const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(lid, brand.id).first<ListRow>();
-				if (l) await signUp(env, l, brand, { email: s.email }, "added by you", true);
+				if (!l) continue;
+				const r = await signUp(env, l, brand, { email: s.email }, "added by you", true);
+				if ("ok" in r && r.status === "elsewhere") notes.push(`Not added to ${l.name}: they're already on another list, and each person can only be on one list (Lists and forms).`);
 			}
-			return ok();
+			return ok({ ok: true, notes });
 		}
 		const { results: history } = await db.prepare("SELECT e.at, e.kind, e.detail, c.subject FROM events e LEFT JOIN campaigns c ON c.id = e.campaign_id WHERE e.subscriber_id = ? ORDER BY e.id DESC LIMIT 50").bind(s.id).all();
-		return ok({ ...s, fields: safeJson(s.fields) ?? {}, tags: safeJson(s.tags) ?? [], token: undefined, history });
+		const { results: lists } = await db.prepare("SELECT list_id AS id, status FROM memberships WHERE subscriber_id = ?").bind(s.id).all();
+		return ok({ ...s, fields: safeJson(s.fields) ?? {}, tags: safeJson(s.tags) ?? [], token: undefined, history, lists });
 	}
 
 	// -- Import and export -------------------------------------------------------------------------
@@ -328,11 +358,14 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 					ON CONFLICT (brand_id, email) DO UPDATE SET name = COALESCE(excluded.name, subscribers.name), fields = json_patch(subscribers.fields, excluded.fields),
 					tags = (SELECT json_group_array(DISTINCT value) FROM (SELECT value FROM json_each(subscribers.tags) UNION SELECT value FROM json_each(excluded.tags)))`)
 					.bind(id, brand.id, email, str(r.name, 120) || null, JSON.stringify(fields), JSON.stringify(tags), newId(16), now),
-				// Never re-add someone who unsubscribed, bounced or complained.
+				// Never re-add someone who unsubscribed (from any list, or this one when unsubscribing is per list), bounced or complained.
+				// With one list per person, someone already on another list stays where they are.
 				db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
-					SELECT ?, s.id, 'active', 'import', ?, ? FROM subscribers s WHERE s.brand_id = ? AND s.email = ? AND s.suppressed IS NULL
-					AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'unsubscribed') ON CONFLICT (list_id, subscriber_id) DO NOTHING`)
-					.bind(l.id, now, now, brand.id, email),
+					SELECT ?1, s.id, 'active', 'import', ?2, ?2 FROM subscribers s WHERE s.brand_id = ?3 AND s.email = ?4 AND s.suppressed IS NULL
+					AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'unsubscribed' AND (?5 = 'all' OR m.list_id = ?1))
+					AND NOT (?6 = 1 AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id != ?1 AND m.status IN ('active', 'pending')))
+					ON CONFLICT (list_id, subscriber_id) DO NOTHING`)
+					.bind(l.id, now, brand.id, email, brand.unsub_scope, brand.one_list),
 			);
 			added++;
 		}
@@ -359,16 +392,17 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 
 	// -- Campaigns ---------------------------------------------------------------------------------
 	if (path === "/api/campaigns" && method === "GET") {
-		const { results } = await db.prepare("SELECT id, subject, status, send_at, started_at, finished_at, total, updated_at FROM campaigns WHERE brand_id = ? ORDER BY COALESCE(started_at, send_at, updated_at) DESC LIMIT 200").bind(brand.id).all<CampaignRow>();
+		const { results } = await db.prepare("SELECT id, name, subject, status, send_at, started_at, finished_at, total, updated_at FROM campaigns WHERE brand_id = ? ORDER BY COALESCE(started_at, send_at, updated_at) DESC LIMIT 200").bind(brand.id).all<CampaignRow>();
 		return ok(results);
 	}
 	if (path === "/api/campaigns" && method === "POST") {
 		const b = await body(request);
 		const id = newId(8);
-		const first = await db.prepare("SELECT id FROM lists WHERE brand_id = ? ORDER BY created_at LIMIT 1").bind(brand.id).first<{ id: string }>();
-		const blocks = cleanBlocks(b.blocks).length ? cleanBlocks(b.blocks) : [{ type: "text", text: "Hello {{first_name|there}},\n\nWrite your newsletter here." }];
-		await db.prepare("INSERT INTO campaigns (id, brand_id, subject, preheader, blocks, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-			.bind(id, brand.id, str(b.subject, 200) || "Untitled email", null, JSON.stringify(blocks), JSON.stringify({ lists: first ? [first.id] : [], tags: [] }), iso(), iso()).run();
+		// With just one list, it's chosen already. With more, the owner picks.
+		const { results: all } = await db.prepare("SELECT id FROM lists WHERE brand_id = ? LIMIT 2").bind(brand.id).all<{ id: string }>();
+		const html = "<p>Hello {{first_name|there}},</p>\n<p>Write your newsletter here.</p>";
+		await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)")
+			.bind(id, brand.id, str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", null, html, JSON.stringify({ lists: all.length === 1 ? [all[0].id] : [], tags: [] }), iso(), iso()).run();
 		return ok({ id });
 	}
 	if (path === "/api/audience" && method === "POST") {
@@ -384,18 +418,19 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const editable = c.status === "draft" || c.status === "scheduled";
 		if (!action && method === "GET") {
 			const stats = await campaignStats(db, c.id);
-			const links = brand.tracking ? (await db.prepare("SELECT n, url, clicks FROM links WHERE campaign_id = ? ORDER BY clicks DESC LIMIT 20").bind(c.id).all()).results : [];
+			const links = brand.track_clicks ? (await db.prepare("SELECT n, url, clicks FROM links WHERE campaign_id = ? ORDER BY clicks DESC LIMIT 20").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: safeJson(c.blocks) ?? [], audience: parseAudience(c.audience), stats, links, pausedWhy: paused?.detail ?? null, tracking: Boolean(brand.tracking), webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, pausedWhy: paused?.detail ?? null, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
 			const b = await body(request);
 			const slug = b.slug ? slugify(String(b.slug)) : slugify(str(b.subject, 200));
 			const clash = await db.prepare("SELECT id FROM campaigns WHERE slug = ? AND id != ?").bind(slug, c.id).first();
-			await db.prepare("UPDATE campaigns SET subject = ?, preheader = ?, blocks = ?, audience = ?, public = ?, slug = ?, updated_at = ? WHERE id = ?")
-				.bind(str(b.subject, 200) || "Untitled email", str(b.preheader, 200) || null, JSON.stringify(cleanBlocks(b.blocks)), JSON.stringify(parseAudience(b.audience)), b.public === false ? 0 : 1, clash ? `${slug}-${c.id.slice(0, 4)}` : slug, iso(), c.id).run();
+			const html = typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : c.html;
+			await db.prepare("UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, audience = ?, public = ?, slug = ?, updated_at = ? WHERE id = ?")
+				.bind(str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", str(b.preheader, 200) || null, html, JSON.stringify(parseAudience(b.audience)), b.public === false ? 0 : 1, clash ? `${slug}-${c.id.slice(0, 4)}` : slug, iso(), c.id).run();
 			return ok();
 		}
 		if (!action && method === "DELETE") {
@@ -405,8 +440,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "preview") {
 			const base = await origin(db, request);
-			const out = renderEmail(c.subject, cleanBlocks(safeJson(c.blocks)), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null }, { email: me.email, name: me.name });
-			return new Response(out.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; img-src * data:; style-src 'unsafe-inline'" } });
+			const out = renderEmail(c.subject, campaignContent(c), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null }, { email: me.email, name: me.name });
+			return new Response(out.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": EMAIL_CSP } });
 		}
 		if (method !== "POST") return bad("Not found.", 404);
 		const b = await body(request);
@@ -415,7 +450,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if (!provider) return bad("Please choose how to send first, on the Sending tab.");
 			const to = (Array.isArray(b.to) ? b.to : String(b.to ?? me.email).split(/[,\s]+/)).map(cleanEmail).filter((e): e is string => !!e).slice(0, 5);
 			if (!to.length) return bad("Please enter an address to send the test to.");
-			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, blocks: cleanBlocks(safeJson(c.blocks)) }, to, { email: me.email, name: me.name });
+			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c) }, to, { email: me.email, name: me.name });
 			const failed = res.find((r) => !r.ok);
 			return failed ? bad(`The test didn't go: ${failed.error}`) : ok({ sent: to.length });
 		}
@@ -450,9 +485,26 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "duplicate") {
 			const id = newId(8);
-			await db.prepare("INSERT INTO campaigns (id, brand_id, subject, preheader, blocks, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.subject} (copy)`, c.preheader, c.blocks, c.audience, iso(), iso()).run();
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, iso(), iso()).run();
 			return ok({ id });
 		}
+	}
+
+	// -- Reports ---------------------------------------------------------------------------------------
+	if (path === "/api/reports") {
+		const [emails, problems] = await db.batch([
+			db.prepare(`SELECT c.id, c.name, c.subject, c.status, c.started_at, c.total,
+				(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent,
+				(SELECT COUNT(opened_at) FROM sends x WHERE x.campaign_id = c.id) AS opens,
+				(SELECT COUNT(clicked_at) FROM sends x WHERE x.campaign_id = c.id) AS clicks,
+				(SELECT COUNT(DISTINCT subscriber_id) FROM events e WHERE e.campaign_id = c.id AND e.kind = 'bounced') AS bounced,
+				(SELECT COUNT(DISTINCT subscriber_id) FROM events e WHERE e.campaign_id = c.id AND e.kind = 'complained') AS complained,
+				(SELECT COUNT(DISTINCT subscriber_id) FROM events e WHERE e.campaign_id = c.id AND e.kind = 'unsubscribed') AS unsubscribed
+				FROM campaigns c WHERE c.brand_id = ? AND c.started_at IS NOT NULL ORDER BY c.started_at DESC LIMIT 100`).bind(brand.id),
+			db.prepare(`SELECT e.at, e.kind, e.detail, s.email, c.name, c.subject FROM events e LEFT JOIN subscribers s ON s.id = e.subscriber_id LEFT JOIN campaigns c ON c.id = e.campaign_id
+				WHERE e.brand_id = ? AND e.kind IN ('bounced', 'soft_bounce', 'complained') ORDER BY e.id DESC LIMIT 100`).bind(brand.id),
+		]);
+		return ok({ emails: emails.results, problems: problems.results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 
 	// -- Images ----------------------------------------------------------------------------------------
@@ -495,5 +547,8 @@ export async function campaignStats(db: D1Database, id: string) {
 		clicks: g.clicks ?? 0,
 	};
 }
+
+/** Emails shown inside the app or on the web can show pictures and styles, never run anything. */
+export const EMAIL_CSP = "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:";
 
 export { isProvider };

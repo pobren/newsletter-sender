@@ -6,7 +6,7 @@ import { csvLine, cleanEmail } from "./csv.ts";
 import { getMeta, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
 import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
-import { safeJson, sendSig } from "./sending.ts";
+import { campaignContent, safeJson, sendSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
 
@@ -72,7 +72,7 @@ async function tooMany(db: D1Database, ip: string): Promise<boolean> {
 }
 
 /** Someone signing up, from the hosted page, a form on any website or the API. */
-export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" } | { error: string }> {
+export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" | "elsewhere" } | { error: string }> {
 	const db = env.DB;
 	const email = cleanEmail(input.email);
 	if (!email) return { error: "Please check your email address." };
@@ -92,11 +92,17 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 	if (s.suppressed === "complained") return { ok: true, status: "already" }; // marked us as spam: never again, but don't say so
 	const m = await db.prepare("SELECT status FROM memberships WHERE list_id = ? AND subscriber_id = ?").bind(l.id, s.id).first<{ status: string }>();
 	if (m?.status === "active") return { ok: true, status: "already" };
+	// One list per person (when the owner has chosen that): someone on another list stays where they are.
+	if (b.one_list && (await db.prepare("SELECT 1 FROM memberships WHERE subscriber_id = ? AND list_id != ? AND status IN ('active', 'pending')").bind(s.id, l.id).first())) return { ok: true, status: "elsewhere" };
 	const direct = confirmed || !l.double_optin;
 	const token = direct ? null : newId(16);
 	await db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, confirm_token, created_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = excluded.status, source = excluded.source, confirm_token = excluded.confirm_token, confirmed_at = excluded.confirmed_at, left_at = NULL`)
 		.bind(l.id, s.id, direct ? "active" : "pending", source, token, now, direct ? now : null).run();
+	// The other lists this list's form adds people to. They're confirmed along with this one.
+	const also: string[] = b.one_list ? [] : (safeJson(l.also_lists) ?? []).filter((x: unknown) => typeof x === "string");
+	if (also.length) await db.batch(also.map((id) => db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM lists WHERE id = ? AND brand_id = ?)
+		ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = CASE WHEN memberships.status = 'active' THEN 'active' ELSE excluded.status END, left_at = NULL`).bind(id, s.id, direct ? "active" : "pending", `${source}, with ${l.name}`, now, direct ? now : null, id, b.id)));
 	// A bounced address that signs up again gets another chance.
 	if (s.suppressed === "bounced") await db.prepare("UPDATE subscribers SET suppressed = NULL, suppressed_at = NULL WHERE id = ?").bind(s.id).run();
 	await logEvent(db, b.id, direct ? "subscribed" : "signed_up", s.id, null, `${l.name} (${source})`).run();
@@ -164,13 +170,17 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	// -- Confirm ---------------------------------------------------------------------
 	const cm = /^\/c\/([0-9a-f]{32})\/?$/.exec(path);
 	if (cm) {
-		const m = await db.prepare("SELECT m.*, l.name AS list_name, l.brand_id, l.welcome_subject, l.welcome_text FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.confirm_token = ?").bind(cm[1]).first<any>();
+		const m = await db.prepare("SELECT m.*, l.name AS list_name, l.brand_id, l.welcome_subject, l.welcome_text, l.also_lists FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.confirm_token = ?").bind(cm[1]).first<any>();
 		const b = m ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(m.brand_id).first<BrandRow>() : await db.prepare("SELECT * FROM brands LIMIT 1").first<BrandRow>();
 		const brand = b ?? { name: "Newsletter", colour: "#a3195b", logo: null };
 		if (!m || !b) return html(publicPage(brand, "Link expired", `<div class="card"><h1>That link has already been used</h1><p>If you've confirmed already, you're all set.</p></div>`), 404);
 		// Link checkers in some inboxes open every link, so confirming needs a press (done for you by the page's script).
 		if (request.method !== "POST") return html(publicPage(b, "Confirm", `<div class="card"><h1>Confirm your subscription</h1><p>${esc(m.list_name)} from ${esc(b.name)}.</p><form method="post" id="go"><button type="submit">${ICON_CHECK}Yes, sign me up</button></form></div><script>document.getElementById("go").submit()</script>`));
-		await db.prepare("UPDATE memberships SET status = 'active', confirmed_at = ?, confirm_token = NULL WHERE list_id = ? AND subscriber_id = ?").bind(iso(), m.list_id, m.subscriber_id).run();
+		await db.batch([
+			db.prepare("UPDATE memberships SET status = 'active', confirmed_at = ?, confirm_token = NULL WHERE list_id = ? AND subscriber_id = ?").bind(iso(), m.list_id, m.subscriber_id),
+			// The other lists the form added them to wait for this same confirmation.
+			db.prepare("UPDATE memberships SET status = 'active', confirmed_at = ? WHERE subscriber_id = ? AND status = 'pending' AND confirm_token IS NULL AND list_id IN (SELECT value FROM json_each(?))").bind(iso(), m.subscriber_id, m.also_lists || "[]"),
+		]);
 		await logEvent(db, b.id, "subscribed", m.subscriber_id, null, `${m.list_name} (confirmed)`).run();
 		const s = await db.prepare("SELECT email FROM subscribers WHERE id = ?").bind(m.subscriber_id).first<{ email: string }>();
 		if (s && m.welcome_subject && m.welcome_text) await oneOff(env, b, s.email, m.welcome_subject, String(m.welcome_text).split(/\n{2,}/));
@@ -186,12 +196,19 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		if (um[1] === "test") return html(publicPage(brand, "Unsubscribe", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link unsubscribes the reader straight away.</p></div>`));
 		if (!s || !b) return html(publicPage(brand, "Unsubscribe", `<div class="card"><h1>You're not on the list</h1><p>There's nothing more to do.</p></div>`), 404);
 		const campaign = /^[0-9a-f]{16}$/.test(url.searchParams.get("c") ?? "") ? url.searchParams.get("c") : null;
+		// Unsubscribing leaves every list, or (when the owner has chosen it) just the lists that email went to.
+		const c = campaign && b.unsub_scope === "list" ? await db.prepare("SELECT audience FROM campaigns WHERE id = ? AND brand_id = ?").bind(campaign, b.id).first<{ audience: string }>() : null;
+		const only: string[] = c ? (safeJson(c.audience)?.lists ?? []).filter((x: unknown) => typeof x === "string") : [];
+		const names = only.length ? (await db.prepare("SELECT name FROM lists WHERE id IN (SELECT value FROM json_each(?)) AND brand_id = ?").bind(JSON.stringify(only), b.id).all<{ name: string }>()).results.map((r) => r.name) : [];
+		const what = names.length ? names.join(", ") : b.name;
 		if (request.method === "POST") {
-			const changed = await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id).run();
-			if (changed.meta.changes) await logEvent(db, b.id, "unsubscribed", s.id, campaign, request.headers.get("content-type")?.includes("form") && (await request.clone().text()).includes("One-Click") ? "one click" : "page").run();
-			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(b.name)}.</p><p class="small">Changed your mind? You can sign up again on the website.</p></div>`));
+			const changed = only.length
+				? await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed' AND list_id IN (SELECT value FROM json_each(?))").bind(iso(), s.id, JSON.stringify(only)).run()
+				: await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id).run();
+			if (changed.meta.changes) await logEvent(db, b.id, "unsubscribed", s.id, campaign, `${request.headers.get("content-type")?.includes("form") && (await request.clone().text()).includes("One-Click") ? "one click" : "page"}${names.length ? `, ${names.join(", ")}` : ""}`).run();
+			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(what)}.</p><p class="small">Changed your mind? You can sign up again on the website.</p></div>`));
 		}
-		return html(publicPage(b, "Unsubscribe", `<div class="card"><h1>Unsubscribe?</h1><p>Stop all emails from ${esc(b.name)} to ${esc(s.email)}.</p><form method="post"><button type="submit">${ICON_X}Unsubscribe</button></form></div>`));
+		return html(publicPage(b, "Unsubscribe", `<div class="card"><h1>Unsubscribe?</h1><p>Stop ${names.length ? "" : "all "}emails from ${esc(what)} to ${esc(s.email)}.</p><form method="post"><button type="submit">${ICON_X}Unsubscribe</button></form></div>`));
 	}
 
 	// -- The archive of past issues ------------------------------------------------------
@@ -207,8 +224,8 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		}
 		const c = await db.prepare("SELECT * FROM campaigns WHERE slug = ? AND brand_id = ? AND status IN ('sent', 'sending') AND public = 1").bind(am[1], b.id).first<CampaignRow>();
 		if (!c) return null;
-		const out = renderEmail(c.subject, cleanBlocks(safeJson(c.blocks)), { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: "/archive", track: null }, { email: "" });
-		return html(out.html.replace("<title>", '<meta name="robots" content="index"><link rel="alternate" href="/archive"><title>').replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, '<a href="/archive" style="color:#6b5a73">More issues</a>'));
+		const out = renderEmail(c.subject, campaignContent(c), { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: "/archive", track: null }, { email: "" });
+		return html(out.html.replace("<title>", '<meta name="robots" content="index"><link rel="alternate" href="/archive"><title>').replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, '<a href="/archive" style="color:#6b5a73">More issues</a>'), 200, { "content-security-policy": "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:" });
 	}
 
 	// -- Images -------------------------------------------------------------------------------

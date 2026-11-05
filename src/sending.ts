@@ -12,7 +12,7 @@
 import { sesAccount } from "./aws.ts";
 import { iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
-import { cleanBlocks, listHeaders, renderEmail, type Block, type Look, type Reader } from "./render.ts";
+import { cleanBlocks, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 
 /** Send rows in one queue message. */
@@ -40,7 +40,8 @@ export function batches(min: number, max: number, size = BATCH): [number, number
 /** How long a list takes at a rate: "about 8 minutes". */
 export function sendTime(count: number, rate: number): string {
 	const s = Math.ceil(count / Math.max(rate, 0.1));
-	if (s < 90) return `about ${Math.max(1, s)} seconds`;
+	if (s < 2) return "about a second";
+	if (s < 90) return `about ${s} seconds`;
 	if (s < 5400) return `about ${Math.round(s / 60)} minutes`;
 	return `about ${Math.round(s / 360) / 10} hours`;
 }
@@ -90,6 +91,16 @@ export async function sendSig(secret: string, id: number): Promise<string> {
 	return [...new Uint8Array(d).slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** What a campaign's email is made of: its HTML, or blocks for emails written before the visual editor. */
+export function campaignContent(c: Pick<CampaignRow, "html" | "blocks">): Content {
+	return c.html ?? cleanBlocks(safeJson(c.blocks));
+}
+
+/** Where open and click links point: the owner's own tracking address when they've set one. */
+export function trackBase(brand: Pick<BrandRow, "track_domain">, base: string): string {
+	return brand.track_domain ? brand.track_domain.replace(/\/+$/, "") : base;
+}
+
 /** Starts sending a campaign now. Returns what's wrong instead, when it can't. */
 export async function start(env: Env, c: CampaignRow, request?: Request): Promise<{ ok: true; total: number } | { error: string }> {
 	const db = env.DB;
@@ -99,7 +110,7 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 	if (!provider) return { error: "Please choose how to send first, on the Sending tab." };
 	const audience = parseAudience(c.audience);
 	if (!audience.lists.length) return { error: "Please choose at least one list to send to." };
-	if (!cleanBlocks(safeJson(c.blocks)).length) return { error: "This email is empty. Please write something first." };
+	if (!hasContent(campaignContent(c))) return { error: "This email is empty. Please write something first." };
 
 	// Amazon SES: send at the account's current rate, and don't start what the day's allowance can't finish.
 	if (provider.provider === "ses") {
@@ -122,9 +133,9 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 	await db.prepare("UPDATE campaigns SET total = ?, slug = ? WHERE id = ?").bind(total, slug, c.id).run();
 
 	// Keep every link so clicks can be counted against it (only used when opens and clicks are on).
-	if (brand.tracking) {
+	if (brand.track_clicks) {
 		const look = await lookFor(env, brand, c, "", null);
-		const { links } = renderEmail(c.subject, cleanBlocks(safeJson(c.blocks)), { ...look, track: null }, { email: "" });
+		const { links } = renderEmail(c.subject, campaignContent(c), { ...look, track: null }, { email: "" });
 		if (links.length) await db.batch(links.slice(0, 200).map((url, i) => db.prepare("INSERT OR REPLACE INTO links (campaign_id, n, url) VALUES (?, ?, ?)").bind(c.id, i + 1, url)));
 	}
 
@@ -203,10 +214,10 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		await pause(db, c, "The sending service was removed, so sending stopped. Add it again on the Sending tab, then carry on.");
 		return 0;
 	}
-	// Anyone who bounced, complained or left since the send started is skipped.
-	await db.prepare(`UPDATE sends SET status = 'skipped' WHERE campaign_id = ? AND id BETWEEN ? AND ? AND status = 'queued' AND subscriber_id IN
-		(SELECT id FROM subscribers WHERE suppressed IS NOT NULL UNION SELECT subscriber_id FROM memberships m WHERE m.subscriber_id = sends.subscriber_id GROUP BY subscriber_id HAVING SUM(m.status = 'active') = 0)`)
-		.bind(c.id, b.from, b.to).run();
+	// Anyone who bounced, complained or left this email's lists since the send started is skipped.
+	await db.prepare(`UPDATE sends SET status = 'skipped' WHERE campaign_id = ? AND id BETWEEN ? AND ? AND status = 'queued' AND (subscriber_id IN (SELECT id FROM subscribers WHERE suppressed IS NOT NULL)
+		OR NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = sends.subscriber_id AND m.status = 'active' AND m.list_id IN (SELECT value FROM json_each(?))))`)
+		.bind(c.id, b.from, b.to, JSON.stringify(parseAudience(c.audience).lists)).run();
 	const { results: rows } = await db
 		.prepare(`SELECT x.id, s.id AS sub, s.email, s.name, s.fields, s.token FROM sends x JOIN subscribers s ON s.id = x.subscriber_id
 			WHERE x.campaign_id = ? AND x.id BETWEEN ? AND ? AND x.status = 'queued' AND s.suppressed IS NULL ORDER BY x.id`)
@@ -216,7 +227,8 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 
 	const base = await origin(db);
 	const secret = await sealSecret(db);
-	const blocks = cleanBlocks(safeJson(c.blocks));
+	const content = campaignContent(c);
+	const tb = trackBase(brand, base);
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
 	const flush = async () => {
@@ -227,11 +239,12 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		else if (!s.throttled) pending.push(db.prepare("UPDATE sends SET status = 'failed', error = ? WHERE id = ?").bind((s.error ?? "Failed").slice(0, 240), id));
 	};
 	const outcome = await paced(rows, shareOfRate(brand.rate), async (r) => {
-		const sig = brand.tracking ? await sendSig(secret, r.id) : "";
+		const sig = brand.track_opens || brand.track_clicks ? await sendSig(secret, r.id) : "";
 		const unsub = `${base}/u/${r.token}?c=${c.id}`;
-		const look = await lookFor(env, brand, c, unsub, brand.tracking ? { link: (_url, n) => `${base}/l/${r.id}.${sig}/${n}`, pixel: `${base}/o/${r.id}.${sig}` } : null);
+		const track: Look["track"] = { link: brand.track_clicks ? (_url, n) => `${tb}/l/${r.id}.${sig}/${n}` : null, pixel: brand.track_opens ? `${tb}/o/${r.id}.${sig}` : null };
+		const look = await lookFor(env, brand, c, unsub, track);
 		const reader: Reader = { email: r.email, name: r.name, fields: safeJson(r.fields) ?? {} };
-		const out = renderEmail(c.subject, blocks, look, reader);
+		const out = renderEmail(c.subject, content, look, reader);
 		const email: OutEmail = {
 			to: r.email,
 			subject: mergeSubject(c.subject, reader),
@@ -340,10 +353,10 @@ export async function startDue(env: Env, now = new Date()): Promise<void> {
 }
 
 /** A test of a campaign to a few addresses, straight away (not through the queue). */
-export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; blocks: Block[] }, to: string[], sample: Reader): Promise<Sent[]> {
+export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; content: Content }, to: string[], sample: Reader): Promise<Sent[]> {
 	const base = await origin(env.DB);
 	const look: Look = { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null };
-	const out = renderEmail(c.subject, c.blocks, look, sample);
+	const out = renderEmail(c.subject, c.content, look, sample);
 	const subject = `[Test] ${mergeSubject(c.subject, sample)}`;
 	return Promise.all(to.map((addr) => sendOne(provider, brand.from_name, brand.from_email, { to: addr, subject, text: out.text, html: out.html, headers: listHeaders(`${base}/u/test`, `${brand.id}.test`), replyTo: brand.reply_to }, fetch)));
 }

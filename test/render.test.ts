@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanBlocks, listHeaders, merge, renderEmail, slugify } from "../src/render.ts";
+import { cleanBlocks, hasContent, listHeaders, merge, renderEmail, slugify } from "../src/render.ts";
 
 const look = { brandName: "The Friday Letter", colour: "#a3195b", unsubscribeUrl: "https://n.example/u/abc", footer: "1 High Street, Leeds" };
 
@@ -46,4 +46,31 @@ test("every newsletter carries one click unsubscribe headers", () => {
 test("slugs", () => {
 	assert.equal(slugify("Spring news! Café opens"), "spring-news-cafe-opens");
 	assert.equal(slugify("!!!"), "issue");
+});
+
+test("HTML from the editor gets the template, styles, merge tags and tracked links", () => {
+	const html = `<p>Hi {{name|there}}, <a href="https://example.com/a?x=1&amp;y=2">read</a> <a href="mailto:a@b.com">mail</a></p><script>alert(1)</script><img src="x" onerror="alert(1)">`;
+	const r = renderEmail("S", html, { ...look, track: { link: (_u, n) => `https://n.example/l/x/${n}`, pixel: null } }, { email: "a@b.com", name: "Jo <b>" });
+	assert.ok(r.html.includes("Hi Jo &lt;b&gt;,"), "names are escaped");
+	assert.ok(!r.html.includes("<script") && !r.html.includes("onerror"));
+	assert.deepEqual(r.links, ["https://example.com/a?x=1&y=2"]);
+	assert.ok(r.html.includes('href="https://n.example/l/x/1"'));
+	assert.ok(r.html.includes('href="mailto:a@b.com"'));
+	assert.ok(r.html.includes('<p style="margin:0 0 16px'));
+	assert.ok(!r.html.includes("/o/"), "no open picture when opens are off");
+	assert.ok(r.text.includes("read (https://example.com/a?x=1&y=2)"));
+	assert.ok(r.html.includes("Unsubscribe"));
+});
+
+test("a whole designed email keeps its look, with its own or our unsubscribe link", () => {
+	const doc = `<!doctype html><html><head><style>.x{color:red}</style></head><body><div class="x">Hello {{name}}</div><a href="{{unsubscribe_url}}">Leave</a></body></html>`;
+	const r = renderEmail("S", doc, { ...look, preheader: "Peek" }, { email: "a@b.com", name: "Sam" });
+	assert.ok(r.html.includes(".x{color:red}"));
+	assert.ok(r.html.includes('href="https://n.example/u/abc"'));
+	assert.ok(!r.html.includes("You're getting this because"), "their own unsubscribe link, so no footer added");
+	assert.ok(r.html.includes("Peek"));
+	const plain = renderEmail("S", "<html><body><p>Hi</p></body></html>", look, { email: "a@b.com" });
+	assert.ok(plain.html.includes("You're getting this because"));
+	assert.equal(hasContent("<p><br></p>"), false);
+	assert.equal(hasContent("<p>Hi</p>"), true);
 });

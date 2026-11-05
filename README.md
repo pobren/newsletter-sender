@@ -15,14 +15,15 @@ Newsletter Sender runs in your own Cloudflare account. Your subscribers, your em
 
 - **Lists and sign up forms.** A hosted sign up page for each list, and a form to paste into your own website. Extra questions if you want them, and a robot check if you switch on Turnstile.
 - **Double opt in.** New readers confirm by email first (you can turn it off per list). The confirm link is safe from email scanners that click every link.
-- **The editor.** Headings, text with **bold**, *italic* and links, pictures (uploaded to your own storage), buttons and lines, with a live preview. `{{first_name|there}}` puts in each reader's first name.
+- **The editor.** Write in the visual editor (paste straight from Word or Google Docs), switch to HTML whenever you like, or upload a whole designed email. Pictures go to your own storage. `{{first_name|there}}` puts in each reader's first name, and a design can place its own unsubscribe link with `{{unsubscribe_url}}`.
+- **As many lists as you like.** A main list, a test list, one per brand or topic. Choose whether someone can be on more than one, whether unsubscribing leaves every list or just that one, and which lists each form adds people to.
 - **Sending at full speed.** Newsletter Sender reads your SES sending rate and spreads the sending across up to ten workers, so a 10,000 person list at 14 a second takes about 12 minutes. If the service says slow down, it does, and carries on.
 - **Safety checks.** It won't send from an SES sandbox account, or more than your daily SES limit. If every email in a batch is turned down the same way (an unverified domain, a revoked key), sending pauses and tells you why.
 - **Test, schedule, stop.** Send a test to yourself, schedule it for later, or stop a send part way.
 - **Unsubscribe in one click.** Every email has an unsubscribe link and the one click unsubscribe headers Gmail and Yahoo ask bulk senders for.
 - **Bounces and spam complaints.** Hard bounces and complaints come straight back and that address is never emailed again.
 - **Import and export.** CSV files from Mailchimp, Sendy, Substack, Kit and others. We find the email column, join first and last names and keep extra columns. Nobody who unsubscribed, bounced or complained is added back.
-- **Stats.** Sent, bounced, unsubscribed and marked as spam for every email. Opens and clicks are **off by default**: switch them on in Settings if you want them.
+- **Reports.** Sent, bounced, unsubscribed and marked as spam for every email, and every bounce and complaint. Opens and clicks are **off by default**: switch each on in Settings, with your own tracking address if you like.
 - **Public archive.** Past issues on the web at `/archive`, if you want it.
 
 <img src="docs/editor.png" alt="Writing an email: blocks on the left, live preview on the right" width="100%">
