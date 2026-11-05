@@ -10,7 +10,7 @@
 // A send row is only ever sent once: it's marked the moment the service accepts it, so a retried batch skips it.
 
 import { sesAccount } from "./aws.ts";
-import { BLOCKED_SQL, iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
+import { BLOCKED_SQL, iso, linkBase, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
 import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
 import { canSendFrom, loadProvider, sealSecret } from "./settings.ts";
@@ -126,10 +126,8 @@ export function campaignContent(c: Pick<CampaignRow, "html" | "blocks">): Conten
 	return c.html ?? cleanBlocks(safeJson(c.blocks));
 }
 
-/** Where open and click links point: the owner's own tracking address when they've set one. */
-export function trackBase(brand: Pick<BrandRow, "track_domain">, base: string): string {
-	return brand.track_domain ? brand.track_domain.replace(/\/+$/, "") : base;
-}
+/** Where every link in an email points: the brand's own domain for links when it has one, otherwise this app's address. */
+export const trackBase = linkBase;
 
 /** Starts sending a campaign now. Returns what's wrong instead, when it can't. */
 export async function start(env: Env, c: CampaignRow, request?: Request): Promise<{ ok: true; total: number } | { error: string }> {
@@ -200,7 +198,7 @@ export async function resume(env: Env, c: CampaignRow): Promise<{ ok: true } | {
 
 /** What each email for a campaign looks like, apart from the reader. */
 async function lookFor(env: Env, brand: BrandRow, c: CampaignRow, unsubscribeUrl: string, track: Look["track"]): Promise<Look> {
-	const base = await origin(env.DB);
+	const base = linkBase(brand, await origin(env.DB));
 	return {
 		brandName: brand.name,
 		colour: brand.colour,
@@ -261,7 +259,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		.all<Row>();
 	if (!rows.length) return (await finishIfDone(db, c.id), 0);
 
-	const base = await origin(db);
+	const base = linkBase(brand, await origin(db));
 	const secret = await sealSecret(db);
 	const content = campaignContent(c);
 	const tb = trackBase(brand, base);
@@ -456,7 +454,7 @@ export function senderOf(brand: BrandRow, c: Pick<CampaignRow, "from_name" | "fr
 }
 
 export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; content: Content; from_name?: string | null; from_email?: string | null; reply_to?: string | null }, to: string[], sample: Reader): Promise<Sent[]> {
-	const base = await origin(env.DB);
+	const base = linkBase(brand, await origin(env.DB));
 	const look: Look = { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null };
 	const out = renderEmail(c.subject, c.content, look, sample);
 	const subject = `[Test] ${mergeSubject(c.subject, sample)}`;

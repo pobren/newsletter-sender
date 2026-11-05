@@ -2,7 +2,7 @@
 // clicking an email, unsubscribing) starts a run for that person; the minute cron carries each run on when its next
 // step is due. Each person goes through an automation once, except yearly ones (like a birthday), which start again
 // each year. Date triggers are checked once a day, from the hour chosen (UK time).
-import { iso, logEvent, newId, origin, type BrandRow, type Env, type SubscriberRow } from "./db.ts";
+import { iso, linkBase, logEvent, newId, origin, type BrandRow, type Env, type SubscriberRow } from "./db.ts";
 import { sendOne } from "./providers.ts";
 import { listHeaders, renderEmail } from "./render.ts";
 import { mergeSubject } from "./sending.ts";
@@ -239,7 +239,7 @@ async function doStep(env: Env, b: BrandRow, a: AutomationRow, step: Step, s: Su
 		const t = await db.prepare("SELECT html FROM templates WHERE id = ? AND brand_id = ?").bind(step.template, b.id).first<{ html: string }>();
 		const provider = await loadProvider(db, b);
 		if (!t || !provider) throw new Error(t ? "No sending service" : "That template has gone");
-		const base = await origin(db);
+		const base = linkBase(b, await origin(db));
 		const unsub = `${base}/u/${s.token}`;
 		const reader = { email: s.email, name: s.name, fields: parse(s.fields) ?? {} };
 		const out = renderEmail(step.subject!, t.html, { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: unsub, manageUrl: `${base}/p/${s.token}`, footerLinks: b.footer_links & 1, track: null }, reader);

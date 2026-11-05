@@ -265,6 +265,11 @@ export async function origin(db: D1Database, request?: Request): Promise<string>
 	return here;
 }
 
+/** Where every link in a brand's emails points: its own domain for links when it has one, otherwise this app's address. */
+export function linkBase(brand: { track_domain?: string | null }, base: string): string {
+	return brand.track_domain ? brand.track_domain.replace(/\/+$/, "") : base;
+}
+
 /** Records something that happened, for the activity list and campaign stats. */
 export const logEvent = (db: D1Database, brand: string, kind: string, sub: string | null, campaign: string | null, detail: string | null = null) =>
 	db.prepare("INSERT INTO events (brand_id, at, kind, subscriber_id, campaign_id, detail) VALUES (?, ?, ?, ?, ?, ?)").bind(brand, iso(), kind, sub, campaign, detail ? detail.slice(0, 300) : null);
