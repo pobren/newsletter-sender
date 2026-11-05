@@ -251,7 +251,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		const { results } = await db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM memberships m JOIN subscribers s ON s.id = m.subscriber_id WHERE m.list_id = l.id AND m.status = 'active' AND s.suppressed IS NULL) AS active,
 			(SELECT COUNT(*) FROM memberships m WHERE m.list_id = l.id AND m.status = 'pending') AS pending,
-			(SELECT COUNT(*) FROM memberships m WHERE m.list_id = l.id AND m.status = 'unsubscribed') AS left_count FROM lists l WHERE l.brand_id = ? ORDER BY l.created_at`).bind(brand.id).all<ListRow & { active: number; pending: number; left_count: number }>();
+			(SELECT COUNT(*) FROM memberships m WHERE m.list_id = l.id AND m.status = 'unsubscribed') AS left_count,
+			(SELECT COUNT(*) FROM memberships m JOIN subscribers s ON s.id = m.subscriber_id WHERE m.list_id = l.id AND s.suppressed = 'bounced') AS bounced,
+			(SELECT COUNT(*) FROM memberships m JOIN subscribers s ON s.id = m.subscriber_id WHERE m.list_id = l.id AND s.suppressed = 'complained') AS complained,
+			(SELECT COUNT(*) FROM memberships m WHERE m.list_id = l.id) AS everyone FROM lists l WHERE l.brand_id = ? ORDER BY l.created_at`).bind(brand.id).all<ListRow & { active: number; pending: number; left_count: number }>();
 		const base = await origin(db, request);
 		const key = turnstileKey(env);
 		return ok(results.map((l) => ({ ...l, fields: safeJson(l.fields) ?? [], also_lists: safeJson(l.also_lists) ?? [], url: `${base}/s/${l.slug}`, embed: formHtml(l, `${base}/s/${l.slug}`, key) })));
@@ -280,6 +283,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			where.push("(s.email LIKE ? OR LOWER(s.name) LIKE ?)");
 			binds.push(`%${q}%`, `%${q}%`);
 		}
+		if (list && !["active", "pending", "unsubscribed"].includes(status)) {
+			where.push("EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id = ?)");
+			binds.push(list);
+		}
 		if (status === "bounced" || status === "complained") {
 			where.push("s.suppressed = ?");
 			binds.push(status);
@@ -293,9 +300,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	}
 	if (path === "/api/subscribers" && method === "POST") {
 		const b = await body(request);
-		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(b.list, brand.id).first<ListRow>();
+		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(String(b.list ?? ""), brand.id).first<ListRow>();
 		if (!l) return bad("Please choose a list.");
 		const r = await signUp(env, l, brand, { email: b.email, name: b.name, fields: b.fields ?? {} }, "added by you", !b.confirm);
+		if ("ok" in r && r.status === "blocked") return bad("That address is on your blocklist, so it can't be added. Take it off the blocklist first if you're sure.");
 		return "error" in r ? bad(r.error) : ok(r);
 	}
 	const sd = /^\/api\/subscribers\/([0-9a-f]{16})(\/unsubscribe)?$/.exec(path);
@@ -322,7 +330,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(lid, brand.id).first<ListRow>();
 				if (!l) continue;
 				const r = await signUp(env, l, brand, { email: s.email }, "added by you", true);
-				if ("ok" in r && r.status === "elsewhere") notes.push(`Not added to ${l.name}: they're already on another list, and each person can only be on one list (Lists and forms).`);
+				if ("ok" in r && r.status === "elsewhere") notes.push(`Not added to ${l.name}: they're already on another list, and each person can only be on one list (Settings, Lists).`);
 			}
 			return ok({ ok: true, notes });
 		}
@@ -335,7 +343,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (path === "/api/import" && method === "POST") {
 		const b = await body(request);
 		if (!b.consent) return bad("Please confirm everyone on this list agreed to hear from you.");
-		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(b.list, brand.id).first<ListRow>();
+		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(String(b.list ?? ""), brand.id).first<ListRow>();
 		if (!l) return bad("Please choose a list.");
 		const rows = Array.isArray(b.rows) ? b.rows.slice(0, 1000) : [];
 		const extraTags = Array.isArray(b.tags) ? b.tags.map(cleanTag).filter(Boolean) : [];
@@ -363,6 +371,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
 					SELECT ?1, s.id, 'active', 'import', ?2, ?2 FROM subscribers s WHERE s.brand_id = ?3 AND s.email = ?4 AND s.suppressed IS NULL
 					AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'unsubscribed' AND (?5 = 'all' OR m.list_id = ?1))
+					AND NOT EXISTS (SELECT 1 FROM blocklist b WHERE b.brand_id = ?3 AND b.email = s.email) AND NOT EXISTS (SELECT 1 FROM blocked_domains d WHERE d.brand_id = ?3 AND d.domain = substr(s.email, instr(s.email, '@') + 1))
 					AND NOT (?6 = 1 AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id != ?1 AND m.status IN ('active', 'pending')))
 					ON CONFLICT (list_id, subscriber_id) DO NOTHING`)
 					.bind(l.id, now, brand.id, email, brand.unsub_scope, brand.one_list),
@@ -392,15 +401,25 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 
 	// -- Campaigns ---------------------------------------------------------------------------------
 	if (path === "/api/campaigns" && method === "GET") {
-		const { results } = await db.prepare("SELECT id, name, subject, status, send_at, started_at, finished_at, total, updated_at FROM campaigns WHERE brand_id = ? ORDER BY COALESCE(started_at, send_at, updated_at) DESC LIMIT 200").bind(brand.id).all<CampaignRow>();
-		return ok(results);
+		const { results } = await db.prepare(`SELECT c.id, c.name, c.subject, c.status, c.send_at, c.started_at, c.finished_at, c.total, c.updated_at,
+			(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent,
+			(SELECT COUNT(opened_at) FROM sends x WHERE x.campaign_id = c.id) AS opens,
+			(SELECT COUNT(clicked_at) FROM sends x WHERE x.campaign_id = c.id) AS clicks
+			FROM campaigns c WHERE c.brand_id = ? ORDER BY COALESCE(c.started_at, c.send_at, c.updated_at) DESC LIMIT 500`).bind(brand.id).all();
+		return ok({ campaigns: results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 	if (path === "/api/campaigns" && method === "POST") {
 		const b = await body(request);
 		const id = newId(8);
 		// With just one list, it's chosen already. With more, the owner picks.
 		const { results: all } = await db.prepare("SELECT id FROM lists WHERE brand_id = ? LIMIT 2").bind(brand.id).all<{ id: string }>();
-		const html = "<p>Hello {{first_name|there}},</p>\n<p>Write your newsletter here.</p>";
+		// A new campaign starts blank, from a template, or from HTML the owner brought in (a file or a web page).
+		let html = "<p>Hello {{first_name|there}},</p>\n<p>Write your newsletter here.</p>";
+		if (typeof b.template === "string") {
+			const t = await db.prepare("SELECT html FROM templates WHERE id = ? AND brand_id = ?").bind(b.template, brand.id).first<{ html: string }>();
+			if (!t) return bad("That template has gone.");
+			html = t.html;
+		} else if (typeof b.html === "string" && b.html.trim()) html = sanitise(b.html.slice(0, 500_000));
 		await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)")
 			.bind(id, brand.id, str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", null, html, JSON.stringify({ lists: all.length === 1 ? [all[0].id] : [], tags: [] }), iso(), iso()).run();
 		return ok({ id });
@@ -434,8 +453,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return ok();
 		}
 		if (!action && method === "DELETE") {
-			if (!editable) return bad("Only drafts can be deleted.");
-			await db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id).run();
+			if (c.status === "sending") return bad("This one is sending. Stop it first, then delete it.");
+			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
 			return ok();
 		}
 		if (action === "preview") {
@@ -447,7 +466,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const b = await body(request);
 		if (action === "test") {
 			const provider = await loadProvider(db, brand);
-			if (!provider) return bad("Please choose how to send first, on the Sending tab.");
+			if (!provider) return bad("Please choose how to send first, under Settings, Sending.");
 			const to = (Array.isArray(b.to) ? b.to : String(b.to ?? me.email).split(/[,\s]+/)).map(cleanEmail).filter((e): e is string => !!e).slice(0, 5);
 			if (!to.length) return bad("Please enter an address to send the test to.");
 			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c) }, to, { email: me.email, name: me.name });
@@ -462,7 +481,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if (!editable) return bad("This email has already gone.");
 			const at = new Date(String(b.at ?? ""));
 			if (isNaN(at.getTime()) || at.getTime() < Date.now() + 60_000) return bad("Please choose a time at least a minute from now.");
-			if (!(await loadProvider(db, brand))) return bad("Please choose how to send first, on the Sending tab.");
+			if (!(await loadProvider(db, brand))) return bad("Please choose how to send first, under Settings, Sending.");
 			await db.prepare("UPDATE campaigns SET status = 'scheduled', send_at = ?, updated_at = ? WHERE id = ?").bind(iso(at), iso(), c.id).run();
 			return ok();
 		}
@@ -488,6 +507,127 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, iso(), iso()).run();
 			return ok({ id });
 		}
+	}
+
+	// -- Bringing in a design from a web page --------------------------------------------------------
+	if (path === "/api/fetch-html" && method === "POST") {
+		const b = await body(request);
+		let u: URL;
+		try {
+			u = new URL(String(b.url ?? "").trim());
+		} catch {
+			return bad("Please enter the full web address, starting https://");
+		}
+		if (u.protocol !== "https:" && u.protocol !== "http:") return bad("Please enter the full web address, starting https://");
+		const r = await fetch(u.toString(), { headers: { accept: "text/html" }, redirect: "follow" }).catch(() => null);
+		if (!r || !r.ok) return bad(`We couldn't open that page${r ? ` (it answered ${r.status})` : ""}.`);
+		if (!/html|text\/plain/i.test(r.headers.get("content-type") ?? "")) return bad("That address isn't a web page.");
+		const text = (await r.text()).slice(0, 500_000);
+		// Make the page's own short picture and link addresses work in an email.
+		const fixed = text.replace(/\b(src|href)\s*=\s*(["'])(?!https?:|mailto:|data:|#|\{\{)([^"']+)\2/gi, (_m, a: string, q: string, v: string) => {
+			try {
+				return `${a}=${q}${new URL(v, u).toString()}${q}`;
+			} catch {
+				return _m;
+			}
+		});
+		return ok({ html: sanitise(fixed), title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text)?.[1]?.trim() ?? "" });
+	}
+
+	// -- Templates -------------------------------------------------------------------------------------
+	if (path === "/api/templates" && method === "GET") {
+		const { results } = await db.prepare("SELECT id, name, created_at, updated_at FROM templates WHERE brand_id = ? ORDER BY updated_at DESC").bind(brand.id).all();
+		return ok(results);
+	}
+	if (path === "/api/templates" && method === "POST") {
+		const b = await body(request);
+		const id = newId(8);
+		let html = typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : "<p>Hello {{first_name|there}},</p>\n<p>Your words here.</p>";
+		if (typeof b.from === "string") {
+			const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(b.from, brand.id).first<CampaignRow>();
+			if (c) html = c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour);
+		}
+		await db.prepare("INSERT INTO templates (id, brand_id, name, html, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(id, brand.id, str(b.name, 120) || "Untitled template", html, iso(), iso()).run();
+		return ok({ id });
+	}
+	const tm = /^\/api\/templates\/([0-9a-f]{16})$/.exec(path);
+	if (tm) {
+		const t = await db.prepare("SELECT * FROM templates WHERE id = ? AND brand_id = ?").bind(tm[1], brand.id).first<any>();
+		if (!t) return bad("That template has gone.", 404);
+		if (method === "DELETE") {
+			await db.prepare("DELETE FROM templates WHERE id = ?").bind(t.id).run();
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			await db.prepare("UPDATE templates SET name = ?, html = ?, updated_at = ? WHERE id = ?").bind(str(b.name, 120) || "Untitled template", typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : t.html, iso(), t.id).run();
+			return ok();
+		}
+		return ok({ ...t, colour: brand.colour });
+	}
+	const tp = /^\/api\/templates\/([0-9a-f]{16})\/preview$/.exec(path);
+	if (tp) {
+		const t = await db.prepare("SELECT * FROM templates WHERE id = ? AND brand_id = ?").bind(tp[1], brand.id).first<any>();
+		if (!t) return bad("That template has gone.", 404);
+		const out = renderEmail(t.name, t.html, { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, unsubscribeUrl: `${await origin(db, request)}/u/test`, webUrl: null, track: null }, { email: me.email, name: me.name });
+		return new Response(out.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": EMAIL_CSP } });
+	}
+
+	// -- Blocklist -------------------------------------------------------------------------------------
+	if (path === "/api/blocklist" && method === "GET") {
+		const domains = url.searchParams.get("type") === "domains";
+		const q = (url.searchParams.get("q") ?? "").trim().toLowerCase().slice(0, 100);
+		const page = Math.max(0, Number(url.searchParams.get("page")) || 0);
+		const col = domains ? "domain" : "email";
+		const table = domains ? "blocked_domains" : "blocklist";
+		const [rows, counts] = await db.batch([
+			db.prepare(`SELECT ${col} AS value, attempts, updated_at FROM ${table} WHERE brand_id = ? ${q ? `AND ${col} LIKE ?` : ""} ORDER BY updated_at DESC LIMIT 51 OFFSET ?`).bind(brand.id, ...(q ? [`%${q}%`] : []), page * 50),
+			db.prepare("SELECT (SELECT COUNT(*) FROM blocklist WHERE brand_id = ?1) AS emails, (SELECT COUNT(*) FROM blocked_domains WHERE brand_id = ?1) AS domains").bind(brand.id),
+		]);
+		return ok({ rows: rows.results.slice(0, 50), more: rows.results.length > 50, counts: counts.results[0] });
+	}
+	if (path === "/api/blocklist" && method === "POST") {
+		const b = await body(request);
+		const domains = b.type === "domains";
+		const items: string[] = (Array.isArray(b.items) ? b.items : String(b.items ?? "").split(/[\s,;]+/))
+			.map((x: unknown) => String(x ?? "").trim().toLowerCase().replace(/^@/, ""))
+			.filter((x: string) => (domains ? /^[a-z0-9.-]+\.[a-z]{2,}$/.test(x) : !!cleanEmail(x)))
+			.slice(0, 5000);
+		if (b.remove) {
+			if (b.all) await db.prepare(`DELETE FROM ${domains ? "blocked_domains" : "blocklist"} WHERE brand_id = ?`).bind(brand.id).run();
+			else for (let i = 0; i < items.length; i += 100) await db.batch(items.slice(i, i + 100).map((x) => db.prepare(`DELETE FROM ${domains ? "blocked_domains" : "blocklist"} WHERE brand_id = ? AND ${domains ? "domain" : "email"} = ?`).bind(brand.id, x)));
+			return ok();
+		}
+		if (!items.length) return bad(domains ? "Please enter at least one domain, such as example.com." : "Please enter at least one email address.");
+		const now = iso();
+		for (let i = 0; i < items.length; i += 100) await db.batch(items.slice(i, i + 100).map((x) => db.prepare(`INSERT INTO ${domains ? "blocked_domains (brand_id, domain" : "blocklist (brand_id, email"}, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`).bind(brand.id, x, now, now)));
+		await logEvent(db, brand.id, "blocklist", null, null, `${items.length} ${domains ? "domains" : "addresses"} added`).run();
+		return ok({ added: items.length });
+	}
+	if (path === "/api/blocklist/export") {
+		const domains = url.searchParams.get("type") === "domains";
+		const { results } = await db.prepare(`SELECT ${domains ? "domain" : "email"} AS value, attempts, created_at FROM ${domains ? "blocked_domains" : "blocklist"} WHERE brand_id = ? ORDER BY value`).bind(brand.id).all<any>();
+		const lines = [csvLine([domains ? "domain" : "email", "block_attempts", "added"]), ...results.map((r) => csvLine([r.value, String(r.attempts), r.created_at]))];
+		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="blocklist-${domains ? "domains-" : ""}${new Date().toISOString().slice(0, 10)}.csv"`, "cache-control": "no-store" } });
+	}
+
+	// -- A list's subscribers, many at once ---------------------------------------------------------------
+	const lb = /^\/api\/lists\/([0-9a-f]{16})\/(unsubscribe|remove)$/.exec(path);
+	if (lb && method === "POST") {
+		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(lb[1], brand.id).first<ListRow>();
+		if (!l) return bad("That list has gone.", 404);
+		const b = await body(request);
+		const emails: string[] = String(b.emails ?? "").split(/[\s,;]+/).map((x) => cleanEmail(x)).filter((x): x is string => !!x).slice(0, 10000);
+		if (!emails.length) return bad("Please paste at least one email address.");
+		let n = 0;
+		for (let i = 0; i < emails.length; i += 100) {
+			const res = await db.batch(emails.slice(i, i + 100).map((e) => lb[2] === "unsubscribe"
+				? db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE list_id = ? AND status != 'unsubscribed' AND subscriber_id = (SELECT id FROM subscribers WHERE brand_id = ? AND email = ?)").bind(iso(), l.id, brand.id, e)
+				: db.prepare("DELETE FROM memberships WHERE list_id = ? AND subscriber_id = (SELECT id FROM subscribers WHERE brand_id = ? AND email = ?)").bind(l.id, brand.id, e)));
+			n += res.reduce((t, r) => t + (r.meta.changes ?? 0), 0);
+		}
+		if (n) await logEvent(db, brand.id, lb[2] === "unsubscribe" ? "unsubscribed" : "removed", null, null, `${n} from ${l.name} by you`).run();
+		return ok({ changed: n });
 	}
 
 	// -- Reports ---------------------------------------------------------------------------------------

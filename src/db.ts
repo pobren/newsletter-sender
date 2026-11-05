@@ -160,6 +160,11 @@ const SCHEMA = [
 		id INTEGER PRIMARY KEY AUTOINCREMENT, brand_id TEXT NOT NULL, at TEXT NOT NULL, kind TEXT NOT NULL, subscriber_id TEXT, campaign_id TEXT, detail TEXT)`,
 	`CREATE INDEX IF NOT EXISTS events_brand_at ON events (brand_id, at)`,
 	`CREATE INDEX IF NOT EXISTS events_campaign ON events (campaign_id, kind)`,
+	// Saved designs to start new campaigns from.
+	`CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, name TEXT NOT NULL, html TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+	// The blocklist: addresses and whole domains that never get anything, and are never imported.
+	`CREATE TABLE IF NOT EXISTS blocklist (brand_id TEXT NOT NULL, email TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (brand_id, email))`,
+	`CREATE TABLE IF NOT EXISTS blocked_domains (brand_id TEXT NOT NULL, domain TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (brand_id, domain))`,
 	`CREATE TABLE IF NOT EXISTS links (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, url TEXT NOT NULL, clicks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (campaign_id, n))`,
 ];
 // Columns added after the first version. Each runs once; "duplicate column" means it's already there.
@@ -173,7 +178,7 @@ const MIGRATIONS = [
 	"ALTER TABLE brands ADD COLUMN unsub_scope TEXT NOT NULL DEFAULT 'all'",
 	"ALTER TABLE lists ADD COLUMN also_lists TEXT NOT NULL DEFAULT '[]'",
 ];
-const SCHEMA_VERSION = "2";
+const SCHEMA_VERSION = "3";
 
 let ready: Promise<void> | null = null;
 
@@ -187,7 +192,7 @@ export function ensureSchema(db: D1Database): Promise<void> {
 			if (!/duplicate column/i.test(String(e?.message ?? e))) throw e;
 		});
 		// Version 1 had one switch for opens and clicks together.
-		if (have?.value === "1") await db.prepare("UPDATE brands SET track_opens = tracking, track_clicks = tracking").run();
+		if (have?.value === "1" || (have && !have.value)) await db.prepare("UPDATE brands SET track_opens = tracking, track_clicks = tracking").run();
 		await db.prepare("INSERT INTO meta (key, value) VALUES ('schema', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(SCHEMA_VERSION).run();
 	})().catch((e) => {
 		ready = null;
@@ -229,3 +234,17 @@ export async function origin(db: D1Database, request?: Request): Promise<string>
 /** Records something that happened, for the activity list and campaign stats. */
 export const logEvent = (db: D1Database, brand: string, kind: string, sub: string | null, campaign: string | null, detail: string | null = null) =>
 	db.prepare("INSERT INTO events (brand_id, at, kind, subscriber_id, campaign_id, detail) VALUES (?, ?, ?, ?, ?, ?)").bind(brand, iso(), kind, sub, campaign, detail ? detail.slice(0, 300) : null);
+
+/** SQL that's true when a subscriber (alias s) is on the brand's blocklist, by address or domain. Binds: brand id twice. */
+export const BLOCKED_SQL = `(EXISTS (SELECT 1 FROM blocklist b WHERE b.brand_id = ? AND b.email = s.email) OR EXISTS (SELECT 1 FROM blocked_domains d WHERE d.brand_id = ? AND d.domain = substr(s.email, instr(s.email, '@') + 1)))`;
+
+/** Is this address blocked? Counts the attempt when it is. */
+export async function isBlocked(db: D1Database, brandId: string, email: string): Promise<boolean> {
+	const domain = email.split("@")[1] ?? "";
+	const now = iso();
+	const [a, b] = await db.batch([
+		db.prepare("UPDATE blocklist SET attempts = attempts + 1, updated_at = ? WHERE brand_id = ? AND email = ? RETURNING email").bind(now, brandId, email),
+		db.prepare("UPDATE blocked_domains SET attempts = attempts + 1, updated_at = ? WHERE brand_id = ? AND domain = ? RETURNING domain").bind(now, brandId, domain),
+	]);
+	return a.results.length > 0 || b.results.length > 0;
+}

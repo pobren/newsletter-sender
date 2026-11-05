@@ -3,7 +3,7 @@
 // report bounces and spam complaints to.
 
 import { csvLine, cleanEmail } from "./csv.ts";
-import { getMeta, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
+import { getMeta, isBlocked, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
 import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
 import { campaignContent, safeJson, sendSig } from "./sending.ts";
@@ -72,7 +72,7 @@ async function tooMany(db: D1Database, ip: string): Promise<boolean> {
 }
 
 /** Someone signing up, from the hosted page, a form on any website or the API. */
-export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" | "elsewhere" } | { error: string }> {
+export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" | "elsewhere" | "blocked" } | { error: string }> {
 	const db = env.DB;
 	const email = cleanEmail(input.email);
 	if (!email) return { error: "Please check your email address." };
@@ -83,6 +83,8 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 		if (typeof v === "string" && v.trim()) fields[f.key] = v.trim().slice(0, 500);
 		else if (f.required && !confirmed) return { error: `Please fill in ${f.label}.` };
 	}
+	// The blocklist: never added, and (on public forms) never told why.
+	if (await isBlocked(db, b.id, email)) return { ok: true, status: "blocked" };
 	const now = iso();
 	await db.prepare("INSERT INTO subscribers (id, brand_id, email, name, fields, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (brand_id, email) DO NOTHING").bind(newId(8), b.id, email, name, JSON.stringify(fields), newId(16), now).run();
 	const s = (await db.prepare("SELECT * FROM subscribers WHERE brand_id = ? AND email = ?").bind(b.id, email).first<SubscriberRow>())!;

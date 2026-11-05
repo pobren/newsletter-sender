@@ -10,7 +10,7 @@
 // A send row is only ever sent once: it's marked the moment the service accepts it, so a retried batch skips it.
 
 import { sesAccount } from "./aws.ts";
-import { iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
+import { BLOCKED_SQL, iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
 import { cleanBlocks, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
@@ -69,8 +69,8 @@ export function safeJson(s: string | null | undefined): any {
 /** The WHERE part (and its values) that picks a campaign's readers: in any chosen list, with any chosen tag. */
 function audienceSql(brandId: string, a: Audience): { sql: string; binds: unknown[] } {
 	const lists = a.lists.map(() => "?").join(", ");
-	let sql = `s.brand_id = ? AND s.suppressed IS NULL AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'active' AND m.list_id IN (${lists}))`;
-	const binds: unknown[] = [brandId, ...a.lists];
+	let sql = `s.brand_id = ? AND s.suppressed IS NULL AND NOT ${BLOCKED_SQL} AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.status = 'active' AND m.list_id IN (${lists}))`;
+	const binds: unknown[] = [brandId, brandId, brandId, ...a.lists];
 	if (a.tags.length) {
 		sql += ` AND EXISTS (SELECT 1 FROM json_each(s.tags) t WHERE t.value IN (${a.tags.map(() => "?").join(", ")}))`;
 		binds.push(...a.tags);
@@ -107,7 +107,7 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 	const brand = await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>();
 	if (!brand) return { error: "This campaign's brand has gone." };
 	const provider = await loadProvider(db, brand);
-	if (!provider) return { error: "Please choose how to send first, on the Sending tab." };
+	if (!provider) return { error: "Please choose how to send first, under Settings, Sending." };
 	const audience = parseAudience(c.audience);
 	if (!audience.lists.length) return { error: "Please choose at least one list to send to." };
 	if (!hasContent(campaignContent(c))) return { error: "This email is empty. Please write something first." };
@@ -211,13 +211,14 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const brand = await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>();
 	const provider = brand ? await loadProvider(db, brand) : null;
 	if (!brand || !provider) {
-		await pause(db, c, "The sending service was removed, so sending stopped. Add it again on the Sending tab, then carry on.");
+		await pause(db, c, "The sending service was removed, so sending stopped. Add it again under Settings, Sending, then carry on.");
 		return 0;
 	}
 	// Anyone who bounced, complained or left this email's lists since the send started is skipped.
 	await db.prepare(`UPDATE sends SET status = 'skipped' WHERE campaign_id = ? AND id BETWEEN ? AND ? AND status = 'queued' AND (subscriber_id IN (SELECT id FROM subscribers WHERE suppressed IS NOT NULL)
-		OR NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = sends.subscriber_id AND m.status = 'active' AND m.list_id IN (SELECT value FROM json_each(?))))`)
-		.bind(c.id, b.from, b.to, JSON.stringify(parseAudience(c.audience).lists)).run();
+		OR NOT EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = sends.subscriber_id AND m.status = 'active' AND m.list_id IN (SELECT value FROM json_each(?)))
+		OR EXISTS (SELECT 1 FROM subscribers s WHERE s.id = sends.subscriber_id AND ${BLOCKED_SQL}))`)
+		.bind(c.id, b.from, b.to, JSON.stringify(parseAudience(c.audience).lists), c.brand_id, c.brand_id).run();
 	const { results: rows } = await db
 		.prepare(`SELECT x.id, s.id AS sub, s.email, s.name, s.fields, s.token FROM sends x JOIN subscribers s ON s.id = x.subscriber_id
 			WHERE x.campaign_id = ? AND x.id BETWEEN ? AND ? AND x.status = 'queued' AND s.suppressed IS NULL ORDER BY x.id`)
