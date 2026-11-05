@@ -137,6 +137,12 @@ export async function oneOff(env: Env, b: BrandRow, to: string, subject: string,
 	return r.ok;
 }
 
+/** The reader's country as two letters, from Cloudflare. Only the country is kept, never the IP address. */
+export function countryOf(request: Request): string | null {
+	const c = String((request as any).cf?.country ?? "").toUpperCase();
+	return /^[A-Z]{2}$/.test(c) && c !== "XX" && c !== "T1" ? c : null;
+}
+
 export async function handlePublic(request: Request, env: Env, url: URL): Promise<Response | null> {
 	const db = env.DB;
 	const path = url.pathname;
@@ -241,7 +247,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	// -- Opens and clicks (only in emails sent with them switched on) -------------------------------
 	const om = /^\/o\/(\d+)\.([0-9a-f]{12})$/.exec(path);
 	if (om) {
-		if ((await sendSig(await sealSecret(db), Number(om[1]))) === om[2]) await db.prepare("UPDATE sends SET opened_at = COALESCE(opened_at, ?) WHERE id = ?").bind(iso(), Number(om[1])).run();
+		if ((await sendSig(await sealSecret(db), Number(om[1]))) === om[2]) await db.prepare("UPDATE sends SET opened_at = COALESCE(opened_at, ?), opens = opens + 1, country = COALESCE(country, ?) WHERE id = ?").bind(iso(), countryOf(request), Number(om[1])).run();
 		return new Response(Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (ch) => ch.charCodeAt(0)), { headers: { "content-type": "image/gif", "cache-control": "no-store" } });
 	}
 	const lm = /^\/l\/(\d+)\.([0-9a-f]{12})\/(\d{1,3})$/.exec(path);
@@ -252,8 +258,9 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		if (!link) return new Response("That link has expired.", { status: 404 });
 		if ((await sendSig(await sealSecret(db), id)) === lm[2]) {
 			await db.batch([
-				db.prepare("UPDATE sends SET clicked_at = COALESCE(clicked_at, ?), opened_at = COALESCE(opened_at, ?) WHERE id = ?").bind(iso(), iso(), id),
+				db.prepare("UPDATE sends SET clicked_at = COALESCE(clicked_at, ?), opened_at = COALESCE(opened_at, ?), country = COALESCE(country, ?) WHERE id = ?").bind(iso(), iso(), countryOf(request), id),
 				db.prepare("UPDATE links SET clicks = clicks + 1 WHERE campaign_id = ? AND n = ?").bind(send!.campaign_id, Number(lm[3])),
+				db.prepare("INSERT INTO link_clicks (campaign_id, n, send_id, at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING").bind(send!.campaign_id, Number(lm[3]), id, iso()),
 			]);
 		}
 		return Response.redirect(link.url, 302);
