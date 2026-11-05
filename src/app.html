@@ -73,7 +73,7 @@ nav.side{position:sticky;top:86px;display:flex;flex-direction:column;gap:2px}
 nav.side p{margin:20px 12px 6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}nav.side p:first-child{margin-top:0}
 nav.side a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:var(--text);text-decoration:none;font-weight:600;font-size:15px}
 nav.side a.on,nav.side a:hover{background:var(--pink);color:var(--cd)}
-.shell main{max-width:none;margin:0;min-width:0}.shell:has(>#side[hidden]) main{max-width:1200px;margin:0 auto}
+.shell main{max-width:none;margin:0;min-width:0;min-height:70vh}.shell:has(>#side[hidden]) main{max-width:1200px;margin:0 auto}
 .toolbar-row{margin:18px 0 14px}input.search{width:260px;max-width:100%}
 .card.flush{padding:0;overflow:hidden}.pad{padding:22px;margin:0}.small{font-size:13px}.scroll{overflow-x:auto}
 table.data th{background:var(--bg);padding:12px 14px;white-space:nowrap}table.data td{padding:12px 14px;vertical-align:middle}table.data tr:last-child td{border-bottom:0}table.data .c{text-align:center;width:1%}table.data tr:hover td{background:var(--soft)}table.data a{text-decoration:none}table.data a:hover{text-decoration:underline}
@@ -229,6 +229,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 	</aside>
 	<main id="main"></main>
 </div>
+<script>/* Signed in last time: show the header and menu straight away, so the page doesn't jump when it loads. */try{if(localStorage.getItem("ns.in")){document.getElementById("top").hidden=false;document.getElementById("side").hidden=false;}}catch(e){}</script>
 <p class="muted" style="text-align:center;font-size:13px">Newsletter Sender {{VERSION}} · <a href="https://newslettersender.com/">newslettersender.com</a></p>
 <script>
 "use strict";
@@ -275,12 +276,14 @@ async function boot() {
 	if (code || !state.setUp) return setupScreen(state, code);
 	if (!state.signedIn) return signinScreen(state);
 	$("#top").hidden = $("#side").hidden = false;
+	store.set("ns.in", "1");
 	api("/api/brand").then(showName).catch(() => {});
 	window.onhashchange = route;
 	route();
 }
 function setupScreen(state, code) {
 	$("#top").hidden = $("#side").hidden = true;
+	store.set("ns.in", null);
 	if (!code) {
 		main.innerHTML = `<div class="center card"><h1>Welcome to Newsletter Sender</h1><p>To make your account, open the set-up link from when you installed it: <code>/setup?code=your-code</code>.</p>${state.setupTokenOk ? "" : `<p class="err">The SETUP_TOKEN secret isn't set yet (or is still the example). Add it under your Worker's Settings, Variables and Secrets, then use that code.</p>`}</div>`;
 		return;
@@ -301,6 +304,7 @@ function setupScreen(state, code) {
 }
 function signinScreen(state) {
 	$("#top").hidden = $("#side").hidden = true;
+	store.set("ns.in", null);
 	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><button class="btn">${icon("out")}Sign in</button><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
 	loadTurnstile(state);
 	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
@@ -351,12 +355,17 @@ const rate = (n, of, cls) => (of ? `<span class="rate ${cls}">${(Math.round((n /
 
 // -- All campaigns ---------------------------------------------------------------------------------------
 async function campaigns() {
-	const [r, o] = await Promise.all([api("/api/campaigns"), api("/api/overview")]);
+	// The health card asks the sending service for its numbers, which can take a moment. Last time's card shows straight
+	// away and is swapped in place, so the page doesn't jump; with nothing saved yet we wait for it.
+	const hp = api("/api/health").catch(() => null);
+	let cached = null;
+	try { cached = JSON.parse(store.get("ns.health") || "null"); } catch {}
+	const [r, o, h0] = await Promise.all([api("/api/campaigns"), api("/api/overview"), cached ? Promise.resolve(cached) : hp]);
 	const tr = r.tracking;
 	const todo = [[!!o.named, "Add your company or newsletter name", "#settings"], [!!o.sending, "Choose how to send", "#settings/sending"], [o.subscribers > 0, "Add your first subscribers", "#lists"], [!!o.last, "Send your first campaign", "#new"]];
 	main.innerHTML = `<h1>All campaigns</h1>
 	${todo.some((t) => !t[0]) && !store.get("ns.gs") ? `<div class="card gs" style="margin-top:16px"><button class="icon-btn close" id="gsx" title="Close" aria-label="Close getting started">${icon("x")}</button><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
-	<div id="health"></div>
+	<div id="health">${o.sending && h0?.provider ? healthHtml(h0) : ""}</div>
 	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past issues">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
 	<div class="card flush">${r.campaigns.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th><th>Unique opens</th><th>Unique clicks</th><th class="c">Duplicate</th><th class="c">Delete</th></tr></thead><tbody>${r.campaigns.map((c) => {
 		const sent = ["sent", "sending", "paused", "cancelled"].includes(c.status);
@@ -368,7 +377,12 @@ async function campaigns() {
 	}).join("")}</tbody></table></div>` : `<p class="muted pad">No campaigns yet. Press Create and send a new campaign to write your first.</p>`}</div>
 	${tr.opens || tr.clicks ? "" : `<p class="hint">Opens and clicks are off. <a href="#settings/tracking">Switch them on in Settings</a> if you'd like them.</p>`}`;
 	$("#q").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$("tr[data-q]").forEach((tr) => (tr.hidden = q && !tr.dataset.q.includes(q))); };
-	if (o.sending) api("/api/health").then((h) => { const el = $("#health"); if (el && h.provider) el.innerHTML = healthHtml(h); }).catch(() => {});
+	hp.then((h) => {
+		if (!h?.provider) return store.set("ns.health", "");
+		store.set("ns.health", JSON.stringify(h));
+		const el = $("#health");
+		if (el && o.sending) { const html = healthHtml(h); if (el.innerHTML !== html) el.innerHTML = html; }
+	});
 	$("#gsx") && ($("#gsx").onclick = () => { store.set("ns.gs", "1"); $("#gsx").closest(".card").remove(); toast("Hidden. Bring it back any time under Settings, Account."); });
 	$$("[data-dup]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { const x = await api(`/api/campaigns/${b.closest("tr").dataset.id}/duplicate`, { body: {} }); location.hash = `email/${x.id}`; })));
 	$$("[data-del]").forEach((b) => (b.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this campaign and its stats for good?")) return; await api(`/api/campaigns/${b.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));

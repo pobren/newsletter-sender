@@ -8,12 +8,12 @@
 	"d1_databases": [{ "binding": "DB" }],
 	// Runs the Worker near the database when that's quicker, since each page asks the database a few things.
 	"placement": { "mode": "smart" },
-	// The send queue: one batch of 50 emails per worker (a slow SES account takes about four minutes a batch, inside
-	// the queue's 15 minute limit), up to 10 workers at once. Keep max_concurrency the same as CONCURRENCY
+	// The send queue: one batch of 200 emails per worker (a slow SES account takes about four minutes a batch, inside
+	// the queue's 15 minute limit), up to 20 workers at once. Keep max_concurrency the same as CONCURRENCY
 	// in src/sending.ts.
 	"queues": {
 		"producers": [{ "binding": "SENDS", "queue": "newsletter-sender-sends" }],
-		"consumers": [{ "queue": "newsletter-sender-sends", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 12, "max_concurrency": 10 }]
+		"consumers": [{ "queue": "newsletter-sender-sends", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 12, "max_concurrency": 20 }]
 	},
 	// Pictures in your emails.
 	"r2_buckets": [{ "binding": "IMAGES", "bucket_name": "newsletter-sender-images" }],
