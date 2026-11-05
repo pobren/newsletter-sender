@@ -185,8 +185,10 @@ const MIGRATIONS = [
 	// Reports: every open counted (not just the first), and the reader's country (two letters from Cloudflare, never the IP address).
 	"ALTER TABLE sends ADD COLUMN opens INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE sends ADD COLUMN country TEXT",
+	// Sending health: 1 = paused for safety (too many bounces or spam complaints), 2 = the owner chose to carry on anyway.
+	"ALTER TABLE campaigns ADD COLUMN health INTEGER NOT NULL DEFAULT 0",
 ];
-const SCHEMA_VERSION = "5";
+const SCHEMA_VERSION = "6";
 
 let ready: Promise<void> | null = null;
 

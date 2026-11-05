@@ -12,7 +12,7 @@
 import { sesAccount } from "./aws.ts";
 import { BLOCKED_SQL, iso, logEvent, newId, origin, type BrandRow, type CampaignRow, type Env, type SendBatch } from "./db.ts";
 import { sendOne, sesKeys, type OutEmail, type ProviderConfig, type Sent } from "./providers.ts";
-import { cleanBlocks, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
+import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Content, type Look, type Reader } from "./render.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 
 /** Send rows in one queue message. */
@@ -157,7 +157,7 @@ export async function enqueue(env: Env, campaign: string, lo: number, hi: number
 
 /** Carries on a paused campaign: the rows still queued go back on the queue. */
 export async function resume(env: Env, c: CampaignRow): Promise<{ ok: true } | { error: string }> {
-	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'paused' RETURNING id").bind(iso(), c.id).first();
+	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', health = CASE WHEN health = 1 THEN 2 ELSE health END, updated_at = ? WHERE id = ? AND status = 'paused' RETURNING id").bind(iso(), c.id).first();
 	if (!claim) return { error: "Only a paused campaign can carry on." };
 	const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
 	if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi);
@@ -262,6 +262,10 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	});
 	await flush();
 
+	if (outcome.done.some(([, s]) => s.quota)) {
+		await pause(db, c, "Paused: you've used up today's sending limit with your sending service. The rest are still waiting. Press Carry on sending once the limit frees up (Amazon SES counts the last 24 hours), or ask for a higher limit.");
+		return 0;
+	}
 	// Every email failing the same way (an unverified domain, a revoked key) means stop and tell the owner.
 	const failed = outcome.done.filter(([, s]) => !s.ok && !s.throttled && !s.permanent);
 	if (failed.length >= 5 && failed.length === outcome.done.length) {
@@ -280,7 +284,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	return 0;
 }
 
-const mergeSubject = (subject: string, r: Reader) => subject.replace(/\{\{\s*([a-z0-9_]+)\s*(?:\|([^}]*))?\}\}/gi, (_a, k: string, fb = "") => {
+const mergeSubject = (subject: string, r: Reader) => foreignTags(subject).replace(/\{\{\s*([a-z0-9_]+)\s*(?:\|([^}]*))?\}\}/gi, (_a, k: string, fb = "") => {
 	const name = (r.name ?? "").trim();
 	const v = k.toLowerCase() === "first_name" ? name.split(/\s+/)[0] ?? "" : k.toLowerCase() === "name" ? name : k.toLowerCase() === "email" ? r.email : r.fields?.[k.toLowerCase()] ?? "";
 	return v.trim() || fb.trim();

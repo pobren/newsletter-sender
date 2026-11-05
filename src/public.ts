@@ -9,6 +9,7 @@ import { cleanBlocks, esc, renderEmail } from "./render.ts";
 import { campaignContent, safeJson, sendSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
+import { checkCampaign } from "./health.ts";
 
 export { csvLine };
 
@@ -305,4 +306,5 @@ export async function recordMailEvent(db: D1Database, b: BrandRow, e: MailEvent)
 		if (e.permanent) stmts.push(db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE id = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(e.kind === "complaint" ? "complained" : "bounced", iso(), s.id));
 		await db.batch(stmts);
 	}
+	if (e.campaign && (e.permanent || e.kind === "complaint")) await checkCampaign(db, e.campaign);
 }

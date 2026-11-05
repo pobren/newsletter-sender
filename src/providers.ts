@@ -84,6 +84,8 @@ export interface Sent {
 	throttled?: boolean;
 	/** A problem with this one address (it won't work next time either). */
 	permanent?: boolean;
+	/** The account's daily sending limit is used up. */
+	quota?: boolean;
 	error?: string;
 }
 
@@ -179,6 +181,7 @@ export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: st
 /** Sorts a failed send into "slow down and retry", "this address won't work" or "something else is wrong". */
 export function classify(status: number, text: string): Sent {
 	const error = text.replace(/\s+/g, " ").slice(0, 240) || `Error ${status}`;
+	if (/Daily message quota exceeded|daily (sending )?(quota|limit)/i.test(text)) return { ok: false, throttled: true, quota: true, error };
 	if (status === 429 || /Throttl|TooManyRequests|Maximum sending rate exceeded|rate limit/i.test(text)) return { ok: false, throttled: true, error };
 	if (status >= 500) return { ok: false, throttled: true, error };
 	// An address the service refuses outright (on its suppression list, or not a valid address).

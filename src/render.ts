@@ -158,10 +158,18 @@ export function htmlToText(html: string): string {
 	return s.split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Merge tags from Sendy and Mailchimp, turned into ours, so a design brought over from either works as it is. */
+export function foreignTags(h: string): string {
+	return h
+		.replace(/\[Name,\s*fallback=([^\]]*)\]/gi, "{{first_name|$1}}").replace(/\[Name\]/gi, "{{first_name}}").replace(/\[Email\]/gi, "{{email}}")
+		.replace(/\[unsubscribe\]/gi, "{{unsubscribe_url}}").replace(/\[webversion\]/gi, "{{web_url}}")
+		.replace(/\*\|FNAME\|\*/g, "{{first_name}}").replace(/\*\|EMAIL\|\*/g, "{{email}}").replace(/\*\|UNSUB\|\*/g, "{{unsubscribe_url}}").replace(/\*\|ARCHIVE\|\*/g, "{{web_url}}");
+}
+
 /** The email for one reader. Pass a reader of { email: "" } with no tracking for the archive and previews. */
 export function renderEmail(subject: string, content: Content, look: Look, reader: Reader): Rendered {
 	const colour = /^#[0-9a-f]{6}$/i.test(look.colour) ? look.colour : "#a3195b";
-	let body = sanitise(typeof content === "string" ? content : blocksToHtml(content, colour));
+	let body = foreignTags(sanitise(typeof content === "string" ? content : blocksToHtml(content, colour)));
 	const whole = isDocument(body);
 	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? ""));
 	// The plain text version shows the real links, not the click counting ones.

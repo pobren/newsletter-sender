@@ -9,6 +9,7 @@ import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./ren
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
 import { loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
+import { brandHealth } from "./health.ts";
 import { dnsHost, findZone, TOKEN_URL } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
@@ -238,6 +239,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if (p?.provider !== "ses") return bad("Please save your Amazon SES keys first.");
 		const r = await setUpSes(db, brand, p, request);
 		return "error" in r ? bad(r.error) : ok(r);
+	}
+	if (path === "/api/health") {
+		const h = await brandHealth(db, brand.id);
+		const p = await loadProvider(db, brand);
+		const acct = p?.provider === "ses" ? await sesAccount(sesKeys(p)).catch((e) => ({ error: (e as Error).message })) : null;
+		return ok({ ...h, provider: p?.provider ?? null, region: p?.region ?? null, ses: acct });
 	}
 	if (path === "/api/sending/ses-status") {
 		const p = await loadProvider(db, brand);
