@@ -101,13 +101,13 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (refused) return bad(refused, 403);
 	await origin(db, request);
 
+	// More brands, client logins and every brand at a glance come from the agency edition.
+	const extra = await addon.api({ request, env, url, path, method, secure, me, brands, brand });
+	if (extra) return extra;
 	// -- Who's signed in, and which brands they can open ----------------------------------------
 	if (path === "/api/brands" && method === "GET") {
 		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can, me: { name: me.name, email: me.email }, edition: addon.edition });
 	}
-	// More brands, client logins and every brand at a glance come from the agency edition.
-	const extra = await addon.api({ request, env, url, path, method, secure, me, brands, brand });
-	if (extra) return extra;
 
 	if (path === "/api/signout-everywhere" && method === "POST") {
 		await signOutEverywhere(db, me.id);
