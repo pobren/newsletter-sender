@@ -36,7 +36,11 @@ export interface AccountRow {
 	email: string;
 	name: string | null;
 	password: string | null;
-	role: "owner";
+	role: "owner" | "client";
+	/** A client's one brand (the owner has none: they see every brand). */
+	brand_id?: string | null;
+	/** A client's permissions as JSON (team.ts). */
+	limits?: string | null;
 	session_ver: number;
 	reset_token: string | null;
 	reset_until: string | null;
@@ -213,13 +217,16 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN from_name TEXT",
 	"ALTER TABLE campaigns ADD COLUMN from_email TEXT",
 	"ALTER TABLE campaigns ADD COLUMN reply_to TEXT",
+	// Client logins: which brand they can open, and what they're allowed to do there.
+	"ALTER TABLE accounts ADD COLUMN brand_id TEXT",
+	"ALTER TABLE accounts ADD COLUMN limits TEXT",
 	// Fewer writes per email (9 down to 4): batches find their rows by number, nothing looks up the sending service's
 	// message ID, and the activity index no longer needs the time it was sent.
 	"DROP INDEX IF EXISTS sends_campaign_status",
 	"DROP INDEX IF EXISTS sends_message",
 	"DROP INDEX IF EXISTS sends_subscriber",
 ];
-const SCHEMA_VERSION = "13";
+const SCHEMA_VERSION = "14";
 
 let ready: Promise<void> | null = null;
 
