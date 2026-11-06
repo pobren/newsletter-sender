@@ -459,7 +459,7 @@ async function campaigns() {
 	main.innerHTML = `<h1>All campaigns</h1>
 	${todo.some((t) => !t[0]) && !store.get("ns.gs") ? `<div class="card gs" style="margin-top:16px"><button class="icon-btn close" id="gsx" title="Close" aria-label="Close getting started">${icon("x")}</button><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
 	<div id="health">${o.sending && h0?.provider ? healthHtml(h0) : ""}</div>
-	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past campaigns">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
+	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past campaigns">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
 	<div class="card flush">${r.campaigns.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th><th>Unique opens</th><th>Unique clicks</th><th class="c">Duplicate</th><th class="c">Delete</th></tr></thead><tbody>${r.campaigns.map((c) => {
 		const sent = ["sent", "sending", "paused", "cancelled"].includes(c.status);
 		const subj = c.subject === "Untitled email" ? "" : c.subject;
@@ -467,7 +467,7 @@ async function campaigns() {
 		<td>${sent ? num(c.total) : "-"}</td><td>${c.status === "sending" || c.status === "paused" ? `<span class="lpct">${c.total ? Math.floor((Math.min(c.sent ?? 0, c.total) / c.total) * 100) : 0}%</span> ${c.status === "paused" ? "paused" : "sending"}` : sent ? ago(c.started_at) : "-"}</td>
 		<td>${sent && tr.opens ? rate(c.opens, c.sent, "open") : sent ? `<span class="muted small">Off</span>` : "-"}</td><td>${sent && tr.clicks ? rate(c.clicks, c.sent, "click") : sent ? `<span class="muted small">Off</span>` : "-"}</td>
 		<td class="c"><button class="icon-btn" data-dup title="Duplicate" aria-label="Duplicate">${icon("copy")}</button></td><td class="c"><button class="icon-btn" data-del title="Delete" aria-label="Delete">${icon("trash")}</button></td></tr>`;
-	}).join("")}</tbody></table></div>` : `<p class="muted pad">No campaigns yet. Press Create and send a new campaign to write your first.</p>`}</div>
+	}).join("")}</tbody></table></div>` : `<p class="muted pad">No campaigns yet. Press Create campaign to write your first.</p>`}</div>
 	${tr.opens || tr.clicks ? "" : `<p class="hint">Open and click tracking is currently turned off. You can <a href="#settings/tracking">enable tracking at any time in Settings</a>.</p>`}`;
 	$("#q").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$("tr[data-q]").forEach((tr) => (tr.hidden = q && !tr.dataset.q.includes(q))); };
 	hp.then((h) => {
