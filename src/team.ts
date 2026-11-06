@@ -50,7 +50,7 @@ export function notAllowed(a: Pick<AccountRow, "role">, can: Can, path: string, 
 		return "Changing settings is switched off for your login. Please ask the owner.";
 	if (!can.send && ((/^\/api\/campaigns\/[0-9a-f]{16}\/(send|schedule|resume)$/.test(path) && write) || (/^\/api\/automations(\/|$)/.test(path) && write)))
 		return "Sending is switched off for your login. You can still write and test campaigns: the owner sends them.";
-	if (!can.import && path === "/api/import" && write) return "Importing is switched off for your login. Please ask the owner.";
+	if (!can.import && (path === "/api/import" || path.startsWith("/api/move/")) && write) return "Importing is switched off for your login. Please ask the owner.";
 	if (!can.export && (path === "/api/export" || path === "/api/blocklist/export" || (/^\/api\/campaigns\/[0-9a-f]{16}\/people$/.test(path) && !write)))
 		return "Downloading subscribers is switched off for your login. Please ask the owner.";
 	if (!can.delete && ((/^\/api\/(subscribers|lists)\/[0-9a-f]{16}$/.test(path) && method === "DELETE") || /^\/api\/lists\/[0-9a-f]{16}\/(delete|remove)$/.test(path)))
