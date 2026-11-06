@@ -239,8 +239,11 @@ const MIGRATIONS = [
 	"ALTER TABLE memberships ADD COLUMN referred_by TEXT",
 	"ALTER TABLE lists ADD COLUMN referrals TEXT",
 	"CREATE INDEX IF NOT EXISTS memberships_ref ON memberships (referred_by) WHERE referred_by IS NOT NULL",
+	// Passkeys (src/passkeys.ts): the public key only, never anything secret.
+	"CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL, public_key TEXT NOT NULL, alg INTEGER NOT NULL, rp_id TEXT NOT NULL, sign_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, last_used_at TEXT)",
+	"CREATE INDEX IF NOT EXISTS passkeys_account ON passkeys (account_id)",
 ];
-const SCHEMA_VERSION = "17";
+const SCHEMA_VERSION = "18";
 
 let ready: Promise<void> | null = null;
 

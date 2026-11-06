@@ -7,11 +7,12 @@ import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, mak
 import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { getBackup, KEEP, listBackups, makeBackup, restoreBackup } from "./backup.ts";
-import { firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { accountById, firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { addWebhook, isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
+import { ALGS, b64url, checkClientData, keyUsable, newChallenge, passkeyName, takeChallenge, unb64url, verifyAssertion, type PasskeyRow } from "./passkeys.ts";
 import { canSendFrom, installId, linksToken, ownLinksToken, loadProvider, saveLinksToken, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
@@ -85,6 +86,30 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		await clearFailures(db, email);
 		return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 	}
+	// -- Passkeys: signing in without a password ---------------------------------------------------
+	if (path === "/api/passkey/signin-options" && method === "POST") {
+		return ok({ challenge: await newChallenge(db, "signin"), rpId: url.hostname });
+	}
+	if (path === "/api/passkey/signin" && method === "POST") {
+		const b = await body(request);
+		const fail = (m: string) => bad(m, 401);
+		try {
+			const clientData = unb64url(String(b.clientDataJSON ?? ""));
+			const cd = checkClientData(clientData, "webauthn.get", url.origin);
+			if ("error" in cd) return fail(cd.error);
+			if (!(await takeChallenge(db, cd.challenge, "signin"))) return fail("That passkey prompt ran out of time. Please try again.");
+			const pk = await db.prepare("SELECT * FROM passkeys WHERE id = ? AND rp_id = ?").bind(String(b.id ?? ""), url.hostname).first<PasskeyRow>();
+			if (!pk) return fail("We don't know that passkey here. Sign in with your password, then add it in Settings, Account.");
+			const r = await verifyAssertion({ publicKey: unb64url(pk.public_key), alg: pk.alg, rpId: pk.rp_id, authenticatorData: unb64url(String(b.authenticatorData ?? "")), clientDataJSON: clientData, signature: unb64url(String(b.signature ?? "")), storedCount: pk.sign_count });
+			if ("error" in r) return fail(r.error);
+			const a = await accountById(db, pk.account_id);
+			if (!a) return fail("That passkey's account has gone.");
+			await db.prepare("UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?").bind(r.count, iso(), pk.id).run();
+			return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
+		} catch {
+			return fail("That passkey reply couldn't be read. Please try again.");
+		}
+	}
 	// The agency edition's routes that work before signing in (a client's invite link).
 	const early = await addon.open(request, env, url);
 	if (early) return early;
@@ -110,6 +135,49 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can, me: { name: me.name, email: me.email }, edition: addon.edition });
 	}
 
+	// -- Your account: password and passkeys --------------------------------------------------------
+	if (path === "/api/account" && method === "GET") {
+		const keys = (await db.prepare("SELECT id, name, rp_id, created_at, last_used_at FROM passkeys WHERE account_id = ? ORDER BY created_at").bind(me.id).all<PasskeyRow>()).results;
+		return ok({ email: me.email, name: me.name, passkeys: keys.map((k) => ({ id: k.id, name: k.name, created_at: k.created_at, last_used_at: k.last_used_at, here: k.rp_id === url.hostname, site: k.rp_id })) });
+	}
+	if (path === "/api/account/password" && method === "POST") {
+		const b = await body(request);
+		if (!me.password || typeof b.current !== "string" || !(await checkPassword(b.current, me.password))) return bad("Your current password isn't right.");
+		const problem = passwordProblem(b.password);
+		if (problem) return bad(problem);
+		await db.prepare("UPDATE accounts SET password = ?, session_ver = session_ver + 1 WHERE id = ?").bind(await hashPassword(b.password), me.id).run();
+		// Every other device is signed out; this one stays signed in.
+		return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, { id: me.id, session_ver: me.session_ver + 1 }, secure) } });
+	}
+	if (path === "/api/passkey/add-options" && method === "POST") {
+		const have = (await db.prepare("SELECT id FROM passkeys WHERE account_id = ? AND rp_id = ?").bind(me.id, url.hostname).all<{ id: string }>()).results;
+		return ok({ challenge: await newChallenge(db, "add", me.id), rpId: url.hostname, rpName: brand.app_name || "Newsletter Sender", user: { id: b64url(new TextEncoder().encode(me.id)), name: me.email, displayName: me.name || me.email }, exclude: have.map((k) => k.id), algs: ALGS });
+	}
+	if (path === "/api/passkey/add" && method === "POST") {
+		const b = await body(request);
+		try {
+			const cd = checkClientData(unb64url(String(b.clientDataJSON ?? "")), "webauthn.create", url.origin);
+			if ("error" in cd) return bad(cd.error);
+			if (!(await takeChallenge(db, cd.challenge, "add", me.id))) return bad("That passkey prompt ran out of time. Please try again.");
+			const id = String(b.id ?? "");
+			const alg = Number(b.alg);
+			const key = unb64url(String(b.publicKey ?? ""));
+			if (!/^[A-Za-z0-9_-]{16,1400}$/.test(id)) return bad("That passkey's ID couldn't be read.");
+			if (!ALGS.includes(alg) || !(await keyUsable(key, alg))) return bad("This device made a kind of passkey we can't use yet. Please try another device or browser.");
+			const count = (await db.prepare("SELECT COUNT(*) AS n FROM passkeys WHERE account_id = ?").bind(me.id).first<{ n: number }>())!.n;
+			if (count >= 20) return bad("You already have 20 passkeys. Please remove one first.");
+			const name = str(b.name, 60) || passkeyName(request.headers.get("user-agent"));
+			await db.prepare("INSERT INTO passkeys (id, account_id, name, public_key, alg, rp_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING").bind(id, me.id, name, b64url(key), alg, url.hostname, iso()).run();
+			return ok({ ok: true, name });
+		} catch {
+			return bad("That passkey reply couldn't be read. Please try again.");
+		}
+	}
+	const pkm = /^\/api\/passkey\/([A-Za-z0-9_-]{16,1400})$/.exec(path);
+	if (pkm && method === "DELETE") {
+		await db.prepare("DELETE FROM passkeys WHERE id = ? AND account_id = ?").bind(pkm[1], me.id).run();
+		return ok();
+	}
 	if (path === "/api/signout-everywhere" && method === "POST") {
 		await signOutEverywhere(db, me.id);
 		return ok({ ok: true }, { headers: { "set-cookie": clearCookie(secure) } });

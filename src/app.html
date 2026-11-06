@@ -287,6 +287,43 @@ async function run(btn, fn) {
 	const was = btn && btn.disabled; if (btn) btn.disabled = true;
 	try { return await fn(); } catch (e) { toast(e.message); } finally { if (btn) btn.disabled = was; }
 }
+// -- Passkeys (src/passkeys.ts): Face ID, Touch ID, Windows Hello or a phone instead of a password ---------------
+const PK = Boolean(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => { const t = s.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(t + "=".repeat((4 - (t.length % 4)) % 4)), (c) => c.charCodeAt(0)); };
+function pkError(e) {
+	if (e && e.name === "NotAllowedError") return new Error("The passkey prompt was closed, so nothing changed.");
+	if (e && e.name === "InvalidStateError") return new Error("This device already has a passkey for your account.");
+	return e instanceof Error ? e : new Error("That didn't work. Please try again.");
+}
+async function addPasskey() {
+	const o = await api("/api/passkey/add-options", { body: {} });
+	let cred;
+	try {
+		cred = await navigator.credentials.create({ publicKey: { challenge: unb64u(o.challenge), rp: { id: o.rpId, name: o.rpName }, user: { id: unb64u(o.user.id), name: o.user.name, displayName: o.user.displayName }, pubKeyCredParams: o.algs.map((alg) => ({ type: "public-key", alg })), excludeCredentials: o.exclude.map((id) => ({ type: "public-key", id: unb64u(id) })), authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "preferred" }, attestation: "none", timeout: 120000 } });
+	} catch (e) { throw pkError(e); }
+	const r = cred.response;
+	const pub = r.getPublicKey ? r.getPublicKey() : null;
+	if (!pub) throw new Error("This browser can't make passkeys for us yet. Please update it or try another browser.");
+	return api("/api/passkey/add", { body: { id: cred.id, publicKey: b64u(pub), alg: r.getPublicKeyAlgorithm(), clientDataJSON: b64u(r.clientDataJSON) } });
+}
+async function passkeySignIn() {
+	const o = await api("/api/passkey/signin-options", { body: {}, quiet: true });
+	let cred;
+	try { cred = await navigator.credentials.get({ publicKey: { challenge: unb64u(o.challenge), rpId: o.rpId, userVerification: "preferred", timeout: 120000 } }); }
+	catch (e) { throw pkError(e); }
+	const r = cred.response;
+	await api("/api/passkey/signin", { body: { id: cred.id, authenticatorData: b64u(r.authenticatorData), clientDataJSON: b64u(r.clientDataJSON), signature: b64u(r.signature) }, quiet: true });
+}
+function passkeyOffer(then) {
+	main.innerHTML = `<div class="center card"><h1>Add a passkey?</h1><p class="muted">Sign in next time with Face ID, Touch ID, Windows Hello or your phone, instead of typing your password. Your password still works too.</p>
+	<p class="err" id="e"></p><div class="row"><button class="btn" id="pkAdd">${icon("key")}Add a passkey</button><button class="btn ghost" id="pkSkip">${icon("x")}Skip for now</button></div><p class="hint" style="margin-top:14px">You can add one any time in Settings, Account.</p></div>`;
+	$("#pkSkip").onclick = then;
+	$("#pkAdd").onclick = (e) => run(e.currentTarget, async () => {
+		$("#e").textContent = "";
+		try { await addPasskey(); toast("Passkey added"); then(); } catch (err) { $("#e").textContent = err.message; }
+	});
+}
 function copyBtn(text) { return `<button class="icon-btn" type="button" title="Copy" data-copy="${esc(text)}">${icon("copy")}</button>`; }
 document.addEventListener("click", (e) => { const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied")); } });
 function modal(html) { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="card">${html}</div>`; m.addEventListener("click", (e) => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); }); document.body.append(m); return m; }
@@ -326,7 +363,8 @@ function setupScreen(state, code) {
 		e.preventDefault();
 		try {
 			await api("/api/setup", { body: { code, email: $("#email").value, name: $("#name")?.value, password: $("#pw").value, ts: $("[name=ts]")?.value } });
-			history.replaceState(null, "", "/#campaigns"); boot();
+			history.replaceState(null, "", "/#campaigns");
+			PK ? passkeyOffer(boot) : boot();
 		} catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); }
 	};
 }
@@ -337,8 +375,9 @@ const ADDON = window.NS_ADDON || {};
 function signinScreen(state) {
 	$("#top").hidden = $("#side").hidden = true;
 	store.set("ns.in", null);
-	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><button class="btn">${icon("out")}Sign in</button><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
+	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><div class="row"><button class="btn">${icon("out")}Sign in</button>${PK ? `<button type="button" class="btn ghost" id="pkIn">${icon("key")}Sign in with a passkey</button>` : ""}</div><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
 	loadTurnstile(state);
+	$("#pkIn") && ($("#pkIn").onclick = (e) => run(e.currentTarget, async () => { $("#e").textContent = ""; try { await passkeySignIn(); boot(); } catch (err) { $("#e").textContent = err.message; } }));
 	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
 }
 $("#signout").onclick = async () => { await api("/api/signout", { body: {} }); location.hash = ""; boot(); };
@@ -1600,10 +1639,19 @@ async function settings(section) {
 	}
 	if (ADDON.settings?.[sec]) return ADDON.settings[sec](head);
 	if (sec === "account") {
-		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To update your password, use your original setup link.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show setup guide again</button>` : ""}</div></div>
+		const acct = await api("/api/account");
+		const day = (d) => (d ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "Not yet");
+		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>Signed in as <b>${esc(acct.email)}</b>.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show setup guide again</button>` : ""}</div></div>
+		<div class="card"><h2>Passkeys</h2><p class="muted">Sign in with Face ID, Touch ID, Windows Hello or your phone, instead of typing your password. Your password still works too.</p>
+		${acct.passkeys.length ? `<div class="scroll"><table class="data"><thead><tr><th>Passkey</th><th>Added</th><th>Last used</th><th class="c">Remove</th></tr></thead><tbody>${acct.passkeys.map((k) => `<tr><td><b>${esc(k.name)}</b>${k.here ? "" : `<br><span class="muted small">Works on ${esc(k.site)}</span>`}</td><td>${day(k.created_at)}</td><td>${day(k.last_used_at)}</td><td class="c"><button class="icon-btn" data-pkdel="${esc(k.id)}" title="Remove" aria-label="Remove">${icon("trash")}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No passkeys yet.</p>`}
+		${PK ? `<div class="row" style="margin-top:14px"><button class="btn" id="pkAdd">${icon("key")}Add a passkey</button></div>` : `<p class="hint">This browser can't make passkeys. Try Safari, Chrome, Edge or Firefox.</p>`}<p class="err" id="pke"></p></div>
+		<div class="card"><h2>Change password</h2><label for="pwOld">Current password</label><input id="pwOld" type="password" autocomplete="current-password"><label for="pwNew">New password</label><input id="pwNew" type="password" minlength="10" autocomplete="new-password"><p class="hint">At least 10 characters. Other devices will be signed out.</p><p class="err" id="pwe"></p><div class="row"><button class="btn" id="pwSave">${icon("save")}Change password</button></div></div>
 		${ADDON.licenceCard ? ADDON.licenceCard() : `<div class="card"><h2>Licence</h2><p>You are running the Free Edition, licensed for a single brand and in-house newsletters. If you plan to manage campaigns for clients or resell this as a white-labelled service, a commercial agency licence is required.</p><p>The Agency Edition unlocks unlimited client brands, dedicated client logins with custom send limits and an overarching agency dashboard.</p><a class="btn ghost" href="https://newslettersender.com/agency/" target="_blank" rel="noopener">${icon("users")}Explore the Agency Edition</a></div>`}`;
 		$("#gsback") && ($("#gsback").onclick = () => { store.set("ns.gs", null); location.hash = "campaigns"; });
 		$("#everywhere").onclick = (e) => run(e.currentTarget, async () => { await api("/api/signout-everywhere", { body: {} }); boot(); });
+		$("#pkAdd") && ($("#pkAdd").onclick = (e) => run(e.currentTarget, async () => { $("#pke").textContent = ""; try { await addPasskey(); toast("Passkey added"); settings("account"); } catch (err) { $("#pke").textContent = err.message; } }));
+		main.querySelectorAll("[data-pkdel]").forEach((b) => b.onclick = () => run(b, async () => { if (!confirm("Remove this passkey? You can still sign in with your password.")) return; await api(`/api/passkey/${b.dataset.pkdel}`, { method: "DELETE" }); toast("Passkey removed"); settings("account"); }));
+		$("#pwSave").onclick = (e) => run(e.currentTarget, async () => { $("#pwe").textContent = ""; try { await api("/api/account/password", { body: { current: $("#pwOld").value, password: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Password changed"); } catch (err) { $("#pwe").textContent = err.message; } });
 	}
 }
 
