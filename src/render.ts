@@ -233,5 +233,5 @@ export function listHeaders(unsubscribeUrl: string, listId: string): Record<stri
 
 /** A web address part from a subject: "Spring news!" becomes "spring-news". */
 export function slugify(s: string): string {
-	return s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "issue";
+	return s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "campaign";
 }

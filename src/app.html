@@ -426,7 +426,7 @@ async function campaigns() {
 	main.innerHTML = `<h1>All campaigns</h1>
 	${todo.some((t) => !t[0]) && !store.get("ns.gs") ? `<div class="card gs" style="margin-top:16px"><button class="icon-btn close" id="gsx" title="Close" aria-label="Close getting started">${icon("x")}</button><h2>Getting started</h2><ol class="steps">${todo.map(([done, text, href]) => `<li class="${done ? "done" : ""}">${done ? icon("check") + " " : ""}<a href="${href}">${text}</a></li>`).join("")}</ol></div>` : ""}
 	<div id="health">${o.sending && h0?.provider ? healthHtml(h0) : ""}</div>
-	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past issues">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
+	<div class="row toolbar-row"><a class="btn" href="#new">${icon("plus")}Create and send a new campaign</a><span class="grow"></span>${o.archive ? `<a class="btn ghost" href="/archive/feed.xml" target="_blank" title="RSS feed of your past campaigns">${icon("rss")}RSS</a>` : ""}<input id="q" class="search" placeholder="Search campaigns" aria-label="Search campaigns"></div>
 	<div class="card flush">${r.campaigns.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th><th>Unique opens</th><th>Unique clicks</th><th class="c">Duplicate</th><th class="c">Delete</th></tr></thead><tbody>${r.campaigns.map((c) => {
 		const sent = ["sent", "sending", "paused", "cancelled"].includes(c.status);
 		const subj = c.subject === "Untitled email" ? "" : c.subject;
@@ -536,7 +536,7 @@ async function editor(id, kind) {
 			<select id="actDays" aria-label="How far back">${[7, 14, 30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === 90 ? "selected" : ""}>in the last ${d === 365 ? "year" : `${d} days`}</option>`).join("")}</select></div>
 			${c.tracking?.opens || c.tracking?.clicks ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to pick people by what they read.</p>`}
 			<p id="count" class="count"></p>
-			<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past issues</label>
+			<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past campaigns</label>
 		</div>
 	</div>
 	<div class="card"><div class="row"><h2 class="grow">The email</h2>
