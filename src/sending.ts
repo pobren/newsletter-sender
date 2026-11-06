@@ -16,6 +16,7 @@ import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Co
 import { canSendFrom, loadProvider, sealSecret } from "./settings.ts";
 import { checkCampaign } from "./health.ts";
 import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
+import { abSplit, parseAb, pickWinners, sendableTo, subjectFor } from "./abtest.ts";
 
 /** Send rows in one queue message. Bigger batches spend less of each second waiting on the queue between
  * messages: the 100k load test on Cloudflare reached about 65 a second (of 100) with 10 workers, as each message
@@ -165,11 +166,15 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 	if (!claim) return { error: "This campaign has already been sent or is sending." };
 
 	const { sql, binds } = audienceSql(brand.id, audience);
-	await db.prepare(`INSERT OR IGNORE INTO sends (campaign_id, subscriber_id) SELECT ?, s.id FROM subscribers s WHERE ${sql} ORDER BY s.created_at`).bind(c.id, ...binds).run();
+	// Testing two subject lines: random order, so the test groups are a fair sample.
+	let ab = parseAb(c.ab);
+	await db.prepare(`INSERT OR IGNORE INTO sends (campaign_id, subscriber_id) SELECT ?, s.id FROM subscribers s WHERE ${sql} ORDER BY ${ab ? "RANDOM()" : "s.created_at"}`).bind(c.id, ...binds).run();
 	const range = await db.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(*) AS n FROM sends WHERE campaign_id = ?").bind(c.id).first<{ lo: number | null; hi: number | null; n: number }>();
 	const total = range?.n ?? 0;
 	const slug = c.slug ?? `${c.id.slice(0, 6)}`;
-	await db.prepare("UPDATE campaigns SET total = ?, slug = ? WHERE id = ?").bind(total, slug, c.id).run();
+	const split = ab && range?.lo != null ? abSplit(range.lo, total, ab.pct) : null;
+	ab = ab && split ? { ...ab, ...split, at: iso(new Date(Date.now() + ab.hours * 3600_000)) } : null;
+	await db.prepare("UPDATE campaigns SET total = ?, slug = ?, ab = ? WHERE id = ?").bind(total, slug, ab ? JSON.stringify(ab) : null, c.id).run();
 
 	// Keep every link so clicks can be counted against it (only used when opens and clicks are on).
 	if (brand.track_clicks) {
@@ -182,7 +187,7 @@ export async function start(env: Env, c: CampaignRow, request?: Request): Promis
 		await db.prepare("UPDATE campaigns SET status = 'sent', finished_at = ? WHERE id = ?").bind(iso(), c.id).run();
 		return { ok: true, total: 0 };
 	}
-	await enqueue(env, c.id, range.lo, range.hi);
+	await enqueue(env, c.id, range.lo, sendableTo(ab, range.hi));
 	await logEvent(db, brand.id, "campaign.started", null, c.id, `${total} people`).run();
 	if (request) await origin(db, request);
 	return { ok: true, total };
@@ -199,8 +204,10 @@ export async function resume(env: Env, c: CampaignRow): Promise<{ ok: true } | {
 	const claim = await env.DB.prepare("UPDATE campaigns SET status = 'sending', run = run + 1, health = CASE WHEN health = 1 THEN 2 ELSE health END, updated_at = ? WHERE id = ? AND status = 'paused' RETURNING run").bind(iso(), c.id).first<{ run: number }>();
 	if (!claim) return { error: "Only a paused campaign can carry on." };
 	const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
-	if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi, claim.run);
-	else await finishIfDone(env.DB, c.id);
+	const to = r?.hi != null ? sendableTo(parseAb(c.ab), r.hi) : null;
+	if (r?.lo != null && to != null) {
+		if (r.lo <= to) await enqueue(env, c.id, r.lo, to, claim.run);
+	} else await finishIfDone(env.DB, c.id);
 	return { ok: true };
 }
 
@@ -270,6 +277,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const base = linkBase(brand, await origin(db));
 	const secret = await sealSecret(db);
 	const content = campaignContent(c);
+	const ab = parseAb(c.ab);
 	const tb = trackBase(brand, base);
 	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
 	const from = senderOf(brand, c);
@@ -294,10 +302,11 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		const track: Look["track"] = { link: brand.track_clicks ? (_url, n) => `${tb}/l/${r.id}.${sig}/${n}` : null, pixel: brand.track_opens ? `${tb}/o/${r.id}.${sig}` : null };
 		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links };
 		const reader: Reader = { email: r.email, name: r.name, fields: safeJson(r.fields) ?? {} };
-		const out = renderEmail(c.subject, content, look, reader);
+		const subject = subjectFor(c, ab, r.id);
+		const out = renderEmail(subject, content, look, reader);
 		const email: OutEmail = {
 			to: r.email,
-			subject: mergeSubject(c.subject, reader),
+			subject: mergeSubject(subject, reader),
 			text: out.text,
 			html: out.html,
 			headers: listHeaders(unsub, `${brand.id}.${new URL(base || "https://example.com").hostname}`),
@@ -424,6 +433,7 @@ export async function doneEmail(db: D1Database, id: string, fetcher: typeof fetc
 		["Unsubscribed so far", n(e.unsubscribed ?? 0)],
 		...(b.track_opens ? ([["Opened so far", `${n(g.opens ?? 0)} (${pct(g.opens ?? 0)})`]] as [string, string][]) : []),
 		...(b.track_clicks ? ([["Clicked so far", `${n(g.clicks ?? 0)} (${pct(g.clicks ?? 0)})`]] as [string, string][]) : []),
+		...(parseAb(c.ab)?.winner ? ([["Winning subject line", parseAb(c.ab)!.winner === "b" ? parseAb(c.ab)!.b : c.subject]] as [string, string][]) : []),
 	];
 	const link = `${await origin(db)}/#email/${c.id}`;
 	const x = (v: string) => v.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
@@ -435,6 +445,7 @@ export async function doneEmail(db: D1Database, id: string, fetcher: typeof fetc
 
 /** Every minute: starts campaigns whose time has come. */
 export async function startDue(env: Env, now = new Date()): Promise<void> {
+	await pickWinners(env, enqueue, now).catch((e) => console.error("subject line test", e));
 	const { results } = await env.DB.prepare("SELECT * FROM campaigns WHERE status = 'scheduled' AND send_at <= ? LIMIT 5").bind(iso(now)).all<CampaignRow>();
 	for (const c of results) {
 		const r = await start(env, c);
@@ -445,13 +456,15 @@ export async function startDue(env: Env, now = new Date()): Promise<void> {
 	}
 	// A send that's made no progress for an hour (its queue message was lost) gets its remaining rows queued again.
 	const hourAgo = iso(new Date(now.getTime() - 3600_000));
-	const { results: stuck } = await env.DB.prepare(`SELECT c.id, c.run FROM campaigns c WHERE c.status = 'sending' AND c.updated_at < ?1
+	const { results: stuck } = await env.DB.prepare(`SELECT c.id, c.run, c.ab FROM campaigns c WHERE c.status = 'sending' AND c.updated_at < ?1
 		AND EXISTS (SELECT 1 FROM sends WHERE campaign_id = c.id AND status = 'queued')
-		AND COALESCE((SELECT MAX(sent_at) FROM sends WHERE campaign_id = c.id), c.started_at) < ?1 LIMIT 5`).bind(hourAgo).all<{ id: string; run: number }>();
+		AND COALESCE((SELECT MAX(sent_at) FROM sends WHERE campaign_id = c.id), c.started_at) < ?1 LIMIT 5`).bind(hourAgo).all<{ id: string; run: number; ab: string | null }>();
 	for (const c of stuck) {
 		await env.DB.prepare("UPDATE campaigns SET updated_at = ? WHERE id = ?").bind(iso(now), c.id).run();
 		const r = await env.DB.prepare("SELECT MIN(id) AS lo, MAX(id) AS hi FROM sends WHERE campaign_id = ? AND status = 'queued'").bind(c.id).first<{ lo: number | null; hi: number | null }>();
-		if (r?.lo != null && r.hi != null) await enqueue(env, c.id, r.lo, r.hi, c.run);
+		// While a subject line test waits for its winner, only the test groups count as stuck.
+		const to = r?.hi != null ? sendableTo(parseAb(c.ab), r.hi) : null;
+		if (r?.lo != null && to != null && r.lo <= to) await enqueue(env, c.id, r.lo, to, c.run);
 	}
 }
 
