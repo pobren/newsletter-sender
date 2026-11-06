@@ -107,6 +107,7 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 .wnav{display:flex;justify-content:space-between;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
 .wlist{padding-left:22px;margin:14px 0 18px}.wlist li{margin:0 0 14px;line-height:1.5}.wlist li .btn{margin-top:10px}.wlist.plain{list-style:none;padding:0}.wlist.plain li{display:flex;gap:8px;align-items:center;margin:0 0 8px}.wlist.plain .ico{color:var(--ok)}
 a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--soft)}.btn.big{min-height:52px;font-size:17px;padding:10px 22px}
+.abbox{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}.abbox .check{margin:0}.abopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0 12px}.abres p .ico{vertical-align:-3px;margin-right:6px;color:var(--c)}
 .steps.big li{font-size:16px;margin:10px 0}.nsteps p{display:flex;gap:10px;align-items:flex-start;margin:8px 0}.nsteps b{flex:none;width:26px;height:26px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;font-size:13px}
 .picks{display:grid;gap:10px;margin:14px 0}.pick{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;text-align:left;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#fff;color:inherit;font:inherit;cursor:pointer}.pick:hover{border-color:var(--c)}.pick .ico{grid-row:span 2;width:26px;height:26px;color:var(--c)}.pick b{font-size:16px}.pick span{color:var(--muted);font-size:14px}
 .aud{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin:8px 0;font-weight:400;cursor:pointer}.aud input{width:auto;min-height:0;margin:0;flex:none}.filerow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.filerow select{width:auto;max-width:170px}.wready{font-size:20px;font-weight:750;color:var(--ok);display:flex;gap:8px;align-items:center}
@@ -352,7 +353,7 @@ async function allBrands() {
 	const HL = { good: ["All healthy", "check"], ok: ["Needs a look", "alert"], bad: ["Needs you now", "alert"] };
 	const mark = (b) => (b.logo ? `<img class="abmark" src="${esc(b.logo)}" alt="">` : `<span class="abmark" style="background:${esc(b.colour)};border:0">${esc((b.name || "?").trim().charAt(0).toUpperCase())}</span>`);
 	const svcName = (p) => (PROVIDERS.find((x) => x[0] === p) || [])[1];
-	const row = (b) => `<div class="abrow">
+	const row = (b) => `<div class="abopts">
 		<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span></span></button></div>
 		<div class="abnum"><b>${num(b.subscribers)}</b><span class="muted">subscribers</span><br><span class="muted">${b.provider ? `Sends with ${esc(svcName(b.provider) || b.provider)}` : `<a href="#" data-open="${b.id}" data-to="#settings/sending">${icon("alert")} No sending service yet</a>`}</span></div>
 		<div class="abnum"><b>${num(b.sentMonth)}${b.limit ? ` <span class="muted" style="font-size:14px;font-weight:400">of ${num(b.limit)}</span>` : ""}</b><span class="muted">sent this month${b.limit ? " (client's limit)" : ""}</span>${b.limit ? `<div class="hmeter"><i style="width:${Math.min(100, (b.sentMonth / b.limit) * 100)}%"></i></div>` : ""}
@@ -611,6 +612,7 @@ async function editor(id, kind) {
 		<div class="card"><h2>About this campaign</h2>
 			<label for="cname">Campaign name <span class="hint">(only you see this, such as November news)</span></label><input id="cname" value="${esc(c.name || "")}" placeholder="Such as November news">
 			<label for="subject">Subject line <span class="hint">(what readers see in their inbox)</span></label><input id="subject" value="${esc(c.subject === "Untitled email" ? "" : c.subject)}" placeholder="Such as Our autumn news">
+			${isT ? "" : abBox(c)}
 			<label for="pre">Preview text <span class="hint">(optional: the line inboxes show after the subject)</span></label><input id="pre" value="${esc(c.preheader || "")}">
 			${isT ? "" : `<div class="row" style="gap:12px"><div class="grow"><label for="fromName">From name</label><input id="fromName" value="${esc(c.from_name || c.defaults?.from_name || "")}" autocomplete="off"></div>
 			<div class="grow"><label for="fromEmail">From address</label><input id="fromEmail" type="email" value="${esc(c.from_email || c.defaults?.from_email || "")}" autocomplete="off"></div></div>
@@ -723,7 +725,7 @@ async function editor(id, kind) {
 		toast(/src=["'](?!https?:|data:|cid:)/i.test(text) ? "Design loaded. Some pictures use short addresses: upload them, or use full https:// addresses." : "Design loaded");
 	};
 
-	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
+	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked, ab: { on: $("#abOn").checked, subject: $("#abSub").value, pct: $("#abPct").value, hours: $("#abHours").value, by: $("#abBy").value } });
 	let saving = null;
 	const save = async () => {
 		clearTimeout(t);
@@ -733,9 +735,9 @@ async function editor(id, kind) {
 	let t = null;
 	const changed = () => { saved = false; $("#saveState").textContent = "Saving…"; clearTimeout(t); t = setTimeout(save, 900); };
 	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")} Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.`; } catch {} };
-	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo"].includes(e.target.id)) changed(); }, { signal });
+	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo", "abSub"].includes(e.target.id)) changed(); }, { signal });
 	if (!isT) watchFrom($("#fromEmail"), $("#fromCheck"));
-	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public") changed(); }, { signal });
+	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public" || /^ab/.test(e.target.id)) changed(); if (e.target.id === "abOn") $("#abSet").hidden = !e.target.checked; if (/^ab/.test(e.target.id)) $("#abHint").textContent = abHint(); }, { signal });
 	if (!isT) {
 		const act = c.audience.activity;
 		if (act && $(`#act option[value=${act.kind}]`)) { $("#act").value = act.kind; $("#actDays").value = String(act.days); }
@@ -761,7 +763,7 @@ async function editor(id, kind) {
 		if (h?.bounceLevel === "bad") warn.push("Your bounces are high. Sending to an old list could put your account at risk.");
 		const odd = [...new Set((current() + " " + $("#subject").value).match(/\*\|[A-Z0-9_:]+\|\*/g) || [])].filter((t) => !/^\*\|(FNAME|EMAIL|UNSUB|ARCHIVE)\|\*$/.test(t));
 		if (odd.length) warn.push(`These tags won't be filled in: ${odd.map(esc).join(", ")}. Use {{first_name|there}}, {{name}} or {{email}} instead.`);
-		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"} straight away and takes ${esc(r.time)}. You can't change it once it's gone.</p>${warn.map((w) => `<p class="hwarn">${icon("alert")}<span>${w}</span></p>`).join("")}<p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
+		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}${$("#abOn")?.checked && $("#abSub").value.trim() && r.count >= 20 ? `: first a test of two subject lines to ${$("#abPct").value}% of them, then the winner to everyone else after ${hoursText(Number($("#abHours").value))}` : ` straight away and takes ${esc(r.time)}`}. You can't change it once it's gone.</p>${warn.map((w) => `<p class="hwarn">${icon("alert")}<span>${w}</span></p>`).join("")}<p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
 		$("#go", m).onclick = async (ev) => { ev.currentTarget.disabled = true; try { await api(`/api/campaigns/${id}/send`, { body: {} }); m.remove(); route(); } catch (err) { $("#me", m).textContent = err.message; ev.currentTarget.disabled = false; } };
 	};
 	loadVisual(html);
@@ -883,6 +885,32 @@ function healthHtml(h) {
 
 // -- Live sending: percentage, speed and time left, updated in place while it goes ------------------------------
 const doneOf = (s) => s.sent + s.failed + s.skipped;
+// Testing two subject lines: the editor box, and the results on the report.
+const AB_PCTS = [10, 20, 30, 40, 50], AB_HOURS = [1, 2, 4, 8, 12, 24];
+const hoursText = (h) => `${h} hour${h === 1 ? "" : "s"}`;
+function abBox(c) {
+	const can = c.tracking?.opens || c.tracking?.clicks, ab = c.ab || { pct: 20, hours: 4, by: c.tracking?.opens ? "opens" : "clicks" };
+	const opt = (v, t, cur) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${t}</option>`;
+	return `<div class="abbox"><label class="check"><input type="checkbox" id="abOn" ${c.ab ? "checked" : ""} ${can ? "" : "disabled"}> Test two subject lines and send the winner</label>
+	${can ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to test two subject lines.</p>`}
+	<div id="abSet" ${c.ab ? "" : "hidden"}><label for="abSub">Second subject line</label><input id="abSub" value="${esc(c.ab?.subject || "")}" placeholder="Such as What's new this autumn">
+	<div class="abopts"><div><label for="abPct">Test on</label><select id="abPct">${AB_PCTS.map((p) => opt(p, `${p}%`, ab.pct)).join("")}</select></div>
+	<div><label for="abHours">Then wait</label><select id="abHours">${AB_HOURS.map((h) => opt(h, hoursText(h), ab.hours)).join("")}</select></div>
+	<div><label for="abBy">Pick the winner by</label><select id="abBy">${c.tracking?.opens ? opt("opens", "Opens", ab.by) : ""}${c.tracking?.clicks ? opt("clicks", "Clicks", ab.by) : ""}</select></div></div>
+	<p class="hint" id="abHint">${abHint(ab)}</p></div></div>`;
+}
+function abHint(ab) {
+	ab = ab || { pct: Number($("#abPct").value), hours: Number($("#abHours").value), by: $("#abBy").value };
+	return `${ab.pct / 2}% of people get the first subject line and ${ab.pct / 2}% get the second, picked at random. After ${hoursText(Number(ab.hours))}, the one with more ${ab.by} goes to the other ${100 - ab.pct}%. With fewer than 20 people, everyone gets the first.`;
+}
+function abHtml(c) {
+	const ab = c.ab;
+	if (!ab || !ab.results) return "";
+	const lead = ab.winner || ab.leading, rows = [["a", c.subject], ["b", ab.subject]];
+	const cell = (g) => `<td>${num(g.sent)}</td>${c.tracking.opens ? `<td>${pct(g.opens, g.sent)}</td>` : ""}${c.tracking.clicks ? `<td>${pct(g.clicks, g.sent)}</td>` : ""}`;
+	const head = ab.winner ? `${icon("check")}<b>The winner went to everyone else.</b>` : `${icon("clock")}<b>Testing two subject lines.</b> The winner goes to everyone else ${when(ab.at)}.`;
+	return `<div class="card abres"><p>${head}</p><div class="scroll"><table class="data"><thead><tr><th>Subject line</th><th>Sent</th>${c.tracking.opens ? "<th>Opened</th>" : ""}${c.tracking.clicks ? "<th>Clicked</th>" : ""}</tr></thead><tbody>${rows.map(([k, s]) => `<tr><td>${k === lead ? `<span class="pill sent">${ab.winner ? "Winner" : "Ahead"}</span> ` : ""}${esc(s)}</td>${cell(ab.results[k])}</tr>`).join("")}</tbody></table></div><p class="hint">Picked by ${esc(ab.by)}. A tie goes to the first subject line.</p></div>`;
+}
 function liveHtml(c, speed) {
 	const done = doneOf(c.stats), total = Math.max(1, c.total), p = Math.min(100, (done / total) * 100);
 	const left = speed > 0 ? Math.ceil((total - done) / speed) : 0;
@@ -933,7 +961,7 @@ async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
 	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
-	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
+	<div id="abr">${abHtml(c)}</div>${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
 	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
@@ -954,6 +982,7 @@ async function report(c, ls) {
 			last = { at: now, done };
 			const el = $("#live");
 			if (el) el.innerHTML = liveHtml(fresh, speed);
+			if ($("#abr")) $("#abr").innerHTML = abHtml(fresh);
 			const rep = $("#rep");
 			if (rep) rep.innerHTML = reportHtml(fresh) || statsHtml(fresh.stats, fresh.total, fresh.tracking);
 		}, 3000);

@@ -16,6 +16,7 @@ import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
+import { abResults, cleanAb, parseAb, winnerOf } from "./abtest.ts";
 import { importStatus, mailchimp, pastDate } from "./move.ts";
 
 const DEFAULT_BRAND = "My newsletter";
@@ -764,7 +765,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			const ab = parseAb(c.ab);
+			const abOut = ab && { subject: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by, at: ab.at ?? null, winner: ab.winner ?? null, results: ab.bTo != null ? await abResults(db, c, ab) : null };
+			if (abOut?.results && !abOut.winner && abOut.results.a[ab!.by] + abOut.results.b[ab!.by] > 0) (abOut as any).leading = winnerOf(abOut.results, ab!.by);
+			return ok({ ...c, ab: abOut, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -774,8 +778,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const html = typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : c.html;
 			// From name, address and Reply to: blank means "use Settings".
 			const own = (v: string | null | undefined, d: string | null) => (v && v !== d ? v : null);
-			await db.prepare("UPDATE campaigns SET from_name = ?, from_email = ?, reply_to = ? WHERE id = ?")
-				.bind(own(str(b.from_name, 80), brand.from_name), own(cleanEmail(b.from_email), brand.from_email), own(cleanEmail(b.reply_to), brand.reply_to), c.id).run();
+			const ab = cleanAb(b.ab, { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) });
+			await db.prepare("UPDATE campaigns SET from_name = ?, from_email = ?, reply_to = ?, ab = ? WHERE id = ?")
+				.bind(own(str(b.from_name, 80), brand.from_name), own(cleanEmail(b.from_email), brand.from_email), own(cleanEmail(b.reply_to), brand.reply_to), ab ? JSON.stringify(ab) : null, c.id).run();
 			await db.prepare("UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, audience = ?, public = ?, slug = ?, updated_at = ? WHERE id = ?")
 				.bind(str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", str(b.preheader, 200) || null, html, JSON.stringify(parseAudience(b.audience)), b.public === false ? 0 : 1, clash ? `${slug}-${c.id.slice(0, 4)}` : slug, iso(), c.id).run();
 			return ok();
@@ -797,7 +802,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if (!provider) return bad("Please choose how to send first, under Settings, Sending.");
 			const to = (Array.isArray(b.to) ? b.to : String(b.to ?? me.email).split(/[,\s]+/)).map(cleanEmail).filter((e): e is string => !!e).slice(0, 5);
 			if (!to.length) return bad("Please enter an address to send the test to.");
-			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c), from_name: c.from_name, from_email: c.from_email, reply_to: c.reply_to }, to, { email: me.email, name: me.name });
+			// Testing two subject lines: a test of each, so you see both in your inbox.
+			const subjects = [c.subject, ...(parseAb(c.ab) ? [parseAb(c.ab)!.b] : [])];
+			const res = [];
+			for (const subject of subjects) res.push(...(await sendTest(env, brand, provider, { subject, preheader: c.preheader, content: campaignContent(c), from_name: c.from_name, from_email: c.from_email, reply_to: c.reply_to }, to, { email: me.email, name: me.name })));
 			const failed = res.find((r) => !r.ok);
 			return failed ? bad(`The test didn't go: ${failed.error}`) : ok({ sent: to.length });
 		}
@@ -842,7 +850,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "duplicate") {
 			const id = newId(8);
-			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, iso(), iso()).run();
+			const ab = parseAb(c.ab);
+			const abCopy = ab ? JSON.stringify({ b: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by }) : null;
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, ab, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, abCopy, iso(), iso()).run();
 			return ok({ id });
 		}
 	}
