@@ -12,6 +12,8 @@ import { turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkCampaign } from "./health.ts";
 import { fireSafely } from "./automations.ts";
 import { dueRewards, parseReferrals, referralBody, refFrom } from "./referrals.ts";
+import { popupScript, popupSettings, popupTestPage } from "./popup.ts";
+import { pollsIn } from "./polls.ts";
 
 export { csvLine };
 
@@ -201,6 +203,15 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	const path = url.pathname;
 	const ip = request.headers.get("cf-connecting-ip") ?? "local";
 
+	// -- The pop up form for websites, and a page to try it on ------------------------------------
+	const pum = /^\/s\/([a-z0-9-]{1,60})\/(popup\.js|popup)$/.exec(path);
+	if (pum && request.method === "GET") {
+		const found = await listBySlug(db, pum[1]);
+		if (!found) return new Response("// That list has gone.", { status: 404, headers: { "content-type": "text/javascript; charset=utf-8" } });
+		if (pum[2] === "popup") return html(popupTestPage(`${url.origin}/s/${found.l.slug}/popup.js`, url.searchParams));
+		return new Response(popupScript(popupSettings(found.l, found.b, url.origin, turnstileKey(env))), { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" } });
+	}
+
 	// -- Sign up -----------------------------------------------------------------
 	const sm = /^\/s\/([a-z0-9-]{1,60})\/?$/.exec(path);
 	if (sm) {
@@ -218,7 +229,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			const fields: Record<string, unknown> = {};
 			for (const f of listFields(l)) fields[f.key] = form[f.key];
 			const referrer = form.r ? await refFrom(await sealSecret(db), form.r) : null;
-			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? new URL(request.headers.get("referer")!).hostname : "form", false, referrer);
+			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? `${form.via === "popup" ? "pop up on " : ""}${new URL(request.headers.get("referer")!).hostname}` : form.via === "popup" ? "pop up" : "form", false, referrer);
 			if ("error" in r) return fail(r.error);
 			if (wantsJson) return Response.json({ ok: true, confirm: r.status === "pending" }, { headers: cors });
 			return Response.redirect(l.thanks_url || `${url.origin}/s/${l.slug}?done=${r.status === "pending" ? 1 : 2}`, 303);
@@ -433,6 +444,25 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			await fireForCampaign(db, send!.campaign_id, send!.subscriber_id, { kind: "clicked", campaign: send!.campaign_id, link: Number(lm[3]) });
 		}
 		return Response.redirect(link.url, 302);
+	}
+
+	// -- One click polls: the page records the answer itself, so link checkers that open every link in an email
+	// (some workplaces do) don't vote. Without JavaScript there's a button. Clicking another answer changes it.
+	const vm = /^\/v\/(\d+)\.([0-9a-f]{12})\/([a-z0-9]{4,12})\/(\d{1,2})$/.exec(path);
+	if (vm) {
+		const id = Number(vm[1]);
+		const send = (await sendSig(await sealSecret(db), id)) === vm[2] ? await db.prepare("SELECT campaign_id, subscriber_id FROM sends WHERE id = ?").bind(id).first<{ campaign_id: string; subscriber_id: string }>() : null;
+		const c = send ? await db.prepare("SELECT * FROM campaigns WHERE id = ?").bind(send.campaign_id).first<CampaignRow>() : null;
+		const b = c ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(c.brand_id).first<BrandRow>() : null;
+		const poll = c ? pollsIn(c.html).find((p) => p.id === vm[3]) : null;
+		const answer = poll?.answers.find((a) => a.n === Number(vm[4]));
+		if (!send || !b || !poll || !answer) return html(publicPage(b ?? { name: "Newsletter", colour: "#a3195b", logo: null }, "Poll", `<div class="card"><h1>That poll has closed</h1><p>Thanks for wanting to answer, though.</p></div>`), 404);
+		if (request.method === "POST") {
+			await db.prepare("INSERT INTO poll_votes (campaign_id, poll, subscriber_id, answer, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (campaign_id, poll, subscriber_id) DO UPDATE SET answer = excluded.answer, at = excluded.at")
+				.bind(send.campaign_id, poll.id, send.subscriber_id, answer.n, iso()).run();
+			return html(publicPage(b, "Thanks", `<div class="card"><h1>Thanks, your answer is in</h1>${poll.question ? `<p>${esc(poll.question)}</p>` : ""}<p>You chose <b>${esc(answer.text)}</b>. Changed your mind? Click a different answer in the email.</p></div>`));
+		}
+		return html(publicPage(b, "Your answer", `<div class="card"><h1>Your answer</h1>${poll.question ? `<p>${esc(poll.question)}</p>` : ""}<p><b>${esc(answer.text)}</b></p><form method="post" id="vote"><button type="submit">${ICON_CHECK}That's my answer</button></form></div><script>document.getElementById("vote").submit()</script>`));
 	}
 
 	// -- Bounces and complaints from the sending services ------------------------------------------

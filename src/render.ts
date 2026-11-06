@@ -4,6 +4,8 @@
 // An email is HTML: from the visual editor (a piece our template goes round), or a whole designed email someone
 // pasted or uploaded (which keeps its own look). Emails from before the visual editor are blocks, turned into HTML.
 
+import { POLL_TAG } from "./polls.ts";
+
 export type Block =
 	| { type: "heading"; text: string }
 	| { type: "text"; text: string }
@@ -79,6 +81,8 @@ export interface Look {
 	footerLinks?: number;
 	/** Opens and clicks, each only when switched on: links go through `link`, and `pixel` is an invisible picture. */
 	track?: { link?: ((url: string, n: number) => string) | null; pixel?: string | null } | null;
+	/** Each reader's own address for a poll answer (polls.ts). Without it, poll answers link to the web version. */
+	poll?: ((id: string, n: number) => string) | null;
 }
 
 export interface Rendered {
@@ -180,7 +184,7 @@ export function renderEmail(subject: string, content: Content, look: Look, reade
 	const colour = /^#[0-9a-f]{6}$/i.test(look.colour) ? look.colour : "#a3195b";
 	let body = foreignTags(sanitise(typeof content === "string" ? content : blocksToHtml(content, colour)));
 	const whole = isDocument(body);
-	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? "")).replace(/\{\{\s*manage_url\s*\}\}/gi, esc(look.manageUrl ?? look.unsubscribeUrl)).replace(/\{\{\s*forward_url\s*\}\}/gi, esc(look.forwardUrl ?? look.webUrl ?? ""))
+	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? "")).replace(/\{\{\s*manage_url\s*\}\}/gi, esc(look.manageUrl ?? look.unsubscribeUrl)).replace(/\{\{\s*forward_url\s*\}\}/gi, esc(look.forwardUrl ?? look.webUrl ?? "")).replace(POLL_TAG, (_m, id: string, n: string) => esc(look.poll ? look.poll(id.toLowerCase(), Number(n)) : look.webUrl ?? "#"))
 		.replace(/\{\{\s*referral_url\s*\}\}/gi, esc(look.referralUrl ?? look.forwardUrl ?? look.webUrl ?? "")).replace(/\{\{\s*referral_count\s*\}\}/gi, String(look.referralCount ?? 0));
 	// The plain text version shows the real links, not the click counting ones.
 	const bodyText = htmlToText(mergeHtml(specials(body), reader));

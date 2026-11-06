@@ -122,6 +122,8 @@ export interface CampaignRow {
 	from_email?: string | null;
 	reply_to?: string | null;
 	run?: number;
+	/** Testing two subject lines, as JSON (abtest.ts). */
+	ab?: string | null;
 	brand_id: string;
 	/** What the owner calls it (only they see it). */
 	name: string | null;
@@ -229,12 +231,16 @@ const MIGRATIONS = [
 	"DROP INDEX IF EXISTS sends_campaign_status",
 	"DROP INDEX IF EXISTS sends_message",
 	"DROP INDEX IF EXISTS sends_subscriber",
+	// One click polls (src/polls.ts): each reader's answer, one per poll.
+	"CREATE TABLE IF NOT EXISTS poll_votes (campaign_id TEXT NOT NULL, poll TEXT NOT NULL, subscriber_id TEXT NOT NULL, answer INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, poll, subscriber_id))",
+	// Testing two subject lines (src/abtest.ts).
+	"ALTER TABLE campaigns ADD COLUMN ab TEXT",
 	// Referrals: who brought each person to a list (only set for people new to it), and the list's rewards.
 	"ALTER TABLE memberships ADD COLUMN referred_by TEXT",
 	"ALTER TABLE lists ADD COLUMN referrals TEXT",
 	"CREATE INDEX IF NOT EXISTS memberships_ref ON memberships (referred_by) WHERE referred_by IS NOT NULL",
 ];
-const SCHEMA_VERSION = "15";
+const SCHEMA_VERSION = "17";
 
 let ready: Promise<void> | null = null;
 

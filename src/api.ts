@@ -17,6 +17,10 @@ import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
+import { checkEmail } from "./check.ts";
+import { pollsIn } from "./polls.ts";
+import { abResults, cleanAb, parseAb, winnerOf } from "./abtest.ts";
+import { importStatus, mailchimp, pastDate } from "./move.ts";
 
 const DEFAULT_BRAND = "My newsletter";
 
@@ -583,7 +587,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (method === "DELETE") {
 			// Removes everything we hold about them (a right to be forgotten request).
-			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM referral_rewards WHERE subscriber_id = ?").bind(s.id), db.prepare("UPDATE memberships SET referred_by = NULL WHERE referred_by = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
+			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM referral_rewards WHERE subscriber_id = ?").bind(s.id), db.prepare("UPDATE memberships SET referred_by = NULL WHERE referred_by = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
 			return ok();
 		}
 		if (method === "POST") {
@@ -616,6 +620,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const now = iso();
 		let added = 0;
 		let skipped = 0;
+		const counts = { active: 0, unsubscribed: 0, bounced: 0, complained: 0 };
 		const stmts: D1PreparedStatement[] = [];
 		for (const r of rows) {
 			const email = cleanEmail(r?.email);
@@ -627,11 +632,33 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			for (const [k, v] of Object.entries(r.fields ?? {})) if (typeof v === "string" && fieldKey(k)) fields[fieldKey(k)] = v.slice(0, 500);
 			const tags = [...new Set([...(Array.isArray(r.tags) ? r.tags.map(cleanTag) : []), ...extraTags].filter(Boolean))].slice(0, 20);
 			const id = newId(8);
+			const status = importStatus(r.status);
+			const joined = pastDate(r.joined) ?? now;
+			counts[status]++;
 			stmts.push(
 				db.prepare(`INSERT INTO subscribers (id, brand_id, email, name, fields, tags, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT (brand_id, email) DO UPDATE SET name = COALESCE(excluded.name, subscribers.name), fields = json_patch(subscribers.fields, excluded.fields),
 					tags = (SELECT json_group_array(DISTINCT value) FROM (SELECT value FROM json_each(subscribers.tags) UNION SELECT value FROM json_each(excluded.tags)))`)
-					.bind(id, brand.id, email, str(r.name, 120) || null, JSON.stringify(fields), JSON.stringify(tags), newId(16), now),
+					.bind(id, brand.id, email, str(r.name, 120) || null, JSON.stringify(fields), JSON.stringify(tags), newId(16), joined),
+			);
+			added++;
+			if (status === "unsubscribed") {
+				// Someone who left the old service stays left here, so they're never mailed by mistake.
+				stmts.push(db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, left_at)
+					SELECT ?1, s.id, 'unsubscribed', 'import', ?2, ?3 FROM subscribers s WHERE s.brand_id = ?4 AND s.email = ?5
+					ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = 'unsubscribed', left_at = COALESCE(memberships.left_at, excluded.left_at)`).bind(l.id, joined, now, brand.id, email));
+				continue;
+			}
+			if (status !== "active") {
+				// Bounced or marked as spam on the old service: keep them on the list (so the counts match) but never send to them.
+				stmts.push(
+					db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE brand_id = ? AND email = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(status, now, brand.id, email),
+					db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
+						SELECT ?1, s.id, 'active', 'import', ?2, ?2 FROM subscribers s WHERE s.brand_id = ?3 AND s.email = ?4 ON CONFLICT (list_id, subscriber_id) DO NOTHING`).bind(l.id, joined, brand.id, email),
+				);
+				continue;
+			}
+			stmts.push(
 				// Never re-add someone who unsubscribed (from any list, or this one when unsubscribing is per list), bounced or complained.
 				// With one list per person, someone already on another list stays where they are.
 				db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
@@ -640,13 +667,17 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 					AND NOT EXISTS (SELECT 1 FROM blocklist b WHERE b.brand_id = ?3 AND b.email = s.email) AND NOT EXISTS (SELECT 1 FROM blocked_domains d WHERE d.brand_id = ?3 AND d.domain = substr(s.email, instr(s.email, '@') + 1))
 					AND NOT (?6 = 1 AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id != ?1 AND m.status IN ('active', 'pending')))
 					ON CONFLICT (list_id, subscriber_id) DO NOTHING`)
-					.bind(l.id, now, brand.id, email, brand.unsub_scope, brand.one_list),
+					.bind(l.id, joined, brand.id, email, brand.unsub_scope, brand.one_list),
 			);
-			added++;
 		}
 		for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
 		if (added) await logEvent(db, brand.id, "imported", null, null, `${added} into ${l.name}`).run();
-		return ok({ added, skipped });
+		return ok({ added, skipped, counts });
+	}
+	if (path === "/api/move/mailchimp" && method === "POST") {
+		const b = await body(request);
+		const r = await mailchimp(String(b.key ?? ""), b.audience ? String(b.audience) : null, Number(b.offset) || 0);
+		return r.error ? bad(r.error) : ok(r);
 	}
 	if (path === "/api/export") {
 		const list = url.searchParams.get("list");
@@ -726,7 +757,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const file = `${slugify(c.name || c.subject) || "campaign"}-${who}${who === "link" ? `-${n}` : ""}.csv`;
 		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" } });
 	}
-	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|preview))?$/.exec(path);
+	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|resend|check|preview))?$/.exec(path);
 	if (cm) {
 		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<CampaignRow>();
 		if (!c) return bad("That email has gone.", 404);
@@ -738,7 +769,15 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			const polls = pollsIn(c.html);
+			const votes = polls.length ? (await db.prepare("SELECT poll, answer, COUNT(*) AS n FROM poll_votes WHERE campaign_id = ? GROUP BY poll, answer").bind(c.id).all<{ poll: string; answer: number; n: number }>()).results : [];
+			const pollResults = polls.map((p) => ({ ...p, answers: p.answers.map((a) => ({ ...a, votes: votes.find((v) => v.poll === p.id && v.answer === a.n)?.n ?? 0 })) }));
+			const aud = parseAudience(c.audience);
+			const resendOf = aud.resend ? await db.prepare("SELECT id, COALESCE(name, subject) AS name FROM campaigns WHERE id = ? AND brand_id = ?").bind(aud.resend.campaign, brand.id).first() : null;
+			const ab = parseAb(c.ab);
+			const abOut = ab && { subject: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by, at: ab.at ?? null, winner: ab.winner ?? null, results: ab.bTo != null ? await abResults(db, c, ab) : null };
+			if (abOut?.results && !abOut.winner && abOut.results.a[ab!.by] + abOut.results.b[ab!.by] > 0) (abOut as any).leading = winnerOf(abOut.results, ab!.by);
+			return ok({ ...c, ab: abOut, resendOf, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -748,15 +787,16 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const html = typeof b.html === "string" ? sanitise(b.html.slice(0, 500_000)) : c.html;
 			// From name, address and Reply to: blank means "use Settings".
 			const own = (v: string | null | undefined, d: string | null) => (v && v !== d ? v : null);
-			await db.prepare("UPDATE campaigns SET from_name = ?, from_email = ?, reply_to = ? WHERE id = ?")
-				.bind(own(str(b.from_name, 80), brand.from_name), own(cleanEmail(b.from_email), brand.from_email), own(cleanEmail(b.reply_to), brand.reply_to), c.id).run();
+			const ab = cleanAb(b.ab, { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) });
+			await db.prepare("UPDATE campaigns SET from_name = ?, from_email = ?, reply_to = ?, ab = ? WHERE id = ?")
+				.bind(own(str(b.from_name, 80), brand.from_name), own(cleanEmail(b.from_email), brand.from_email), own(cleanEmail(b.reply_to), brand.reply_to), ab ? JSON.stringify(ab) : null, c.id).run();
 			await db.prepare("UPDATE campaigns SET name = ?, subject = ?, preheader = ?, html = ?, audience = ?, public = ?, slug = ?, updated_at = ? WHERE id = ?")
 				.bind(str(b.name, 120) || null, str(b.subject, 200) || "Untitled email", str(b.preheader, 200) || null, html, JSON.stringify(parseAudience(b.audience)), b.public === false ? 0 : 1, clash ? `${slug}-${c.id.slice(0, 4)}` : slug, iso(), c.id).run();
 			return ok();
 		}
 		if (!action && method === "DELETE") {
 			if (c.status === "sending") return bad("This one is sending. Stop it first, then delete it.");
-			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
+			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
 			return ok();
 		}
 		if (action === "preview") {
@@ -766,12 +806,16 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (method !== "POST") return bad("Not found.", 404);
 		const b = await body(request);
+		if (action === "check") return ok({ items: await checkEmail({ subject: c.subject, preheader: c.preheader, content: campaignContent(c), colour: brand.colour, brandName: brand.name }) });
 		if (action === "test") {
 			const provider = await loadProvider(db, brand);
 			if (!provider) return bad("Please choose how to send first, under Settings, Sending.");
 			const to = (Array.isArray(b.to) ? b.to : String(b.to ?? me.email).split(/[,\s]+/)).map(cleanEmail).filter((e): e is string => !!e).slice(0, 5);
 			if (!to.length) return bad("Please enter an address to send the test to.");
-			const res = await sendTest(env, brand, provider, { subject: c.subject, preheader: c.preheader, content: campaignContent(c), from_name: c.from_name, from_email: c.from_email, reply_to: c.reply_to }, to, { email: me.email, name: me.name });
+			// Testing two subject lines: a test of each, so you see both in your inbox.
+			const subjects = [c.subject, ...(parseAb(c.ab) ? [parseAb(c.ab)!.b] : [])];
+			const res = [];
+			for (const subject of subjects) res.push(...(await sendTest(env, brand, provider, { subject, preheader: c.preheader, content: campaignContent(c), from_name: c.from_name, from_email: c.from_email, reply_to: c.reply_to }, to, { email: me.email, name: me.name })));
 			const failed = res.find((r) => !r.ok);
 			return failed ? bad(`The test didn't go: ${failed.error}`) : ok({ sent: to.length });
 		}
@@ -814,9 +858,19 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const r = await resume(env, c);
 			return "error" in r ? bad(r.error) : ok();
 		}
+		if (action === "resend") {
+			if (c.status !== "sent") return bad("You can send again once this one has finished sending.");
+			if (!brand.track_opens) return bad("Switch on opens under Settings, Tracking first, so we know who didn't open it.");
+			const id = newId(8);
+			const audience = { ...parseAudience(c.audience), activity: null, resend: { campaign: c.id } };
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (didn't open)`, c.subject, c.preheader, c.blocks, c.html, JSON.stringify(audience), c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, iso(), iso()).run();
+			return ok({ id });
+		}
 		if (action === "duplicate") {
 			const id = newId(8);
-			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, iso(), iso()).run();
+			const ab = parseAb(c.ab);
+			const abCopy = ab ? JSON.stringify({ b: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by }) : null;
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, ab, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (copy)`, c.subject, c.preheader, c.blocks, c.html, c.audience, c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, abCopy, iso(), iso()).run();
 			return ok({ id });
 		}
 	}
@@ -1002,6 +1056,35 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	}
 
 	// -- Reports ---------------------------------------------------------------------------------------
+	if (path === "/api/reports/growth") {
+		// Everyone who was ever on the brand's lists (or one list): when they joined, and when they left or bounced.
+		// Each person is counted once, so the running total ends exactly at today's subscriber count.
+		const days = [30, 90, 365].includes(Number(url.searchParams.get("days"))) ? Number(url.searchParams.get("days")) : 90;
+		const list = url.searchParams.get("list");
+		const one = list && /^[0-9a-f]{8,40}$/.test(list) ? list : null;
+		const { results } = await db.prepare(`WITH p AS (SELECT s.suppressed, substr(s.suppressed_at, 1, 10) AS sd, MIN(substr(COALESCE(m.confirmed_at, m.created_at), 1, 10)) AS jd,
+				MAX(m.status = 'active') AS act, MAX(substr(m.left_at, 1, 10)) AS ld
+				FROM subscribers s JOIN memberships m ON m.subscriber_id = s.id JOIN lists l ON l.id = m.list_id
+				WHERE l.brand_id = ? ${one ? "AND l.id = ?" : ""} AND m.status != 'pending' GROUP BY s.id)
+			SELECT jd AS d, 'joined' AS k, COUNT(*) AS n FROM p GROUP BY jd
+			UNION ALL SELECT COALESCE(sd, jd), 'lost', COUNT(*) FROM p WHERE suppressed IS NOT NULL GROUP BY COALESCE(sd, jd)
+			UNION ALL SELECT COALESCE(ld, jd), 'left', COUNT(*) FROM p WHERE suppressed IS NULL AND act = 0 GROUP BY COALESCE(ld, jd)`).bind(brand.id, ...(one ? [one] : [])).all<{ d: string; k: "joined" | "lost" | "left"; n: number }>();
+		const from = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+		let total = 0;
+		const by = new Map<string, number>();
+		for (const r of results) {
+			if (r.d < from) total += r.k === "joined" ? r.n : -r.n;
+			else by.set(`${r.d}|${r.k}`, (by.get(`${r.d}|${r.k}`) ?? 0) + r.n);
+		}
+		const out: { d: string; total: number; joined: number; left: number; lost: number }[] = [];
+		for (let i = days - 1; i >= 0; i--) {
+			const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+			const day = { d, total: 0, joined: by.get(`${d}|joined`) ?? 0, left: by.get(`${d}|left`) ?? 0, lost: by.get(`${d}|lost`) ?? 0 };
+			total += day.joined - day.left - day.lost;
+			out.push({ ...day, total });
+		}
+		return ok({ days: out });
+	}
 	if (path === "/api/reports") {
 		const [emails, problems] = await db.batch([
 			db.prepare(`SELECT c.id, c.name, c.subject, c.status, c.started_at, c.total,
