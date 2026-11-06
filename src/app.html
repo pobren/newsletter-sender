@@ -127,7 +127,8 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .svc dl{display:grid;grid-template-columns:auto auto;gap:6px 12px;margin:0}.svc dt{color:var(--muted)}.svc dd{margin:0;font-weight:700;text-align:right}
 .hmeter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}.hmeter i{display:block;height:100%;background:var(--hc)}
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
-.hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
+.hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}
+.checks{margin:14px 0}.chk{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}.chk:last-child{border-bottom:0}.chk>.ico{flex:none;width:22px;height:22px;margin-top:2px}.chk.ok>.ico{color:var(--ok)}.chk.warn>.ico{color:var(--warn)}.chk.bad>.ico{color:var(--bad)}.chk p{margin:2px 0 0;color:var(--muted);font-size:14px}.chk ul{margin:6px 0 0;padding-left:18px;font-size:14px;color:var(--text);word-break:break-all}.hwarn .ico{flex:none;margin-top:3px}
 @media(max-width:900px){.htiles{grid-template-columns:repeat(2,1fr)}}
 .act select{width:auto;flex:1 1 200px}
 .live{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:16px 0}.live .lhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.live .lbig{font-size:40px;font-weight:800;color:var(--c);line-height:1}.live.paused .lbig{color:#d97706}
@@ -638,7 +639,7 @@ async function editor(id, kind) {
 	</div>
 	<div class="card" ${isT ? "hidden" : ""}><h2>Send</h2><label for="testTo">Send a test to</label><div class="row"><input class="grow" id="testTo" type="email" placeholder="you@example.com" style="width:auto"><button class="btn ghost" id="test">${icon("test")}Send test</button></div>
 		<label for="at">Or choose when it goes</label><div class="row"><input class="grow" id="at" type="datetime-local" style="width:auto"><button class="btn ghost" id="schedule">${icon("clock")}Schedule</button></div>
-		<div class="row" style="margin-top:18px"><button class="btn" id="send">${icon("send")}Send now</button></div></div>`;
+		<div class="row" style="margin-top:18px"><button class="btn ghost" id="check">${icon("check")}Check before you send</button><button class="btn" id="send">${icon("send")}Send now</button></div></div>`;
 
 	// -- The visual editor: the email in a frame you can type in (no scripts run in it) --
 	const wys = $("#wys"), code = $("#code"), prev = $("#preview");
@@ -744,12 +745,22 @@ async function editor(id, kind) {
 	$("#unschedule") && ($("#unschedule").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${id}/unschedule`, { body: {} }); route(); }));
 	$("#test").onclick = (e) => run(e.currentTarget, async () => { await save(); const r = await api(`/api/campaigns/${id}/test`, { body: { to: $("#testTo").value } }); toast(`Test sent to ${r.sent === 1 ? $("#testTo").value || "you" : r.sent + " addresses"}`); });
 	$("#schedule").onclick = (e) => run(e.currentTarget, async () => { await save(); if (!$("#at").value) throw new Error("Please choose a date and time."); await api(`/api/campaigns/${id}/schedule`, { body: { at: new Date($("#at").value).toISOString() } }); toast("Scheduled"); route(); });
-	$("#send").onclick = async () => {
+	$("#check").onclick = (e) => run(e.currentTarget, async () => {
+		const b = e.currentTarget, label = b.innerHTML; b.innerHTML = `${icon("refresh")}Checking links and pictures…`;
+		try { await save(); const r = await api(`/api/campaigns/${id}/check`, { body: {} }); checkModal(r.items); } finally { b.innerHTML = label; }
+	});
+	$("#send").onclick = async (e) => {
+		const sb = e.currentTarget, label = sb.innerHTML;
 		await save();
 		const a = gather().audience;
 		if (!a.lists.length) return toast("Please choose at least one list first.");
-		const [r, h] = await Promise.all([api("/api/audience", { body: a }).catch(() => ({ count: 0, time: "" })), api("/api/health").catch(() => null)]);
+		sb.disabled = true; sb.innerHTML = `${icon("refresh")}Checking…`;
+		const [r, h, chk] = await Promise.all([api("/api/audience", { body: a }).catch(() => ({ count: 0, time: "" })), api("/api/health").catch(() => null), api(`/api/campaigns/${id}/check`, { body: {} }).catch(() => null)]).finally(() => { sb.disabled = false; sb.innerHTML = label; });
 		const warn = [];
+		// Check before you send: real mistakes one by one, the rest as one line.
+		const bad = (chk?.items || []).filter((x) => x.level === "bad"), soft = (chk?.items || []).filter((x) => x.level === "warn");
+		for (const x of bad) warn.push(`${esc(x.title)}${x.list ? `: ${x.list.slice(0, 3).map(esc).join(", ")}${x.list.length > 3 ? "…" : ""}` : ""}`);
+		if (soft.length) warn.push(`Worth a look: ${soft.map((x) => esc(x.title.toLowerCase())).join("; ")}. <a href="#" id="seeChk">See the check</a>`);
 		const ses = h?.ses && !h.ses.error ? h.ses : null;
 		if (ses && !ses.enabled) warn.push("Amazon has stopped sending on your account, so nothing will go. Check the SES console.");
 		else if (ses && !ses.production) warn.push("Your Amazon account is still in the sandbox, so only addresses you've verified in Amazon will get it.");
@@ -758,11 +769,20 @@ async function editor(id, kind) {
 		const odd = [...new Set((current() + " " + $("#subject").value).match(/\*\|[A-Z0-9_:]+\|\*/g) || [])].filter((t) => !/^\*\|(FNAME|EMAIL|UNSUB|ARCHIVE)\|\*$/.test(t));
 		if (odd.length) warn.push(`These tags won't be filled in: ${odd.map(esc).join(", ")}. Use {{first_name|there}}, {{name}} or {{email}} instead.`);
 		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"} straight away and takes ${esc(r.time)}. You can't change it once it's gone.</p>${warn.map((w) => `<p class="hwarn">${icon("alert")}<span>${w}</span></p>`).join("")}<p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
+		$("#seeChk", m) && ($("#seeChk", m).onclick = (ev) => { ev.preventDefault(); m.remove(); checkModal(chk.items); });
 		$("#go", m).onclick = async (ev) => { ev.currentTarget.disabled = true; try { await api(`/api/campaigns/${id}/send`, { body: {} }); m.remove(); route(); } catch (err) { $("#me", m).textContent = err.message; ev.currentTarget.disabled = false; } };
 	};
 	loadVisual(html);
 	recount();
 	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
+}
+// Check before you send: what's fine and what's worth fixing, worst first.
+function checkModal(items) {
+	const ic = { ok: "check", warn: "alert", bad: "x" };
+	const bad = items.filter((x) => x.level === "bad").length, warn = items.filter((x) => x.level === "warn").length;
+	modal(`<h2>Check before you send</h2><p class="muted">${bad ? `${bad === 1 ? "One thing needs" : `${bad} things need`} fixing.` : warn ? "Nothing's broken. A few things are worth a look." : "All good. It's ready to go."}</p>
+	<div class="checks">${items.map((x) => `<div class="chk ${x.level}">${icon(ic[x.level])}<div><b>${esc(x.title)}</b>${x.detail ? `<p>${esc(x.detail)}</p>` : ""}${x.list ? `<ul>${x.list.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div></div>`).join("")}</div>
+	<div class="row"><button class="btn" data-close>${icon("check")}Done</button></div>`);
 }
 // -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
 const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };

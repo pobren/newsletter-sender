@@ -16,6 +16,7 @@ import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
+import { checkEmail } from "./check.ts";
 
 const DEFAULT_BRAND = "My newsletter";
 
@@ -724,7 +725,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const file = `${slugify(c.name || c.subject) || "campaign"}-${who}${who === "link" ? `-${n}` : ""}.csv`;
 		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" } });
 	}
-	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|preview))?$/.exec(path);
+	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|check|preview))?$/.exec(path);
 	if (cm) {
 		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<CampaignRow>();
 		if (!c) return bad("That email has gone.", 404);
@@ -764,6 +765,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (method !== "POST") return bad("Not found.", 404);
 		const b = await body(request);
+		if (action === "check") return ok({ items: await checkEmail({ subject: c.subject, preheader: c.preheader, content: campaignContent(c), colour: brand.colour, brandName: brand.name }) });
 		if (action === "test") {
 			const provider = await loadProvider(db, brand);
 			if (!provider) return bad("Please choose how to send first, under Settings, Sending.");
