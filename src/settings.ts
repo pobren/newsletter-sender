@@ -24,9 +24,12 @@ export async function installId(db: D1Database): Promise<string> {
 }
 
 /** The Cloudflare token for a brand's own link domain, kept sealed. Falls back to the one saved for Amazon SES DNS. */
+/** The token made just for the links domain (it can add custom domains to Workers), if one was saved. */
+export async function ownLinksToken(db: D1Database, brand: BrandRow): Promise<string | null> {
+	return (await unsealText(await sealSecret(db), await getMeta(db, `links_token:${brand.id}`))) || null;
+}
 export async function linksToken(db: D1Database, brand: BrandRow): Promise<string | null> {
-	const own = await unsealText(await sealSecret(db), await getMeta(db, `links_token:${brand.id}`));
-	return own || (await loadProvider(db, brand))?.cfToken || null;
+	return (await ownLinksToken(db, brand)) || (await loadProvider(db, brand))?.cfToken || null;
 }
 export async function saveLinksToken(db: D1Database, brandId: string, token: string): Promise<void> {
 	await setMeta(db, `links_token:${brandId}`, await sealText(await sealSecret(db), token));

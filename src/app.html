@@ -413,7 +413,7 @@ async function linksCard(needToken = false) {
 	const ask = needToken || !s.hasToken;
 	box.innerHTML = `<label for="lkd">Custom tracking domain</label><input id="lkd" placeholder="${esc(s.suggest)}" value="${esc(s.suggest)}" autocomplete="off">
 	<div class="info" style="margin-top:12px">${icon("shield")}<p>Use a dedicated subdomain that is not actively used for anything else (e.g. <b>${esc(s.suggest)}</b>). Do not use your apex root domain or www, as this would override your main website. Your DNS must be managed in Cloudflare.</p></div>
-	${ask ? `<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Cloudflare opens with the right permissions filled in. Under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
+	${ask ? `<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Cloudflare opens with the right permissions filled in. Under Account Resources choose your account and under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
 	<div class="helplinks"><a class="btn ghost small" href="${esc(s.tokenUrl)}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
 	<input id="lkt" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token">` : ""}
 	<p class="err" id="lke"></p>

@@ -12,7 +12,7 @@ import { addWebhook, isProvider, parseProvider, providerSummary, sendOne, sesKey
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
-import { canSendFrom, installId, linksToken, loadProvider, saveLinksToken, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
+import { canSendFrom, installId, linksToken, ownLinksToken, loadProvider, saveLinksToken, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
@@ -301,7 +301,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			let token = typeof b.token === "string" ? b.token.trim() : "";
 			if (token && (token.length < 20 || token.length > 200 || /\s/.test(token))) return bad("Please paste the whole Cloudflare token, with no spaces.");
 			if (!token) token = (await linksToken(db, brand)) ?? "";
-			if (!token) return bad("Please make a Cloudflare token first, with the button below.", 409);
+			if (!token) return bad("Please make a Cloudflare token first, with the Make a Cloudflare token button.", 409);
 			const zone = await findZone(token, hostname);
 			if ("error" in zone) return bad(zone.error);
 			if (!zone.accountId) return bad("Cloudflare didn't tell us which account that domain is in. Please try again.");
@@ -320,7 +320,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cf: { cacheTtl: 0 } } as RequestInit).then((r) => (r.ok ? r.text() : ""), () => "");
 			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
 		}
-		return ok({ domain: host, hasToken: Boolean(await linksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname, suggest: `news.${(brand.from_email ?? "").split("@")[1] || "yourdomain.com"}` });
+		return ok({ domain: host, hasToken: Boolean(await ownLinksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname, suggest: `news.${(brand.from_email ?? "").split("@")[1] || "yourdomain.com"}` });
 	}
 	// The public API's keys and webhooks (Settings, API).
 	if (path === "/api/developer" && method === "GET") {
