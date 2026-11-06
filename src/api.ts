@@ -270,6 +270,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		} catch (e) {
 			return bad(`The restore stopped part way: ${(e as Error).message}. Your backup from just before is in the list, so you can put that back.`);
 		}
+	}
 	// Your own domain for links: every link in your emails (unsubscribe, view online, opens and clicks) uses it.
 	if (path === "/api/links") {
 		const host = brand.track_domain ? new URL(brand.track_domain).hostname : null;
