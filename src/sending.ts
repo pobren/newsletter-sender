@@ -55,6 +55,8 @@ export interface Audience {
 	tags: string[];
 	/** Only people who did (or didn't do) something lately, such as opened an email in the last 90 days. */
 	activity?: Activity | null;
+	/** Sending again: only people who got this campaign and didn't open it. */
+	resend?: { campaign: string } | null;
 }
 
 export const ACTIVITY_KINDS = ["opened", "not_opened", "clicked", "not_clicked", "joined"] as const;
@@ -69,7 +71,8 @@ export function parseAudience(x: unknown): Audience {
 	const tags = Array.isArray(a?.tags) ? a.tags.filter((t: unknown) => typeof t === "string" && /^[a-z0-9_-]{1,40}$/.test(t)).slice(0, 20) : [];
 	const act = a?.activity;
 	const activity = act && (ACTIVITY_KINDS as readonly string[]).includes(act.kind) && [7, 14, 30, 60, 90, 180, 365].includes(Number(act.days)) ? { kind: act.kind, days: Number(act.days) } : null;
-	return { lists: ids(a?.lists), tags, ...(activity ? { activity } : {}) };
+	const resend = typeof a?.resend?.campaign === "string" && /^[0-9a-f]{8,40}$/.test(a.resend.campaign) ? { campaign: a.resend.campaign } : null;
+	return { lists: ids(a?.lists), tags, ...(activity ? { activity } : {}), ...(resend ? { resend } : {}) };
 }
 
 export function safeJson(s: string | null | undefined): any {
@@ -98,6 +101,11 @@ function audienceSql(brandId: string, a: Audience): { sql: string; binds: unknow
 		else if (k === "opened" || k === "clicked") (sql += ` AND ${did(k === "opened" ? "opened_at" : "clicked_at")}`), binds.push(since);
 		// "Didn't open" only counts people we actually emailed in that time, not people who just joined.
 		else (sql += ` AND ${got} AND NOT ${did(k === "not_opened" ? "opened_at" : "clicked_at")}`), binds.push(since, since);
+	}
+	if (a.resend) {
+		// Still on the lists and still fine to email (above), got the first one, and never opened it.
+		sql += " AND EXISTS (SELECT 1 FROM sends x WHERE x.campaign_id = ? AND x.subscriber_id = s.id AND x.status = 'sent' AND x.opened_at IS NULL)";
+		binds.push(a.resend.campaign);
 	}
 	return { sql, binds };
 }

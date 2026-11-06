@@ -599,6 +599,7 @@ async function editor(id, kind) {
 	let docMode = false;
 	let html = c.html || "";
 	const tags = new Set(c.audience.tags);
+	let resend = c.audience.resend || null; // sending again to people who didn't open an earlier campaign
 	const allTags = [...new Set([...tagList.map((t) => t.tag), ...c.audience.tags])];
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="${isT ? "#templates" : "#campaigns"}">${icon("back")}${isT ? "All templates" : "All campaigns"}</a><h1 class="grow">${isT ? "Edit template" : c.status === "scheduled" ? "Scheduled campaign" : "Edit campaign"}</h1><span class="muted" id="saveState">Saved</span></div>
 	${c.status === "scheduled" ? `<div class="card" style="margin-top:16px"><p>${icon("clock")} Goes out ${when(c.send_at)}. <button class="btn ghost small" id="unschedule">${icon("x")}Don't send then</button></p></div>` : ""}
@@ -615,6 +616,7 @@ async function editor(id, kind) {
 			<p class="hint">These start as your <a href="#settings">Settings</a>. Change them here for just this campaign.</p>`}
 		</div>
 		<div class="card"><h2>Who it goes to</h2>
+			${c.audience.resend ? `<div class="info" id="rsn">${icon("refresh")}<p>Only people who got <a href="#email/${esc(c.audience.resend.campaign)}"><b>${esc(c.resendOf?.name || "the first one")}</b></a> and didn't open it, and are still on these lists. A new subject line often helps.<br><button type="button" class="btn ghost small" id="rsnOff" style="margin-top:8px">${icon("x")}Send to everyone on the lists instead</button></p></div>` : ""}
 			<p class="step"><b>1</b>Choose the lists</p>
 			<div class="choices">${ls.map((l) => `<label class="choice"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}><span><b>${esc(l.name)}</b><small>${num(l.active)} subscribed</small></span></label>`).join("")}</div>
 			<p class="step"><b>2</b>Only people with these tags <span class="hint">(optional)</span></p>
@@ -719,7 +721,7 @@ async function editor(id, kind) {
 		toast(/src=["'](?!https?:|data:|cid:)/i.test(text) ? "Design loaded. Some pictures use short addresses: upload them, or use full https:// addresses." : "Design loaded");
 	};
 
-	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
+	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null, resend }, public: $("#public").checked });
 	let saving = null;
 	const save = async () => {
 		clearTimeout(t);
@@ -728,11 +730,12 @@ async function editor(id, kind) {
 	};
 	let t = null;
 	const changed = () => { saved = false; $("#saveState").textContent = "Saving…"; clearTimeout(t); t = setTimeout(save, 900); };
-	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")} Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.`; } catch {} };
+	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")}<span>Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.</span>`; } catch {} };
 	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo"].includes(e.target.id)) changed(); }, { signal });
 	if (!isT) watchFrom($("#fromEmail"), $("#fromCheck"));
 	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public") changed(); }, { signal });
 	if (!isT) {
+		$("#rsnOff") && ($("#rsnOff").onclick = () => { resend = null; $("#rsn").remove(); recount(); changed(); });
 		const act = c.audience.activity;
 		if (act && $(`#act option[value=${act.kind}]`)) { $("#act").value = act.kind; $("#actDays").value = String(act.days); }
 		$("#actDays").disabled = !$("#act").value;
@@ -927,16 +930,17 @@ function addToList(c, ls, b) {
 }
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
-	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
-	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
+	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
 	$("#pause") && ($("#pause").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/pause`, { body: {} }); toast("Paused. Nothing more goes until you carry on."); route(); }));
 	$("#resume") && ($("#resume").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/resume`, { body: {} }); route(); }));
 	main.addEventListener("click", (e) => { const b = e.target.closest("[data-addto]"); if (b) addToList(c, ls, b); }, { signal: view.signal });
 	$("#dup").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/duplicate`, { body: {} }); location.hash = `email/${r.id}`; });
+	$("#again") && ($("#again").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/resend`, { body: {} }); toast("A copy is ready. Give it a new subject line, check it, then send."); location.hash = `email/${r.id}`; }));
 	if (c.status === "sending") {
 		// Only the progress updates in place; the page redraws when sending finishes or pauses.
 		let last = { at: Date.now(), done: doneOf(c.stats) }, speed = 0;

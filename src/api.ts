@@ -724,7 +724,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const file = `${slugify(c.name || c.subject) || "campaign"}-${who}${who === "link" ? `-${n}` : ""}.csv`;
 		return new Response(lines.join("\r\n") + "\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${file}"`, "cache-control": "no-store" } });
 	}
-	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|preview))?$/.exec(path);
+	const cm = /^\/api\/campaigns\/([0-9a-f]{16})(?:\/(test|send|schedule|unschedule|cancel|pause|resume|duplicate|resend|preview))?$/.exec(path);
 	if (cm) {
 		const c = await db.prepare("SELECT * FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<CampaignRow>();
 		if (!c) return bad("That email has gone.", 404);
@@ -736,7 +736,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			const aud = parseAudience(c.audience);
+			const resendOf = aud.resend ? await db.prepare("SELECT id, COALESCE(name, subject) AS name FROM campaigns WHERE id = ? AND brand_id = ?").bind(aud.resend.campaign, brand.id).first() : null;
+			return ok({ ...c, resendOf, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -811,6 +813,14 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if (action === "resume") {
 			const r = await resume(env, c);
 			return "error" in r ? bad(r.error) : ok();
+		}
+		if (action === "resend") {
+			if (c.status !== "sent") return bad("You can send again once this one has finished sending.");
+			if (!brand.track_opens) return bad("Switch on opens under Settings, Tracking first, so we know who didn't open it.");
+			const id = newId(8);
+			const audience = { ...parseAudience(c.audience), activity: null, resend: { campaign: c.id } };
+			await db.prepare("INSERT INTO campaigns (id, brand_id, name, subject, preheader, blocks, html, audience, from_name, from_email, reply_to, public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)").bind(id, brand.id, `${c.name || c.subject} (didn't open)`, c.subject, c.preheader, c.blocks, c.html, JSON.stringify(audience), c.from_name ?? null, c.from_email ?? null, c.reply_to ?? null, iso(), iso()).run();
+			return ok({ id });
 		}
 		if (action === "duplicate") {
 			const id = newId(8);
