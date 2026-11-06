@@ -980,6 +980,35 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	}
 
 	// -- Reports ---------------------------------------------------------------------------------------
+	if (path === "/api/reports/growth") {
+		// Everyone who was ever on the brand's lists (or one list): when they joined, and when they left or bounced.
+		// Each person is counted once, so the running total ends exactly at today's subscriber count.
+		const days = [30, 90, 365].includes(Number(url.searchParams.get("days"))) ? Number(url.searchParams.get("days")) : 90;
+		const list = url.searchParams.get("list");
+		const one = list && /^[0-9a-f]{8,40}$/.test(list) ? list : null;
+		const { results } = await db.prepare(`WITH p AS (SELECT s.suppressed, substr(s.suppressed_at, 1, 10) AS sd, MIN(substr(COALESCE(m.confirmed_at, m.created_at), 1, 10)) AS jd,
+				MAX(m.status = 'active') AS act, MAX(substr(m.left_at, 1, 10)) AS ld
+				FROM subscribers s JOIN memberships m ON m.subscriber_id = s.id JOIN lists l ON l.id = m.list_id
+				WHERE l.brand_id = ? ${one ? "AND l.id = ?" : ""} AND m.status != 'pending' GROUP BY s.id)
+			SELECT jd AS d, 'joined' AS k, COUNT(*) AS n FROM p GROUP BY jd
+			UNION ALL SELECT COALESCE(sd, jd), 'lost', COUNT(*) FROM p WHERE suppressed IS NOT NULL GROUP BY COALESCE(sd, jd)
+			UNION ALL SELECT COALESCE(ld, jd), 'left', COUNT(*) FROM p WHERE suppressed IS NULL AND act = 0 GROUP BY COALESCE(ld, jd)`).bind(brand.id, ...(one ? [one] : [])).all<{ d: string; k: "joined" | "lost" | "left"; n: number }>();
+		const from = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+		let total = 0;
+		const by = new Map<string, number>();
+		for (const r of results) {
+			if (r.d < from) total += r.k === "joined" ? r.n : -r.n;
+			else by.set(`${r.d}|${r.k}`, (by.get(`${r.d}|${r.k}`) ?? 0) + r.n);
+		}
+		const out: { d: string; total: number; joined: number; left: number; lost: number }[] = [];
+		for (let i = days - 1; i >= 0; i--) {
+			const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+			const day = { d, total: 0, joined: by.get(`${d}|joined`) ?? 0, left: by.get(`${d}|left`) ?? 0, lost: by.get(`${d}|lost`) ?? 0 };
+			total += day.joined - day.left - day.lost;
+			out.push({ ...day, total });
+		}
+		return ok({ days: out });
+	}
 	if (path === "/api/reports") {
 		const [emails, problems] = await db.batch([
 			db.prepare(`SELECT c.id, c.name, c.subject, c.status, c.started_at, c.total,

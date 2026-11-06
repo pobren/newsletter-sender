@@ -127,6 +127,8 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .svc dl{display:grid;grid-template-columns:auto auto;gap:6px 12px;margin:0}.svc dt{color:var(--muted)}.svc dd{margin:0;font-weight:700;text-align:right}
 .hmeter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}.hmeter i{display:block;height:100%;background:var(--hc)}
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
+.gtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:14px 0}.gtiles>div{background:var(--soft);border-radius:12px;padding:12px 14px}.gtiles b{display:block;font-size:24px;line-height:1.2;color:var(--ink)}.gtiles span{font-size:13px;color:var(--muted)}.gtiles .up b{color:var(--ok)}.gtiles .down b{color:var(--bad)}
+.gchart{position:relative;padding-left:52px}.gax{position:absolute;left:0;font-size:12px;color:var(--muted)}.gax.top{top:0}.gax.bot{top:200px}.gline{display:block;width:100%;height:220px}.gpath{fill:none;stroke:var(--c);stroke-width:2.5;vector-effect:non-scaling-stroke}.garea{fill:var(--pink);opacity:.7}.gbars{display:block;width:100%;height:70px;margin-top:6px}.gj{fill:var(--ok)}.gl{fill:var(--bad)}.gmid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}.gdates{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);margin-top:4px;white-space:nowrap}.gkey{text-align:center;margin:6px 0 0}
 .hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
 @media(max-width:900px){.htiles{grid-template-columns:repeat(2,1fr)}}
 .act select{width:auto;flex:1 1 200px}
@@ -1480,13 +1482,34 @@ async function settings(section) {
 }
 
 // -- Reports ---------------------------------------------------------------------------------------------
+// Subscriber growth: everyone on the lists over time, with who joined and who left each day.
+function growthHtml(days) {
+	const n = days.length, tot = days.map((d) => d.total), hi = Math.max(...tot), lo = Math.min(...tot), span = Math.max(1, hi - lo);
+	const y = (v) => 8 + (1 - (v - lo) / span) * 84, x = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
+	const line = tot.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(2)},${y(v).toFixed(2)}`).join("");
+	const moves = days.map((d) => Math.max(d.joined, d.left + d.lost)), top = Math.max(1, ...moves), w = 100 / n;
+	const sum = (k) => days.reduce((a, d) => a + d[k], 0), joined = sum("joined"), left = sum("left"), lost = sum("lost"), net = joined - left - lost;
+	const day = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+	const sign = (v) => (v > 0 ? `+${num(v)}` : v < 0 ? `−${num(-v)}` : "0");
+	return `<div class="gtiles"><div><b>${num(tot[n - 1])}</b><span>Subscribers now</span></div><div class="up"><b>${sign(joined)}</b><span>Joined</span></div><div class="down"><b>${left ? `−${num(left)}` : "0"}</b><span>Unsubscribed</span></div><div class="down"><b>${lost ? `−${num(lost)}` : "0"}</b><span>Bounced or spam</span></div><div class="${net >= 0 ? "up" : "down"}"><b>${sign(net)}</b><span>Overall</span></div></div>
+	<div class="gchart"><span class="gax top">${num(hi)}</span><span class="gax bot">${num(lo)}</span>
+	<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="gline" role="img" aria-label="Subscribers over time, from ${num(tot[0])} to ${num(tot[n - 1])}"><path d="${line}L100,100L0,100Z" class="garea"/><path d="${line}" class="gpath"/>${days.map((d, i) => `<rect x="${(i * w).toFixed(2)}" y="0" width="${w.toFixed(2)}" height="100" fill="transparent"><title>${day(d.d)}: ${num(d.total)} subscribers${d.joined ? `, ${num(d.joined)} joined` : ""}${d.left ? `, ${num(d.left)} unsubscribed` : ""}${d.lost ? `, ${num(d.lost)} bounced or spam` : ""}</title></rect>`).join("")}</svg>
+	<svg viewBox="0 0 100 40" preserveAspectRatio="none" class="gbars" aria-hidden="true">${days.map((d, i) => `${d.joined ? `<rect x="${(i * w + w * 0.15).toFixed(2)}" y="${(20 - (d.joined / top) * 19).toFixed(2)}" width="${(w * 0.7).toFixed(2)}" height="${((d.joined / top) * 19).toFixed(2)}" class="gj"/>` : ""}${d.left + d.lost ? `<rect x="${(i * w + w * 0.15).toFixed(2)}" y="20" width="${(w * 0.7).toFixed(2)}" height="${(((d.left + d.lost) / top) * 19).toFixed(2)}" class="gl"/>` : ""}`).join("")}<line x1="0" y1="20" x2="100" y2="20" class="gmid"/></svg>
+	<div class="gdates"><span>${day(days[0].d)}</span><span>${day(days[n - 1].d)}</span></div><p class="hint gkey">Green: joined. Red: unsubscribed, bounced or spam.</p></div>`;
+}
 async function reports() {
-	const r = await api("/api/reports");
+	const [r, ls] = await Promise.all([api("/api/reports"), api("/api/lists")]);
 	const tr = r.tracking;
 	main.innerHTML = `<div class="row"><h1 class="grow">Reports</h1><a class="btn ghost" href="#settings/tracking">${icon("cog")}Tracking settings</a></div>
 	<p class="muted lead">${tr.opens || tr.clicks ? `Tracking ${[tr.opens && "opens", tr.clicks && "clicks"].filter(Boolean).join(" and ")}.` : "Opens and clicks are off. Switch them on in Settings if you'd like them."} Bounces, spam complaints and unsubscribes are always counted.</p>
+	<div class="card"><div class="row toolbar-row"><h2 class="grow" style="margin:0">${icon("users")}Subscriber growth</h2>${ls.length > 1 ? `<select id="gl" aria-label="Which list"><option value="">All lists</option>${ls.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select>` : ""}<div class="seg" id="gd" role="group" aria-label="How far back">${[[30, "30 days"], [90, "90 days"], [365, "12 months"]].map(([d, t]) => `<button type="button" class="${d === 90 ? "on" : ""}" data-d="${d}">${t}</button>`).join("")}</div></div><div id="gbody"><p class="muted">Loading…</p></div></div>
 	<div class="card flush">${r.emails.length ? `<div class="scroll"><table class="data"><thead><tr><th>Campaign</th><th>Recipients</th><th>Sent</th>${tr.opens ? "<th>Unique opens</th>" : ""}${tr.clicks ? "<th>Unique clicks</th>" : ""}<th>Unsubscribed</th><th>Bounced</th><th>Marked as spam</th></tr></thead><tbody>${r.emails.map((c) => `<tr><td><a href="#email/${c.id}"><b>${esc(c.name || c.subject)}</b></a></td><td>${num(c.total)}</td><td>${ago(c.started_at)}</td>${tr.opens ? `<td>${rate(c.opens, c.sent, "open")}</td>` : ""}${tr.clicks ? `<td>${rate(c.clicks, c.sent, "click")}</td>` : ""}<td>${rate(c.unsubscribed, c.sent, "")}</td><td>${rate(c.bounced, c.sent, "bad")}</td><td>${rate(c.complained, c.sent, "bad")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted pad">Nothing sent yet. Reports appear here after your first campaign.</p>`}</div>
 	<div class="card"><h2>Bounces and spam complaints</h2><p class="hint">Hard bounces and complaints are never emailed again. A bounce "for now" (a full inbox, say) gets another try next time.</p>${r.problems.length ? `<ul class="feed">${r.problems.map((a) => `<li><time>${when(a.at)}</time>${esc(KIND[a.kind] || a.kind)}: ${esc(a.email || "")}${a.name || a.subject ? ` · ${esc(a.name || a.subject)}` : ""}${a.detail ? ` <span class="muted">(${esc(a.detail)})</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted">None so far.</p>`}</div>`;
+	let days = 90;
+	const draw = async () => { const g = await api(`/api/reports/growth?days=${days}&list=${$("#gl")?.value || ""}`); $("#gbody").innerHTML = growthHtml(g.days); };
+	$("#gd").onclick = (e) => { const b = e.target.closest("[data-d]"); if (!b) return; days = Number(b.dataset.d); $$("#gd button").forEach((x) => x.classList.toggle("on", x === b)); draw(); };
+	$("#gl") && ($("#gl").onchange = draw);
+	draw();
 }
 
 boot();
