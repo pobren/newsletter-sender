@@ -16,6 +16,7 @@ import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Co
 import { canSendFrom, loadProvider, sealSecret } from "./settings.ts";
 import { checkCampaign } from "./health.ts";
 import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
+import { parseReferrals, refCode } from "./referrals.ts";
 import { hasPoll } from "./polls.ts";
 import { abSplit, parseAb, pickWinners, sendableTo, subjectFor } from "./abtest.ts";
 
@@ -236,6 +237,23 @@ interface Row {
 	token: string;
 }
 
+/**
+ * Referral links, only when the email has {{referral_url}} or {{referral_count}} in it: the first of its lists with
+ * referrals switched on (or, when none are, its first list's sign up page), and each reader's friends so far.
+ */
+async function referralsFor(db: D1Database, brandId: string, c: CampaignRow, subs: string[]): Promise<{ slug: string; on: boolean; counts: Map<string, number> } | null> {
+	if (!/\{\{\s*referral_(url|count)\s*\}\}/i.test(`${c.html ?? ""}${c.blocks ?? ""}`)) return null;
+	const order = parseAudience(c.audience).lists;
+	const { results } = await db.prepare("SELECT id, slug, referrals FROM lists WHERE brand_id = ? AND id IN (SELECT value FROM json_each(?))").bind(brandId, JSON.stringify(order)).all<{ id: string; slug: string; referrals: string | null }>();
+	results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+	const pick = results.find((l) => parseReferrals(l.referrals).on);
+	const counts = new Map<string, number>();
+	if (!pick) return results[0] ? { slug: results[0].slug, on: false, counts } : null;
+	const { results: n } = await db.prepare("SELECT referred_by AS id, COUNT(*) AS n FROM memberships WHERE list_id = ? AND status = 'active' AND referred_by IN (SELECT value FROM json_each(?)) GROUP BY referred_by").bind(pick.id, JSON.stringify(subs)).all<{ id: string; n: number }>();
+	for (const r of n) counts.set(r.id, r.n);
+	return { slug: pick.slug, on: true, counts };
+}
+
 /** The queue: sends each batch at this worker's share of the brand's rate. */
 export async function consume(batch: MessageBatch<SendBatch>, env: Env): Promise<void> {
 	for (const msg of batch.messages) {
@@ -283,6 +301,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const tb = trackBase(brand, base);
 	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
 	const from = senderOf(brand, c);
+	const ref = await referralsFor(db, brand.id, c, rows.map((r) => r.sub));
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
 	// Every 50 emails we look again, so pressing Pause (or Stop) takes effect within seconds, not at the end of the batch.
@@ -302,7 +321,8 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		const sig = brand.track_opens || brand.track_clicks || polls ? await sendSig(secret, r.id) : "";
 		const unsub = `${base}/u/${r.token}?c=${c.id}`;
 		const track: Look["track"] = { link: brand.track_clicks ? (_url, n) => `${tb}/l/${r.id}.${sig}/${n}` : null, pixel: brand.track_opens ? `${tb}/o/${r.id}.${sig}` : null };
-		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links, poll: polls ? (pid: string, n: number) => `${base}/v/${r.id}.${sig}/${pid}/${n}` : null };
+		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links, poll: polls ? (pid: string, n: number) => `${base}/v/${r.id}.${sig}/${pid}/${n}` : null,
+			...(ref ? { referralUrl: ref.on ? `${base}/r/${ref.slug}/${await refCode(secret, r.sub)}` : `${base}/s/${ref.slug}`, referralCount: ref.counts.get(r.sub) ?? 0 } : {}) };
 		const reader: Reader = { email: r.email, name: r.name, fields: safeJson(r.fields) ?? {} };
 		const subject = subjectFor(c, ab, r.id);
 		const out = renderEmail(subject, content, look, reader);
@@ -478,7 +498,7 @@ export function senderOf(brand: BrandRow, c: Pick<CampaignRow, "from_name" | "fr
 
 export async function sendTest(env: Env, brand: BrandRow, provider: ProviderConfig, c: { subject: string; preheader: string | null; content: Content; from_name?: string | null; from_email?: string | null; reply_to?: string | null }, to: string[], sample: Reader): Promise<Sent[]> {
 	const base = linkBase(brand, await origin(env.DB));
-	const look: Look = { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, track: null };
+	const look: Look = { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, webUrl: null, referralUrl: `${base}/r/test`, track: null };
 	const out = renderEmail(c.subject, c.content, look, sample);
 	const subject = `[Test] ${mergeSubject(c.subject, sample)}`;
 	const from = senderOf(brand, c);

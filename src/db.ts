@@ -97,6 +97,8 @@ export interface ListRow {
 	thanks_url: string | null;
 	/** Other lists this list's form adds people to, as JSON: [id, ...]. */
 	also_lists: string;
+	/** Referrals and their rewards, as JSON (see referrals.ts). */
+	referrals?: string | null;
 	created_at: string;
 }
 
@@ -193,6 +195,8 @@ const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS link_clicks (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, send_id INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, n, send_id))`,
 	// The public API: keys (only their hash is kept) and signed webhooks (the secret is sealed).
 	`CREATE TABLE IF NOT EXISTS api_keys (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, name TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, tail TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT)`,
+	// Referral rewards already emailed, so each one goes once.
+	`CREATE TABLE IF NOT EXISTS referral_rewards (list_id TEXT NOT NULL, subscriber_id TEXT NOT NULL, at INTEGER NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (list_id, subscriber_id, at))`,
 	`CREATE TABLE IF NOT EXISTS webhooks (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, url TEXT NOT NULL, events TEXT NOT NULL, secret TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, failures INTEGER NOT NULL DEFAULT 0, last_status INTEGER, last_at TEXT, created_at TEXT NOT NULL)`,
 ];
 // Columns added after the first version. Each runs once; "duplicate column" means it's already there.
@@ -231,8 +235,12 @@ const MIGRATIONS = [
 	"CREATE TABLE IF NOT EXISTS poll_votes (campaign_id TEXT NOT NULL, poll TEXT NOT NULL, subscriber_id TEXT NOT NULL, answer INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, poll, subscriber_id))",
 	// Testing two subject lines (src/abtest.ts).
 	"ALTER TABLE campaigns ADD COLUMN ab TEXT",
+	// Referrals: who brought each person to a list (only set for people new to it), and the list's rewards.
+	"ALTER TABLE memberships ADD COLUMN referred_by TEXT",
+	"ALTER TABLE lists ADD COLUMN referrals TEXT",
+	"CREATE INDEX IF NOT EXISTS memberships_ref ON memberships (referred_by) WHERE referred_by IS NOT NULL",
 ];
-const SCHEMA_VERSION = "16";
+const SCHEMA_VERSION = "17";
 
 let ready: Promise<void> | null = null;
 

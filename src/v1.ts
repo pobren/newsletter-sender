@@ -283,7 +283,7 @@ export async function handleV1(request: Request, env: Env, url: URL): Promise<Re
 		}
 		if (method === "DELETE") {
 			// Everything we hold about them goes (a right to be forgotten request).
-			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM automation_runs WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
+			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM automation_runs WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM referral_rewards WHERE subscriber_id = ?").bind(s.id), db.prepare("UPDATE memberships SET referred_by = NULL WHERE referred_by = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
 			return json({ deleted: true, id: s.id });
 		}
 		return fail("That method isn't supported here.", 405);

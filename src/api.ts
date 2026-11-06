@@ -1,5 +1,6 @@
 // The dashboard's JSON. Everything here needs the owner signed in, apart from set-up and sign in.
 
+import { cleanReferrals, parseReferrals } from "./referrals.ts";
 import { checkPassword, clearCookie, clearFailures, currentAccount, hashPassword, noteFailure, passwordProblem, sessionCookie, setupCodeMatches, setupTokenOk, signOutEverywhere, tooManyTries } from "./auth.ts";
 import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
 import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, makeKey, MAX_HOOKS, MAX_KEYS } from "./v1.ts";
@@ -533,6 +534,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if ((n?.n ?? 0) <= 1) return bad("You need at least one list.");
 		await db.batch([
 			db.prepare("DELETE FROM memberships WHERE list_id = ?").bind(ld[1]),
+			db.prepare("DELETE FROM referral_rewards WHERE list_id = ? AND EXISTS (SELECT 1 FROM lists WHERE id = ? AND brand_id = ?)").bind(ld[1], ld[1], brand.id),
 			db.prepare("DELETE FROM lists WHERE id = ? AND brand_id = ?").bind(ld[1], brand.id),
 			db.prepare("UPDATE lists SET also_lists = COALESCE((SELECT json_group_array(value) FROM json_each(lists.also_lists) WHERE value != ?), '[]') WHERE brand_id = ?").bind(ld[1], brand.id),
 		]);
@@ -585,7 +587,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (method === "DELETE") {
 			// Removes everything we hold about them (a right to be forgotten request).
-			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
+			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM referral_rewards WHERE subscriber_id = ?").bind(s.id), db.prepare("UPDATE memberships SET referred_by = NULL WHERE referred_by = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
 			return ok();
 		}
 		if (method === "POST") {
@@ -799,7 +801,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (action === "preview") {
 			const base = await origin(db, request);
-			const out = renderEmail(c.subject, campaignContent(c), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, manageUrl: `${base}/p/test`, forwardUrl: `${base}/f/test`, footerLinks: brand.footer_links, webUrl: null, track: null }, { email: me.email, name: me.name });
+			const out = renderEmail(c.subject, campaignContent(c), { brandName: brand.name, colour: brand.colour, logo: brand.logo, footer: brand.footer, preheader: c.preheader, unsubscribeUrl: `${base}/u/test`, manageUrl: `${base}/p/test`, forwardUrl: `${base}/f/test`, referralUrl: `${base}/r/test`, footerLinks: brand.footer_links, webUrl: null, track: null }, { email: me.email, name: me.name });
 			return new Response(out.html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": EMAIL_CSP } });
 		}
 		if (method !== "POST") return bad("Not found.", 404);
@@ -1031,6 +1033,26 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (n) await logEvent(db, brand.id, lb[2] === "unsubscribe" ? "unsubscribed" : "removed", null, null, `${n} from ${l.name} by you`).run();
 		return ok({ changed: n });
+	}
+
+	// -- Referrals: switch them on, set the rewards, and see who's brought the most friends ---------------
+	const rf = /^\/api\/lists\/([0-9a-f]{16})\/referrals$/.exec(path);
+	if (rf) {
+		const l = await db.prepare("SELECT * FROM lists WHERE id = ? AND brand_id = ?").bind(rf[1], brand.id).first<ListRow>();
+		if (!l) return bad("That list has gone.", 404);
+		if (method === "POST") {
+			const r = cleanReferrals(await body(request));
+			if (r.on && !r.rewards.length) return bad("Please add at least one reward, or switch referrals off.");
+			await db.prepare("UPDATE lists SET referrals = ? WHERE id = ?").bind(JSON.stringify(r), l.id).run();
+			return ok(r);
+		}
+		const [total, sent, top] = await db.batch([
+			db.prepare("SELECT COUNT(*) AS n FROM memberships WHERE list_id = ? AND referred_by IS NOT NULL AND status = 'active'").bind(l.id),
+			db.prepare("SELECT COUNT(*) AS n FROM referral_rewards WHERE list_id = ?").bind(l.id),
+			db.prepare(`SELECT s.id, s.email, s.name, COUNT(*) AS n FROM memberships m JOIN subscribers s ON s.id = m.referred_by
+				WHERE m.list_id = ? AND m.status = 'active' AND m.referred_by IS NOT NULL GROUP BY s.id ORDER BY n DESC, s.email LIMIT 20`).bind(l.id),
+		]);
+		return ok({ settings: parseReferrals(l.referrals), double_optin: Boolean(l.double_optin), referred: (total.results[0] as any)?.n ?? 0, rewards_sent: (sent.results[0] as any)?.n ?? 0, top: top.results });
 	}
 
 	// -- Reports ---------------------------------------------------------------------------------------
