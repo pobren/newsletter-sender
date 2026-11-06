@@ -65,6 +65,22 @@ export async function workerName(token: string, accountId: string, host: string,
  * Points a hostname such as news.yourdomain.com at this Worker as a Cloudflare custom domain. Cloudflare makes the DNS
  * record and the certificate itself. Says plainly when the token can't do it, so the app can ask for a better one.
  */
+/** Names that are nearly always in use for a website or email, so never offered for links. */
+const BUSY = /^(www|mail|webmail|smtp|imap|pop|pop3|mx|autodiscover|autoconfig|ftp|cpanel|whm|webdisk|admin|shop|blog|app|api)\./;
+
+/**
+ * Why a name can't be used for links, or null when it's safe: never the main domain (that would take over the website),
+ * never a name used for a website or email, and never a name that already has a DNS record.
+ */
+export async function linksNameProblem(token: string, zone: { id: string; name: string }, hostname: string, fetcher: typeof fetch = fetch): Promise<string | null> {
+	const suggest = `news.${zone.name}`;
+	if (hostname === zone.name) return `${hostname} is your main domain. Using it for links would stop your website working. Please use a new subdomain, such as ${suggest}.`;
+	if (BUSY.test(hostname)) return `${hostname} is usually used for your website or email. Please use a new subdomain, such as ${suggest}.`;
+	const have = await cf(token, "GET", `/zones/${zone.id}/dns_records?name=${encodeURIComponent(hostname)}`, null, fetcher);
+	if (have.ok && (have.data?.result ?? []).length) return `${hostname} is already in use (it has a DNS record in Cloudflare), so we've left it alone. Please choose a new subdomain, such as ${suggest}.`;
+	return null;
+}
+
 export async function addWorkerDomain(token: string, zone: { id: string; accountId: string }, hostname: string, service: string, fetcher: typeof fetch = fetch): Promise<{ ok: true; already: boolean } | { error: string; token?: boolean }> {
 	const have = await cf(token, "GET", `/accounts/${zone.accountId}/workers/domains?hostname=${encodeURIComponent(hostname)}`, null, fetcher);
 	if (!have.ok) return { error: "Your Cloudflare token can't add custom domains to Workers yet. Please make a new token with the button below.", token: true };

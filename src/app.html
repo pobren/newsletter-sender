@@ -407,8 +407,8 @@ async function linksCard(needToken = false) {
 		return;
 	}
 	const ask = needToken || !s.hasToken;
-	box.innerHTML = `<label for="lkd">Your domain for links</label><input id="lkd" placeholder="news.yourdomain.com" autocomplete="off">
-	<p class="hint">A new subdomain of your website that isn't used for anything else. Your domain needs to be on Cloudflare.</p>
+	box.innerHTML = `<label for="lkd">Your domain for links</label><input id="lkd" placeholder="${esc(s.suggest)}" value="${esc(s.suggest)}" autocomplete="off">
+	<div class="info">${icon("shield")}<p>Use a <b>new subdomain</b> that isn't used for anything else, such as <b>${esc(s.suggest)}</b>. Never your main domain or www: that would stop your website working, so we won't allow it. Your domain needs to be on Cloudflare.</p></div>
 	${ask ? `<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Cloudflare opens with the right permissions filled in. Under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
 	<div class="helplinks"><a class="btn ghost small" href="${esc(s.tokenUrl)}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
 	<input id="lkt" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token">` : ""}
