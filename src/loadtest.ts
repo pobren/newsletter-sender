@@ -27,10 +27,11 @@ export async function loadTestFor(db: D1Database, campaign: string): Promise<Loa
 	}
 }
 
-/** The same address always gets the same result, so a run can be checked afterwards. */
-export function pick(email: string): number {
+/** The same address always gets the same result in a campaign, so a run can be checked afterwards. Each campaign mixes
+ * in its own id, so a second test campaign doesn't pick the very people the first one already suppressed. */
+export function pick(email: string, campaign = ""): number {
 	let h = 0;
-	for (const ch of email) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+	for (const ch of campaign + email) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
 	return h % 10000;
 }
 
@@ -44,7 +45,7 @@ export async function pretendSend(t: LoadTest, to: string): Promise<Sent> {
 export function pretendReplies(db: D1Database, brandId: string, campaign: string, t: LoadTest, rows: { sub: string; email: string }[]): D1PreparedStatement[] {
 	const out: D1PreparedStatement[] = [];
 	for (const r of rows) {
-		const p = pick(r.email);
+		const p = pick(r.email, campaign);
 		const kind = p < (t.bounce ?? 0) * 100 ? "bounced" : p < ((t.bounce ?? 0) + (t.complaint ?? 0)) * 100 ? "complained" : null;
 		if (!kind) continue;
 		out.push(logEvent(db, brandId, kind, r.sub, campaign, "load test"));

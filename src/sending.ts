@@ -35,6 +35,8 @@ export const MAX_TRIES = 10;
 export const DEFAULT_RATE: Record<string, number> = { ses: 1, postmark: 20, mailgun: 20, brevo: 10, resend: 2 };
 
 /** One worker's share of the brand's rate, in emails a second. */
+/** How often a batch looks again to see if the send was paused or stopped. */
+const LOOK_MS = 2000;
 export const shareOfRate = (rate: number, workers = CONCURRENCY) => Math.max(0.2, rate / workers);
 
 /** The queue batches for send rows from `min` to `max`: [from, to] pairs of BATCH rows each. */
@@ -304,11 +306,13 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const ref = await referralsFor(db, brand.id, c, rows.map((r) => r.sub));
 	// What happened is saved every ten emails, so if a worker is stopped part way, only those last few could go twice.
 	const pending: D1PreparedStatement[] = [];
-	// Every 50 emails we look again, so pressing Pause (or Stop) takes effect within seconds, not at the end of the batch.
-	let stopped = false, flushes = 0;
+	// Every two seconds we look again, so pressing Pause (or Stop) takes effect within seconds, not at the end of the batch,
+	// however slowly the brand sends.
+	let stopped = false, looked = Date.now();
 	const flush = async () => {
 		if (pending.length) await db.batch(pending.splice(0));
-		if (++flushes % 5 === 0) {
+		if (Date.now() - looked >= LOOK_MS) {
+			looked = Date.now();
 			const now = await db.prepare("SELECT status, run FROM campaigns WHERE id = ?").bind(c.id).first<{ status: string; run: number }>();
 			if (!now || now.status !== "sending" || (now.run ?? 0) !== (c.run ?? 0)) stopped = true;
 		}
@@ -337,7 +341,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		};
 		const sent = test ? await pretendSend(test, r.email) : await sendOne(provider, from.name, from.email, email, fetcher);
 		record(r.id, sent);
-		if (pending.length >= 10) await flush();
+		if (pending.length >= 10 || Date.now() - looked >= LOOK_MS) await flush();
 		return sent;
 	}, realClock, () => stopped);
 	await flush();
