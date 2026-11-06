@@ -2,7 +2,8 @@
 
 import { checkPassword, clearCookie, clearFailures, currentAccount, hashPassword, noteFailure, passwordProblem, sessionCookie, setupCodeMatches, setupTokenOk, signOutEverywhere, tooManyTries } from "./auth.ts";
 import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
-import { firstBrand, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { getBackup, KEEP, listBackups, makeBackup, restoreBackup } from "./backup.ts";
+import { firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
@@ -241,6 +242,33 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if (p?.provider !== "ses") return bad("Please save your Amazon SES keys first.");
 		const r = await setUpSes(db, brand, p, request);
 		return "error" in r ? bad(r.error) : ok(r);
+	}
+	// Backups (Settings, Backups): the list, one now, download, and putting one back.
+	if (path === "/api/backups") {
+		if (method === "POST") {
+			try {
+				return ok(await makeBackup(env, new Date(), "-by-hand"));
+			} catch (e) {
+				return bad((e as Error).message);
+			}
+		}
+		return ok({ backups: await listBackups(env), keep: KEEP, error: await getMeta(db, "backup_error"), bucket: Boolean(env.IMAGES) });
+	}
+	if (path === "/api/backups/download") {
+		const name = url.searchParams.get("name") ?? "";
+		const obj = await getBackup(env, name);
+		if (!obj) return bad("That backup has gone.", 404);
+		return new Response(obj.body, { headers: { "content-type": "application/gzip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store" } });
+	}
+	if (path === "/api/backups/restore" && method === "POST") {
+		const b = await body(request);
+		if (b.confirm !== true) return bad("Please confirm first.");
+		try {
+			const r = await restoreBackup(env, String(b.name ?? ""));
+			return "error" in r ? bad(r.error) : ok(r);
+		} catch (e) {
+			return bad(`The restore stopped part way: ${(e as Error).message}. Your backup from just before is in the list, so you can put that back.`);
+		}
 	}
 	if (path === "/api/health") {
 		const h = await brandHealth(db, brand.id);
