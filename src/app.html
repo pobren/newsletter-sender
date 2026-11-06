@@ -993,11 +993,25 @@ function readImport(rows) {
 }
 function importer(ls, reload, pick = "") {
 	const m = modal(`<h2>Import a list</h2><p>A CSV file from your old newsletter tool (Mailchimp, Sendy, Substack, Kit and others) or a spreadsheet. We find the email column ourselves.</p>
+	<div class="info">${icon("download")}<p>Not sure how it should look? Download our template: one person per row, with their email address, name, tags and any custom fields this list has. Fill it in with Excel, Numbers or Google Sheets, save it as CSV, then choose it below.<br><button type="button" class="btn ghost small" id="itpl" style="margin-top:8px">${icon("download")}Download the template</button></p></div>
 	<label>The file</label><input type="file" id="if" accept=".csv,text/csv,text/plain"><p id="ip" class="muted"></p><label>Into this list</label><select id="il">${ls.map((l) => `<option value="${l.id}" ${l.id === pick ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
 	<label>Tag them <span class="hint">(optional)</span></label><input id="it" placeholder="such as imported">
 	<label class="check"><input type="checkbox" id="ic"> Everyone on this list agreed to get emails from me</label><p class="hint">Nobody who has unsubscribed, bounced or marked you as spam is added back.</p><p class="err" id="ie"></p>
 	<div class="row"><button class="btn" id="igo" disabled>${icon("upload")}Import</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 	let data = null;
+	$("#itpl", m).onclick = () => {
+		const l = ls.find((x) => x.id === $("#il", m).value) || ls[0] || {};
+		const extra = (l.fields || []).filter((f) => f.key && !["email", "first_name", "last_name", "name", "tags"].includes(f.key));
+		const sample = (f, i) => (/date|birth|day/i.test(`${f.type || ""} ${f.key}`) ? ["1990-03-05", "1985-11-21", ""][i] : ["Example", "", ""][i]);
+		const people = [["jane@example.com", "Jane", "Smith", "customer, vip"], ["sam@example.com", "Sam", "Jones", "customer"], ["alex@example.com", "", "", ""]];
+		const cell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+		const rows = [["email", "first_name", "last_name", "tags", ...extra.map((f) => f.key)], ...people.map((p, i) => [...p, ...extra.map((f) => sample(f, i))])];
+		const a = document.createElement("a");
+		a.href = URL.createObjectURL(new Blob([rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n"], { type: "text/csv" }));
+		a.download = "subscribers-template.csv";
+		a.click();
+		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+	};
 	$("#if", m).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; data = readImport(parseCsv(await f.text())); $("#ip", m).textContent = data.rows.length ? `${num(data.rows.length)} people found${data.skipped ? `, ${num(data.skipped)} rows skipped (no email, or a repeat)` : ""}.${data.columns.length ? ` Also keeping: ${data.columns.join(", ")}.` : ""}` : "We couldn't find any email addresses in that file."; $("#igo", m).disabled = !data.rows.length; };
 	$("#igo", m).onclick = async (e) => {
 		const btn = e.currentTarget; btn.disabled = true; let added = 0;
