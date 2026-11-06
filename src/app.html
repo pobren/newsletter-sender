@@ -64,7 +64,7 @@ details.embed{margin-top:16px;border:1px solid var(--line);border-radius:12px;pa
 @media(max-width:700px){header{position:static}.bar{padding:10px 16px;gap:10px}nav.tabs{order:3;flex:0 0 100%;flex-wrap:nowrap;overflow-x:auto;margin:0 -16px;padding:0 16px}nav.tabs a{flex:none}#signout{margin-left:auto}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat b{font-size:24px}main{padding:20px 16px 60px}h1{font-size:24px}}
 header{overflow:hidden}
 #busy{position:absolute;left:0;bottom:0;height:3px;width:35%;background:var(--c);animation:busy 1s ease-in-out infinite}@keyframes busy{from{transform:translateX(-100%)}to{transform:translateX(300%)}}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.bar{max-width:1320px}#brandPick select{width:auto;min-height:36px;padding:4px 10px;font-weight:600;max-width:240px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.bar{max-width:1320px}#brandPick select{width:auto;min-height:36px;padding:4px 10px;font-weight:600;max-width:240px}@media(max-width:600px){#brandPick select{max-width:130px}}
 #settingsLink.on{border-color:var(--c);background:var(--soft);color:var(--cd)}
 .shell{max-width:1320px;margin:0 auto;display:grid;grid-template-columns:232px minmax(0,1fr)}
 .shell:has(>#side[hidden]){display:block}
@@ -116,6 +116,15 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .htile{border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:2px;border-top:4px solid var(--hc)}.htile .hbig{font-size:28px;font-weight:800;color:var(--hc);line-height:1.15}.htile .muted{font-size:13px}
 .h-good{--hc:#16a34a}.h-ok{--hc:#d97706}.h-bad{--hc:#dc2626}.h-few{--hc:var(--muted)}
 .hpill.h-good{background:#dcfce7;color:#166534}.hpill.h-ok{background:#fef3c7;color:#92400e}.hpill.h-bad{background:#fee2e2;color:#991b1b}
+.ab{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}@media(max-width:1000px){.ab{grid-template-columns:1fr}}
+.abrow{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1.4fr) auto;gap:14px;align-items:center;padding:16px 0;border-bottom:1px solid var(--line)}.abrow:last-child{border-bottom:0}
+@media(max-width:760px){.abrow{grid-template-columns:1fr}}
+.abname{display:flex;gap:12px;align-items:center;font-weight:700;font-size:17px;color:inherit;text-decoration:none;background:none;border:0;padding:0;cursor:pointer;text-align:left}.abname:hover{color:var(--c)}
+.abmark{width:40px;height:40px;border-radius:10px;flex:none;display:grid;place-items:center;color:#fff;font-weight:800;object-fit:contain;background:#fff;border:1px solid var(--line)}
+.abnum{font-size:14px}.abnum b{font-size:18px;display:block}.abnum .hmeter{--hc:var(--c);max-width:160px}
+.abacts{display:flex;gap:6px;flex-wrap:wrap}.abacts .btn{padding:8px 10px}
+.svc{display:flex;flex-direction:column;gap:10px}.svc .hhead{display:flex;gap:10px;align-items:center}.svc .hhead img,.svc .hhead .pm{width:28px;height:28px;border-radius:7px}
+.svc dl{display:grid;grid-template-columns:auto auto;gap:6px 12px;margin:0}.svc dt{color:var(--muted)}.svc dd{margin:0;font-weight:700;text-align:right}
 .hmeter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}.hmeter i{display:block;height:100%;background:var(--hc)}
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
 .hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
@@ -312,14 +321,60 @@ let ME = null;
 function brandPicker() {
 	const box = $("#brandPick");
 	if (!ME || (ME.brands.length < 2 && ME.role !== "owner")) { box.innerHTML = ""; return; }
-	box.innerHTML = `<label class="sr" for="brandSel">Brand</label><select id="brandSel" title="Which brand you're working on">${ME.brands.map((b) => `<option value="${b.id}" ${b.id === ME.current ? "selected" : ""}>${esc(b.name)}</option>`).join("")}${ME.role === "owner" ? `<option value="new">+ Add a brand</option>` : ""}</select>`;
+	const all = manyBrands() && location.hash.startsWith("#brands");
+	box.innerHTML = `<label class="sr" for="brandSel">Brand</label><select id="brandSel" title="Which brand you're working on">${manyBrands() ? `<option value="all" ${all ? "selected" : ""}>All brands</option>` : ""}${ME.brands.map((b) => `<option value="${b.id}" ${b.id === ME.current && !all ? "selected" : ""}>${esc(b.name)}</option>`).join("")}${ME.role === "owner" ? `<option value="new">+ Add a brand</option>` : ""}</select>`;
 	$("#brandSel").onchange = async (e) => {
 		const v = e.target.value;
+		if (v === "all") { location.hash = "#brands"; return; }
 		if (v !== "new") { await api("/api/brands/switch", { body: { id: v } }); location.hash = "#campaigns"; location.reload(); return; }
-		e.target.value = ME.current;
-		const m = modal(`<h2>Add a brand</h2><p>Each brand has its own lists, campaigns, templates, sending and settings. You can let a client sign in to just their brand under Settings, People.</p><label for="bn">Brand name</label><input id="bn" placeholder="Such as Acme Ltd"><p class="err" id="be"></p><div class="row"><button class="btn" id="bgo">${icon("plus")}Add brand</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
-		$("#bgo", m).onclick = (ev) => run(ev.currentTarget, async () => { try { await api("/api/brands", { body: { name: $("#bn", m).value } }); location.hash = "#settings/company"; location.reload(); } catch (err) { $("#be", m).textContent = err.message; } });
+		e.target.value = location.hash.startsWith("#brands") ? "all" : ME.current;
+		addBrand();
 	};
+}
+const manyBrands = () => Boolean(ME && ME.role === "owner" && ME.brands.length > 1);
+function addBrand() {
+	const m = modal(`<h2>Add a brand</h2><p>Each brand has its own lists, campaigns, templates, sending and settings. You can let a client sign in to just their brand under Settings, People.</p><label for="bn">Brand name</label><input id="bn" placeholder="Such as Acme Ltd"><p class="err" id="be"></p><div class="row"><button class="btn" id="bgo">${icon("plus")}Add brand</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+	$("#bgo", m).onclick = (ev) => run(ev.currentTarget, async () => { try { await api("/api/brands", { body: { name: $("#bn", m).value } }); location.hash = "#settings/company"; location.reload(); } catch (err) { $("#be", m).textContent = err.message; } });
+}
+/** Opens a brand, then one of its pages. */
+async function openBrand(id, hash) {
+	if (id !== ME.current) await api("/api/brands/switch", { body: { id } });
+	location.hash = hash;
+	location.reload();
+}
+// -- All brands: every brand at a glance, the first page when there's more than one --------------------------------
+async function allBrands() {
+	const o = await api("/api/brands/overview");
+	const HL = { good: ["All healthy", "check"], ok: ["Needs a look", "alert"], bad: ["Needs you now", "alert"] };
+	const mark = (b) => (b.logo ? `<img class="abmark" src="${esc(b.logo)}" alt="">` : `<span class="abmark" style="background:${esc(b.colour)};border:0">${esc((b.name || "?").trim().charAt(0).toUpperCase())}</span>`);
+	const svcName = (p) => (PROVIDERS.find((x) => x[0] === p) || [])[1];
+	const row = (b) => `<div class="abrow">
+		<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span></span></button></div>
+		<div class="abnum"><b>${num(b.subscribers)}</b><span class="muted">subscribers</span><br><span class="muted">${b.provider ? `Sends with ${esc(svcName(b.provider) || b.provider)}` : `<a href="#" data-open="${b.id}" data-to="#settings/sending">${icon("alert")} No sending service yet</a>`}</span></div>
+		<div class="abnum"><b>${num(b.sentMonth)}${b.limit ? ` <span class="muted" style="font-size:14px;font-weight:400">of ${num(b.limit)}</span>` : ""}</b><span class="muted">sent this month${b.limit ? " (client's limit)" : ""}</span>${b.limit ? `<div class="hmeter"><i style="width:${Math.min(100, (b.sentMonth / b.limit) * 100)}%"></i></div>` : ""}
+			${b.last ? `<span class="muted" style="display:block;margin-top:4px">Last: <a href="#" data-open="${b.id}" data-to="#email/${b.last.id}">${esc(b.last.name)}</a>, ${ago(b.last.at)}${b.opened != null ? `, ${pc2(b.opened, 1)} opened` : ""}</span>` : `<span class="muted" style="display:block;margin-top:4px">Nothing sent yet</span>`}</div>
+		<div class="abacts">
+			<button class="btn ghost small" data-open="${b.id}" data-to="#new" title="New campaign">${icon("pencil")}<span class="sr">New campaign</span></button>
+			<button class="btn ghost small" data-open="${b.id}" data-to="#campaigns" title="All campaigns">${icon("home")}<span class="sr">All campaigns</span></button>
+			<button class="btn ghost small" data-open="${b.id}" data-to="#lists" title="Lists">${icon("list")}<span class="sr">Lists</span></button>
+			<button class="btn ghost small" data-open="${b.id}" data-to="#reports" title="Reports">${icon("chart")}<span class="sr">Reports</span></button>
+			<button class="btn ghost small" data-open="${b.id}" data-to="#settings/company" title="Settings">${icon("cog")}<span class="sr">Settings</span></button>
+		</div></div>`;
+	const svc = (s) => {
+		const a = s.ses && !s.ses.error ? s.ses : null;
+		const region = (REGIONS.find((r) => r[0] === s.region) || [])[1] || s.region;
+		const bad = a && (!a.enabled || a.enforcement !== "HEALTHY");
+		const used = a ? Math.min(100, (a.sent24 / Math.max(1, a.max24)) * 100) : 0;
+		return `<div class="card svc"><div class="hhead">${logo("ses")}<h2 style="margin:0;font-size:18px" class="grow">Amazon SES</h2>${a ? `<span class="hpill h-${bad ? "bad" : a.production ? "good" : "ok"}" style="font-size:12px;padding:3px 9px">${icon(bad ? "alert" : "check")}${bad ? "Stopped" : a.production ? "Healthy" : "Sandbox"}</span>` : ""}</div>
+		${a ? `<dl><dt>Region</dt><dd>${esc(region || "")}</dd><dt>Daily limit</dt><dd>${num(a.max24)}</dd><dt>Left today</dt><dd>${num(Math.max(0, a.max24 - a.sent24))}</dd><dt>Sent today</dt><dd>${num(a.sent24)}</dd><dt>Speed</dt><dd>${num(a.rate)} a second</dd></dl><div class="hmeter h-${used > 90 ? "bad" : used > 70 ? "ok" : "good"}"><i style="width:${used}%"></i></div>`
+			: `<p class="err">We couldn't check Amazon SES just now${s.ses?.error ? `: ${esc(s.ses.error)}` : ""}.</p>`}
+		<p class="hint" style="margin:0">Used by ${s.brands.map(esc).join(", ")}.</p></div>`;
+	};
+	main.innerHTML = `<div class="row toolbar-row"><h1 class="grow" style="margin:0">All brands</h1><button class="btn" id="abAdd">${icon("plus")}Add a brand</button></div>
+	<div class="${o.services.length ? "ab" : ""}"><div class="card">${o.brands.map(row).join("")}</div>
+	${o.services.length ? `<div class="svc">${o.services.map(svc).join("")}</div>` : ""}</div>`;
+	$("#abAdd").onclick = addBrand;
+	main.querySelectorAll("[data-open]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); openBrand(el.dataset.open, el.dataset.to); }));
 }
 async function inviteScreen(token) {
 	$("#top").hidden = $("#side").hidden = true;
@@ -344,7 +399,10 @@ $("#signout").onclick = async () => { await api("/api/signout", { body: {} }); l
 function route() {
 	clearInterval(timer);
 	view.abort(); view = new AbortController(); window.onbeforeunload = null;
-	let [v, id, extra] = (location.hash.slice(1) || "campaigns").split("/");
+	let [v, id, extra] = (location.hash.slice(1) || (manyBrands() ? "brands" : "campaigns")).split("/");
+	if (v === "brands" && !manyBrands()) v = "campaigns";
+	if (v === "brands" && !location.hash) history.replaceState(null, "", "#brands");
+	if (ME) brandPicker(); // "All brands" or the brand you're in
 	// Older addresses still land somewhere sensible.
 	if (v === "overview" || v === "emails") v = "campaigns";
 	if (v === "people") v = id ? "list" : "lists";
@@ -356,7 +414,7 @@ function route() {
 	// The page you're on stays put until the next one is ready (no flicker); a thin bar shows if it takes a moment.
 	const busy = $("#busy"); const slow = setTimeout(() => (busy.hidden = false), 250);
 	const done = () => { clearTimeout(slow); busy.hidden = true; };
-	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), automations, automation: () => automation(id), reports, settings: () => settings(id), ses: () => sesWizard(id) };
+	const views = { brands: allBrands, campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), automations, automation: () => automation(id), reports, settings: () => settings(id), ses: () => sesWizard(id) };
 	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 

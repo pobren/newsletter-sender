@@ -145,6 +145,51 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		]);
 		return ok({ id }, { headers: { "set-cookie": brandCookie(id, secure) } });
 	}
+	// Every brand at a glance: the first page the owner sees when there's more than one.
+	if (path === "/api/brands/overview" && method === "GET") {
+		if (me.role !== "owner") return bad("Only the owner can do that.", 403);
+		const month = iso(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)));
+		const { results: clients } = await db.prepare("SELECT brand_id, limits FROM accounts WHERE role = 'client'").all<{ brand_id: string; limits: string | null }>();
+		const accounts = new Map<string, Promise<unknown>>();
+		const rows = await Promise.all(brands.map(async (b) => {
+			const [subs, sent, last, live] = await db.batch([
+				db.prepare("SELECT COUNT(DISTINCT s.id) AS n FROM subscribers s JOIN memberships m ON m.subscriber_id = s.id WHERE s.brand_id = ? AND s.suppressed IS NULL AND m.status = 'active'").bind(b.id),
+				db.prepare("SELECT COUNT(*) AS n FROM sends x JOIN campaigns c ON c.id = x.campaign_id WHERE c.brand_id = ? AND x.status = 'sent' AND x.sent_at >= ?").bind(b.id, month),
+				db.prepare("SELECT id, name, subject, status, finished_at, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending', 'paused') ORDER BY started_at DESC LIMIT 1").bind(b.id),
+				db.prepare("SELECT COUNT(*) AS n FROM campaigns WHERE brand_id = ? AND status = 'sending'").bind(b.id),
+			]);
+			const lc = (last.results[0] as any) ?? null;
+			let opened: number | null = null;
+			if (lc && b.track_opens) {
+				const o = await db.prepare("SELECT COUNT(*) AS sent, COUNT(opened_at) AS opened FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(lc.id).first<{ sent: number; opened: number }>();
+				opened = o?.sent ? o.opened / o.sent : null;
+			}
+			const p = await loadProvider(db, b);
+			// One look at each Amazon SES account, however many brands share it.
+			let account: string | null = null;
+			if (p?.provider === "ses") {
+				const k = sesKeys(p);
+				account = `${k.accessKeyId}:${k.region}`; // kept on the server: only the region goes to the page
+				if (!accounts.has(account)) accounts.set(account, sesAccount(k).catch((e) => ({ error: (e as Error).message })));
+			}
+			const limits = clients.filter((c) => c.brand_id === b.id).map((c) => canOf({ role: "client", limits: c.limits }).month_limit).filter((n) => n > 0);
+			const health = await brandHealth(db, b.id);
+			return {
+				id: b.id, name: b.name, logo: b.logo, colour: b.colour, provider: p?.provider ?? null, account,
+				subscribers: (subs.results[0] as any)?.n ?? 0, sentMonth: (sent.results[0] as any)?.n ?? 0, limit: limits.length ? Math.min(...limits) : 0,
+				sending: ((live.results[0] as any)?.n ?? 0) > 0, last: lc && { id: lc.id, name: lc.name || lc.subject, status: lc.status, at: lc.finished_at || lc.started_at }, opened,
+				health: health.bounceLevel === "bad" || health.complaintLevel === "bad" ? "bad" : health.bounceLevel === "ok" || health.complaintLevel === "ok" || health.paused.length ? "ok" : "good",
+			};
+		}));
+		const seen = [...accounts.entries()];
+		const acct = await Promise.all(seen.map(([, v]) => v));
+		const services = seen.map(([key], i) => {
+			const users = rows.filter((r) => r.account === key);
+			const p = key.split(":")[1] || null;
+			return { region: p, brands: users.map((u) => u.name), ses: acct[i] };
+		});
+		return ok({ brands: rows.map(({ account, ...r }) => ({ ...r, service: account ? seen.findIndex(([k]) => k === account) : null })), services, current: brand.id });
+	}
 	if (path === "/api/brands/switch" && method === "POST") {
 		const id = String((await body(request)).id ?? "");
 		if (!brands.some((b) => b.id === id)) return bad("You can't open that brand.", 403);
