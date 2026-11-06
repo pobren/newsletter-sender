@@ -386,7 +386,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if (!host) return ok({ live: false, message: "No domain for links yet." });
 			const want = await installId(db);
 			const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cf: { cacheTtl: 0 } } as RequestInit).then((r) => (r.ok ? r.text() : ""), () => "");
-			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
+			// A Worker can't always reach its own custom domain, so the page checks from the browser too (want).
+			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, host, want, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
 		}
 		// A saved links token works; the token from the Amazon SES wizard only counts if it can add Worker custom domains.
 		const linksTokenWorks = async () => {

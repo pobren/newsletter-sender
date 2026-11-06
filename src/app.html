@@ -439,6 +439,10 @@ async function linksCard(needToken = false) {
 			clearTimeout(timer);
 			if (!$("#lkState")) return;
 			const r = await api("/api/links?check=1").catch((e) => ({ live: false, message: e.message }));
+			if (!r.live && r.want) {
+				const got = await fetch(`https://${r.host}/.well-known/newsletter-sender`, { cache: "no-store" }).then((x) => (x.ok ? x.text() : ""), () => "");
+				if (got.trim() === r.want) Object.assign(r, { live: true, message: `${r.host} is working. Every link in your emails now uses it.` });
+			}
 			if (!$("#lkState")) return;
 			$("#lkState").className = r.live ? "hint good" : "hint";
 			$("#lkState").innerHTML = `${icon(r.live ? "check" : "refresh")} ${esc(r.message)}`;

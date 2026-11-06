@@ -73,7 +73,7 @@ export default {
 		if (["/", "/setup", "/signin"].includes(path)) {
 			return withHeaders(new Response(appPage(VERSION), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }), { "x-frame-options": "DENY" });
 		}
-		if (path === "/.well-known/newsletter-sender") return new Response(await installId(env.DB), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
+		if (path === "/.well-known/newsletter-sender") return new Response(await installId(env.DB), { headers: { "content-type": "text/plain", "cache-control": "no-store", "access-control-allow-origin": "*" } });
 		if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /archive\nAllow: /s/\n", { headers: { "content-type": "text/plain" } });
 		return new Response("Not found", { status: 404, headers: { "content-type": "text/plain" } });
 	},
