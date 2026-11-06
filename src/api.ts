@@ -17,6 +17,7 @@ import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 import { abResults, cleanAb, parseAb, winnerOf } from "./abtest.ts";
+import { importStatus, mailchimp, pastDate } from "./move.ts";
 
 const DEFAULT_BRAND = "My newsletter";
 
@@ -615,6 +616,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const now = iso();
 		let added = 0;
 		let skipped = 0;
+		const counts = { active: 0, unsubscribed: 0, bounced: 0, complained: 0 };
 		const stmts: D1PreparedStatement[] = [];
 		for (const r of rows) {
 			const email = cleanEmail(r?.email);
@@ -626,11 +628,33 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			for (const [k, v] of Object.entries(r.fields ?? {})) if (typeof v === "string" && fieldKey(k)) fields[fieldKey(k)] = v.slice(0, 500);
 			const tags = [...new Set([...(Array.isArray(r.tags) ? r.tags.map(cleanTag) : []), ...extraTags].filter(Boolean))].slice(0, 20);
 			const id = newId(8);
+			const status = importStatus(r.status);
+			const joined = pastDate(r.joined) ?? now;
+			counts[status]++;
 			stmts.push(
 				db.prepare(`INSERT INTO subscribers (id, brand_id, email, name, fields, tags, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 					ON CONFLICT (brand_id, email) DO UPDATE SET name = COALESCE(excluded.name, subscribers.name), fields = json_patch(subscribers.fields, excluded.fields),
 					tags = (SELECT json_group_array(DISTINCT value) FROM (SELECT value FROM json_each(subscribers.tags) UNION SELECT value FROM json_each(excluded.tags)))`)
-					.bind(id, brand.id, email, str(r.name, 120) || null, JSON.stringify(fields), JSON.stringify(tags), newId(16), now),
+					.bind(id, brand.id, email, str(r.name, 120) || null, JSON.stringify(fields), JSON.stringify(tags), newId(16), joined),
+			);
+			added++;
+			if (status === "unsubscribed") {
+				// Someone who left the old service stays left here, so they're never mailed by mistake.
+				stmts.push(db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, left_at)
+					SELECT ?1, s.id, 'unsubscribed', 'import', ?2, ?3 FROM subscribers s WHERE s.brand_id = ?4 AND s.email = ?5
+					ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = 'unsubscribed', left_at = COALESCE(memberships.left_at, excluded.left_at)`).bind(l.id, joined, now, brand.id, email));
+				continue;
+			}
+			if (status !== "active") {
+				// Bounced or marked as spam on the old service: keep them on the list (so the counts match) but never send to them.
+				stmts.push(
+					db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE brand_id = ? AND email = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(status, now, brand.id, email),
+					db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
+						SELECT ?1, s.id, 'active', 'import', ?2, ?2 FROM subscribers s WHERE s.brand_id = ?3 AND s.email = ?4 ON CONFLICT (list_id, subscriber_id) DO NOTHING`).bind(l.id, joined, brand.id, email),
+				);
+				continue;
+			}
+			stmts.push(
 				// Never re-add someone who unsubscribed (from any list, or this one when unsubscribing is per list), bounced or complained.
 				// With one list per person, someone already on another list stays where they are.
 				db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at)
@@ -639,13 +663,17 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 					AND NOT EXISTS (SELECT 1 FROM blocklist b WHERE b.brand_id = ?3 AND b.email = s.email) AND NOT EXISTS (SELECT 1 FROM blocked_domains d WHERE d.brand_id = ?3 AND d.domain = substr(s.email, instr(s.email, '@') + 1))
 					AND NOT (?6 = 1 AND EXISTS (SELECT 1 FROM memberships m WHERE m.subscriber_id = s.id AND m.list_id != ?1 AND m.status IN ('active', 'pending')))
 					ON CONFLICT (list_id, subscriber_id) DO NOTHING`)
-					.bind(l.id, now, brand.id, email, brand.unsub_scope, brand.one_list),
+					.bind(l.id, joined, brand.id, email, brand.unsub_scope, brand.one_list),
 			);
-			added++;
 		}
 		for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
 		if (added) await logEvent(db, brand.id, "imported", null, null, `${added} into ${l.name}`).run();
-		return ok({ added, skipped });
+		return ok({ added, skipped, counts });
+	}
+	if (path === "/api/move/mailchimp" && method === "POST") {
+		const b = await body(request);
+		const r = await mailchimp(String(b.key ?? ""), b.audience ? String(b.audience) : null, Number(b.offset) || 0);
+		return r.error ? bad(r.error) : ok(r);
 	}
 	if (path === "/api/export") {
 		const list = url.searchParams.get("list");
