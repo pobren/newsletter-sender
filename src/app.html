@@ -1580,7 +1580,7 @@ async function settings(section) {
 		<p class="muted">Disabled by default to protect subscriber privacy and maximise delivery. Bounces and spam complaints are always recorded automatically: flagged addresses are updated in <a href="#reports">Reports</a> and permanently excluded from future sends.</p>
 		<label class="check"><input type="checkbox" id="to" ${b.track_opens ? "checked" : ""}> <span>Track email opens <span class="hint">Adds a 1 pixel tracking image to each email. Because modern email clients (like Apple Mail) cache or pre-fetch images, treat open rates as a general estimate rather than an exact figure.</span></span></label>
 		<label class="check"><input type="checkbox" id="tc" ${b.track_clicks ? "checked" : ""}> <span>Track link clicks <span class="hint">Routes links through your tracking domain before redirecting subscribers onward to record engagement.</span></span></label>
-		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#reports">${icon("chart")}View reports</a><a class="btn ghost" href="#settings/sending">${icon("shield")}Configure bounce handling</a></div></form>
+		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#reports">${icon("chart")}View reports</a></div></form>
 		<div class="card" id="lk"><h2>Custom domain for email links</h2>
 		<p class="muted">Brand all outgoing links (such as unsubscribe links, web versions and click tracking URLs) with your own domain (e.g. news.yourdomain.com) rather than ${esc(location.host)}. A custom domain builds subscriber trust and improves inbox placement.</p>
 		<div id="lkBody"><p class="muted">Loading…</p></div></div>`;
