@@ -13,7 +13,7 @@ export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: 
 	{ id: "postmark", name: "Postmark", keyLabel: "Server API token", help: "In Postmark: your server, API Tokens. Newsletters go through its Broadcast stream." },
 	{ id: "mailgun", name: "Mailgun", keyLabel: "Sending API key", help: "In Mailgun: Send, Sending, Domain settings, Sending keys." },
 	{ id: "brevo", name: "Brevo", keyLabel: "API key", help: "In Brevo: your name, SMTP & API, API keys." },
-	{ id: "resend", name: "Resend", keyLabel: "API key", help: "In Resend: API Keys, Create API key (Sending access)." },
+	{ id: "resend", name: "Resend", keyLabel: "API key", help: "In Resend: API Keys, Create API key (Full access, so we can add the bounce webhook)." },
 ];
 export const isProvider = (x: unknown): x is ProviderId => PROVIDERS.some((p) => p.id === x);
 export const providerName = (id: ProviderId) => PROVIDERS.find((p) => p.id === id)!.name;
@@ -32,6 +32,8 @@ export interface ProviderConfig {
 	/** Mailgun only: the sending domain, and whether the account is in Mailgun's EU region. */
 	mailgunDomain?: string;
 	mailgunRegion?: "us" | "eu";
+	/** Postmark, Mailgun, Brevo or Resend: we added our bounce and complaint webhook there ourselves. */
+	hookAdded?: boolean;
 }
 
 export const sesKeys = (c: ProviderConfig): AwsKeys => ({ accessKeyId: c.accessKeyId ?? "", secretAccessKey: c.key, region: c.region ?? "eu-west-1" });
@@ -62,7 +64,7 @@ export function parseProvider(input: Record<string, unknown>, fromEmail: string)
 /** What the owner sees about their sending set-up: never the key itself. */
 export function providerSummary(c: ProviderConfig | null) {
 	if (!c) return null;
-	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : null, cloudflareDns: Boolean(c.cfToken) };
+	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
 }
 
 export interface OutEmail {
@@ -303,5 +305,76 @@ export function trustedSubscribeUrl(url: unknown): boolean {
 		return u.protocol === "https:" && /^sns\.[a-z]{2}-[a-z]+-\d\.amazonaws\.com$/.test(u.hostname) && u.searchParams.get("Action") === "ConfirmSubscription";
 	} catch {
 		return false;
+	}
+}
+
+// -- Bounce and complaint webhooks, added for the owner ----------------------------------------------------
+
+/**
+ * Adds our bounce and spam complaint webhook in Postmark, Mailgun, Brevo or Resend, with the key the owner has just
+ * pasted, so they don't have to do it by hand. Leaves any webhooks they already have alone, and does nothing if ours is
+ * already there. Never throws: says what went wrong instead, so the owner can add it themselves.
+ */
+export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: typeof fetch = fetch): Promise<{ ok: true } | { error: string }> {
+	const name = providerName(c.provider);
+	const call = async (url: string, init: RequestInit) => {
+		const res = await fetcher(url, init);
+		const text = await res.text();
+		let data: any = null;
+		try {
+			data = JSON.parse(text);
+		} catch {}
+		return { ok: res.ok, status: res.status, data, text };
+	};
+	const failed = (r: { status: number; text: string }) => {
+		if (r.status === 401 || r.status === 403) return { error: `${name} didn't let this key add webhooks${c.provider === "resend" ? " (a Sending access key can't; a Full access key can)" : ""}. Add the address below in ${name} yourself.` };
+		return { error: `${name} said: ${r.text.replace(/\s+/g, " ").slice(0, 160) || `error ${r.status}`}` };
+	};
+	try {
+		if (c.provider === "postmark") {
+			const h = { "x-postmark-server-token": c.key, accept: "application/json", "content-type": "application/json" };
+			const list = await call("https://api.postmarkapp.com/webhooks?MessageStream=broadcast", { headers: h });
+			if (!list.ok) return failed(list);
+			if ((list.data?.Webhooks ?? []).some((w: any) => w?.Url === hookUrl)) return { ok: true };
+			const r = await call("https://api.postmarkapp.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ Url: hookUrl, MessageStream: "broadcast", Triggers: { Bounce: { Enabled: true, IncludeContent: false }, SpamComplaint: { Enabled: true, IncludeContent: false } } }) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		if (c.provider === "mailgun") {
+			const base = `https://${c.mailgunRegion === "eu" ? "api.eu.mailgun.net" : "api.mailgun.net"}/v3/domains/${encodeURIComponent(c.mailgunDomain ?? "")}/webhooks`;
+			const auth = { authorization: `Basic ${btoa(`api:${c.key}`)}` };
+			const list = await call(base, { headers: auth });
+			if (!list.ok) return failed(list);
+			for (const id of ["permanent_fail", "temporary_fail", "complained"]) {
+				const urls: string[] = list.data?.webhooks?.[id]?.urls ?? (list.data?.webhooks?.[id]?.url ? [list.data.webhooks[id].url] : []);
+				if (urls.includes(hookUrl)) continue;
+				if (urls.length >= 3) return { error: `Mailgun already has three addresses for ${id.replace("_", " ")} webhooks, which is its limit. Remove one, or add ours by hand.` };
+				const form = new URLSearchParams();
+				for (const u of [...urls, hookUrl]) form.append("url", u);
+				const r = urls.length
+					? await call(`${base}/${id}`, { method: "PUT", headers: { ...auth, "content-type": "application/x-www-form-urlencoded" }, body: form.toString() })
+					: await call(base, { method: "POST", headers: { ...auth, "content-type": "application/x-www-form-urlencoded" }, body: `id=${id}&${form.toString()}` });
+				if (!r.ok) return failed(r);
+			}
+			return { ok: true };
+		}
+		if (c.provider === "brevo") {
+			const h = { "api-key": c.key, accept: "application/json", "content-type": "application/json" };
+			const list = await call("https://api.brevo.com/v3/webhooks?type=transactional", { headers: h });
+			if (!list.ok) return failed(list);
+			if ((list.data?.webhooks ?? []).some((w: any) => w?.url === hookUrl)) return { ok: true };
+			const r = await call("https://api.brevo.com/v3/webhooks", { method: "POST", headers: h, body: JSON.stringify({ url: hookUrl, description: "Newsletter Sender: bounces and spam complaints", events: ["hardBounce", "softBounce", "invalid", "spam"], type: "transactional" }) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		if (c.provider === "resend") {
+			const h = { authorization: `Bearer ${c.key}`, "content-type": "application/json" };
+			const list = await call("https://api.resend.com/webhooks", { headers: h });
+			if (!list.ok) return failed(list);
+			if ((list.data?.data ?? []).some((w: any) => w?.endpoint === hookUrl)) return { ok: true };
+			const r = await call("https://api.resend.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ endpoint: hookUrl, events: ["email.bounced", "email.complained"] }) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		return { error: "Amazon SES reports bounces its own way." };
+	} catch (e) {
+		return { error: `Couldn't reach ${name}: ${(e as Error).message}` };
 	}
 }
