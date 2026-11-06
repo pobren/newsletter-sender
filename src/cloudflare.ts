@@ -11,6 +11,12 @@ async function cf(token: string, method: string, path: string, body: unknown, fe
 	return { ok: res.ok && data?.success !== false, data, message };
 }
 
+/** The domains (zones) this token can see, by name. */
+export async function listZones(token: string, fetcher: typeof fetch = fetch): Promise<string[]> {
+	const r = await cf(token, "GET", "/zones?per_page=50&status=active", null, fetcher);
+	return r.ok ? (r.data?.result ?? []).map((z: any) => String(z.name)).sort() : [];
+}
+
 /** The Cloudflare zone a domain (or one of its subdomains) lives in, if this token can see it. */
 export async function findZone(token: string, domain: string, fetcher: typeof fetch = fetch): Promise<{ id: string; name: string; accountId: string } | { error: string }> {
 	const labels = domain.toLowerCase().split(".");

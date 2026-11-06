@@ -378,7 +378,7 @@ function signinScreen(state) {
 	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><div class="row"><button class="btn">${icon("out")}Sign in</button>${PK ? `<button type="button" class="btn ghost" id="pkIn">${icon("key")}Sign in with a passkey</button>` : ""}</div><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
 	loadTurnstile(state);
 	$("#pkIn") && ($("#pkIn").onclick = (e) => run(e.currentTarget, async () => { $("#e").textContent = ""; try { await passkeySignIn(); boot(); } catch (err) { $("#e").textContent = err.message; } }));
-	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
+	$("#f").onsubmit = async (e) => { e.preventDefault(); try { const r = await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); PK && r.passkeyHere === false && !store.get("ns.nopk") ? passkeyOffer(() => { store.set("ns.nopk", "1"); boot(); }) : boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
 }
 $("#signout").onclick = async () => { await api("/api/signout", { body: {} }); location.hash = ""; boot(); };
 
@@ -1467,12 +1467,25 @@ async function sesWizard(stepArg) {
 	if (step === 4) {
 		page("Set up Amazon SES", `<div class="found">${SES_LOGO(44)}<div><b>Amazon SES in ${esc((REGIONS.find((r) => r[0] === s.sending.region) || [, s.sending.region])[1])}</b><small>Sending from ${esc(s.fromEmail)}</small></div></div><div id="wintro"><p>One press and we do the rest:</p>
 		<ul class="wlist plain"><li>${icon("check")} Add ${esc(domain)} to Amazon SES, with email signing (DKIM)</li><li>${icon("check")} Send bounces to bounce.${esc(domain)}</li><li>${icon("check")} Bring bounces and spam complaints straight back here</li>
-		${s.sending.cloudflareDns ? `<li>${icon("check")} Add the DNS records to ${esc(domain)} in Cloudflare</li>` : ""}<li>${icon("check")} Ask Amazon to let you send to anyone</li></ul>
+		${s.sending.cloudflareDns ? `<li>${icon("check")} Add the DNS records to ${esc(domain)} in Cloudflare</li><li>${icon("check")} Give Newsletter Sender its own address, for this app and every link in your emails</li>` : ""}<li>${icon("check")} Ask Amazon to let you send to anyone</li></ul>
+		${s.sending.cloudflareDns && location.hostname.endsWith(".workers.dev") ? `<div id="wownpick"><label for="wsub">Your Newsletter Sender address</label><div class="row"><input id="wsub" value="news" style="width:9em" autocomplete="off" aria-label="Name"><b>.</b><select id="wzone" class="grow" style="width:auto" aria-label="Domain"><option>${esc(domain)}</option></select></div><p class="hint">Choose a domain from your Cloudflare account and a new name on it that isn't used for anything else. You'll use this address for the app, and it's in every link in your emails.</p></div>` : ""}
 		<button class="btn big" id="wrun">${icon("cog")}Set up Amazon SES</button></div><div id="wout"></div>`,
 		`<button class="btn" id="wnext" hidden>Next${icon("next")}</button>`);
+		$("#wzone") && api("/api/cloudflare/zones", { quiet: true }).then((z) => {
+			if (!$("#wzone") || !z.zones.length) return;
+			$("#wzone").innerHTML = z.zones.map((n) => `<option ${n === domain ? "selected" : ""}>${esc(n)}</option>`).join("");
+		}).catch(() => {});
 		$("#wrun").onclick = (e) => run(e.currentTarget, async () => {
 			try {
 				const r = await api("/api/sending/ses-setup", { body: {} });
+				// Your own address for the app and links (Cloudflare makes the record and certificate). Never stops the wizard.
+				if ($("#wsub")) {
+					const host = `${$("#wsub").value.trim().toLowerCase().replace(/\.+$/, "")}.${$("#wzone").value}`;
+					const own = await api("/api/links", { body: { domain: host }, quiet: true }).catch((e) => ({ error: e.message }));
+					if (own.error) r.warnings.push(`We couldn't set up ${host}: ${own.error} You can do it later in Settings, Tracking.`);
+					else { r.steps.push(`Pointed ${host} at Newsletter Sender`); wiz.own = host; }
+					$("#wownpick").hidden = true;
+				}
 				$("#wintro").hidden = true;
 				$("#wout").innerHTML = `<ul class="steps">${r.steps.map((x) => `<li class="done">${icon("check")} ${esc(x)}</li>`).join("")}</ul>${r.warnings.map((w) => `<p class="err">${esc(w)}</p>`).join("")}
 				${r.dnsDone ? "" : `<h3>Now add these to ${esc(domain)}'s DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${sesRecs(r.records)}`}`;
@@ -1496,9 +1509,24 @@ async function sesWizard(stepArg) {
 				${line(good(r.dkim), "Email signing (DKIM) is working", "Email signing (DKIM) is waiting for the DNS records")}
 				${line(good(r.bounceDomain), "Bounce address is working", "Bounce address is waiting for the DNS records")}
 				${line(r.production, "Out of the sandbox, so you can send to anyone", `Amazon is looking at your request to send to anyone (usually a day). <a href="https://newslettersender.com/help/amazon-ses/#sandbox" target="_blank" rel="noopener">More about this</a>`)}</ul>
-				<p class="muted">Up to ${num(r.rate)} emails a second and ${num(r.max24)} a day.</p>${ready ? `<div class="row"><a class="btn" href="#new">${icon("pencil")}Write your first email</a></div>` : ""}`;
+				<p class="muted">Up to ${num(r.rate)} emails a second and ${num(r.max24)} a day.</p>${ready ? `<div class="row"><a class="btn" href="#new">${icon("pencil")}Write your first email</a></div>` : ""}<div id="wown"></div>`;
+				ownAddress();
 				if (ready) { clearInterval(timer); $(".wcard h2").textContent = "All done"; }
 			} catch (err) { $("#wstat").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+		};
+		// Once your own address answers, offer to move there (you sign in once more; it's the address to bookmark).
+		let ownLive = false;
+		const ownAddress = async () => {
+			const host = wiz.own || (await api("/api/links", { quiet: true }).catch(() => ({}))).domain;
+			if (!host || host === location.hostname || !$("#wown")) return;
+			if (!ownLive) {
+				const want = (await api("/api/links?check=1", { quiet: true }).catch(() => ({}))).want;
+				const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cache: "no-store" }).then((x) => (x.ok ? x.text() : ""), () => "");
+				ownLive = Boolean(want) ? got.trim() === want : got.trim().length > 0;
+			}
+			if ($("#wown")) $("#wown").innerHTML = ownLive
+				? `<div class="found" style="margin-top:18px">${icon("link")}<div><b>${esc(host)} is ready</b><small>Use it from now on: it's this app's own address and the one in every email link. Bookmark it, then sign in there once.</small></div><a class="btn" href="https://${esc(host)}/">${icon("ext")}Open ${esc(host)}</a></div>`
+				: `<p class="hint" style="margin-top:18px">${icon("clock")} Getting ${esc(host)} ready. Cloudflare usually takes a minute or two to make the certificate.</p>`;
 		};
 		check();
 		timer = setInterval(check, 30000);
