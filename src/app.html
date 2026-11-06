@@ -942,6 +942,7 @@ function pollsHtml(c) {
 		const total = p.answers.reduce((n, a) => n + a.votes, 0), top = Math.max(1, ...p.answers.map((a) => a.votes));
 		return `<div class="card rchart"><h2>${icon("poll")}${esc(p.question || "Poll")}</h2>${p.answers.map((a) => `<div class="rbar"><span>${esc(a.text)}</span><div class="rtrack"><i style="width:${Math.max(a.votes ? 0.6 : 0, (a.votes / top) * 100)}%;background:var(--c)"></i></div><b>${num(a.votes)}</b><small>${pct(a.votes, total)}</small></div>`).join("")}<p class="hint" style="margin-top:10px">${total ? `${ppl(total)} answered.` : "No answers yet."}</p></div>`;
 	}).join("");
+}
 // Testing two subject lines: the editor box, and the results on the report.
 const AB_PCTS = [10, 20, 30, 40, 50], AB_HOURS = [1, 2, 4, 8, 12, 24];
 const hoursText = (h) => `${h} hour${h === 1 ? "" : "s"}`;
