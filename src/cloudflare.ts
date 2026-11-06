@@ -83,13 +83,13 @@ export async function linksNameProblem(token: string, zone: { id: string; name: 
 
 export async function addWorkerDomain(token: string, zone: { id: string; accountId: string }, hostname: string, service: string, fetcher: typeof fetch = fetch): Promise<{ ok: true; already: boolean } | { error: string; token?: boolean }> {
 	const have = await cf(token, "GET", `/accounts/${zone.accountId}/workers/domains?hostname=${encodeURIComponent(hostname)}`, null, fetcher);
-	if (!have.ok) return { error: "Your Cloudflare token can't add custom domains to Workers yet. Please make a new token with the button below.", token: true };
+	if (!have.ok) return { error: "This Cloudflare token can't add custom domains to Workers. Please press Make a Cloudflare token above, make the new token and paste it in.", token: true };
 	const there = (have.data?.result ?? []).find((d: any) => d.hostname === hostname);
 	if (there?.service === service) return { ok: true, already: true };
 	if (there) return { error: `${hostname} already points at another Worker (${there.service}). Choose another name, such as links.${hostname.split(".").slice(1).join(".")}.` };
 	const r = await cf(token, "PUT", `/accounts/${zone.accountId}/workers/domains`, { hostname, service, zone_id: zone.id, environment: "production" }, fetcher);
 	if (r.ok) return { ok: true, already: false };
-	if (/auth|permission|10000|9109/i.test(r.message)) return { error: "Your Cloudflare token can't add custom domains to Workers yet. Please make a new token with the button below.", token: true };
+	if (/auth|permission|10000|9109/i.test(r.message)) return { error: "This Cloudflare token can't add custom domains to Workers. Please press Make a Cloudflare token above, make the new token and paste it in.", token: true };
 	if (/record|cname|exist/i.test(r.message)) return { error: `There's already a DNS record for ${hostname}. Delete it in Cloudflare (DNS, Records), or choose another name, then try again.` };
 	return { error: `Cloudflare said: ${r.message}` };
 }
