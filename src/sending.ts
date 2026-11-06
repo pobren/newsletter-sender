@@ -277,7 +277,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		}
 	};
 	const record = (id: number, s: Sent) => {
-		if (s.ok) pending.push(db.prepare("UPDATE sends SET status = 'sent', message_id = ?, sent_at = ? WHERE id = ?").bind(s.id ?? null, iso(), id));
+		if (s.ok) pending.push(db.prepare("UPDATE sends SET status = 'sent', sent_at = ? WHERE id = ?").bind(iso(), id));
 		else if (!s.throttled) pending.push(db.prepare("UPDATE sends SET status = 'failed', error = ? WHERE id = ?").bind((s.error ?? "Failed").slice(0, 240), id));
 	};
 	const outcome = await paced(rows, shareOfRate(test?.rate ?? brand.rate), async (r) => {
