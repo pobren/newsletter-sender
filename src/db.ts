@@ -120,6 +120,8 @@ export interface CampaignRow {
 	from_email?: string | null;
 	reply_to?: string | null;
 	run?: number;
+	/** Testing two subject lines, as JSON (abtest.ts). */
+	ab?: string | null;
 	brand_id: string;
 	/** What the owner calls it (only they see it). */
 	name: string | null;
@@ -225,8 +227,10 @@ const MIGRATIONS = [
 	"DROP INDEX IF EXISTS sends_campaign_status",
 	"DROP INDEX IF EXISTS sends_message",
 	"DROP INDEX IF EXISTS sends_subscriber",
+	// Testing two subject lines (src/abtest.ts).
+	"ALTER TABLE campaigns ADD COLUMN ab TEXT",
 ];
-const SCHEMA_VERSION = "14";
+const SCHEMA_VERSION = "15";
 
 let ready: Promise<void> | null = null;
 
