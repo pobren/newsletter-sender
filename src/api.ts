@@ -18,7 +18,7 @@ import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { inlineStyleSheets } from "./pagecss.ts";
-import { addWorkerDomain, canAddWorkerDomains, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
+import { addWorkerDomain, canAddWorkerDomains, listZones, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkEmail } from "./check.ts";
 import { pollsIn } from "./polls.ts";
@@ -84,7 +84,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return bad("That email and password don't match.", 401);
 		}
 		await clearFailures(db, email);
-		return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
+		const pk = await db.prepare("SELECT 1 FROM passkeys WHERE account_id = ? AND rp_id = ? LIMIT 1").bind(a.id, url.hostname).first();
+		return ok({ ok: true, passkeyHere: Boolean(pk) }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 	}
 	// -- Passkeys: signing in without a password ---------------------------------------------------
 	if (path === "/api/passkey/signin-options" && method === "POST") {
@@ -300,6 +301,11 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (path === "/api/sending/dns-host") {
 		const r = await dnsHost(brand.from_email.split("@")[1]);
 		return "error" in r ? bad(r.error) : ok(r);
+	}
+	// The domains in your Cloudflare account, for choosing this app's own address in the setup wizard.
+	if (path === "/api/cloudflare/zones" && method === "GET") {
+		const t = await linksToken(db, brand);
+		return ok({ zones: t ? await listZones(t) : [] });
 	}
 	if (path === "/api/sending/cloudflare") {
 		const p = await loadProvider(db, brand);
