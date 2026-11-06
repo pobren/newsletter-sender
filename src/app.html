@@ -107,7 +107,10 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 .wnav{display:flex;justify-content:space-between;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
 .wlist{padding-left:22px;margin:14px 0 18px}.wlist li{margin:0 0 14px;line-height:1.5}.wlist li .btn{margin-top:10px}.wlist.plain{list-style:none;padding:0}.wlist.plain li{display:flex;gap:8px;align-items:center;margin:0 0 8px}.wlist.plain .ico{color:var(--ok)}
 a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--soft)}.btn.big{min-height:52px;font-size:17px;padding:10px 22px}
-.steps.big li{font-size:16px;margin:10px 0}.wready{font-size:20px;font-weight:750;color:var(--ok);display:flex;gap:8px;align-items:center}
+.abbox{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}.abbox .check{margin:0}.abopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0 12px}.abres p .ico{vertical-align:-3px;margin-right:6px;color:var(--c)}
+.steps.big li{font-size:16px;margin:10px 0}.nsteps p{display:flex;gap:10px;align-items:flex-start;margin:8px 0}.nsteps b{flex:none;width:26px;height:26px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;font-size:13px}
+.picks{display:grid;gap:10px;margin:14px 0}.pick{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;text-align:left;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#fff;color:inherit;font:inherit;cursor:pointer}.pick:hover{border-color:var(--c)}.pick .ico{grid-row:span 2;width:26px;height:26px;color:var(--c)}.pick b{font-size:16px}.pick span{color:var(--muted);font-size:14px}
+.aud{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin:8px 0;font-weight:400;cursor:pointer}.aud input{width:auto;min-height:0;margin:0;flex:none}.filerow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.filerow select{width:auto;max-width:170px}.wready{font-size:20px;font-weight:750;color:var(--ok);display:flex;gap:8px;align-items:center}
 
 /* Campaign report */
 .health .hhead{align-items:center;gap:12px}.health .hhead img,.health .hhead .pm{width:32px;height:32px;border-radius:8px}.health h2{margin:0}
@@ -208,6 +211,9 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v6H4V6h6"/></symbol>
 <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h11a4 4 0 0 0 .5-8A6 6 0 0 0 7 9.5 4.3 4.3 0 0 0 7 18z"/></symbol>
 <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+<symbol id="i-poll" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="2"/><rect x="3" y="10" width="12" height="4" rx="2"/><rect x="3" y="16" width="7" height="4" rx="2"/></symbol>
+<symbol id="i-truck" viewBox="0 0 24 24"><path d="M2 6h12v10H2zM14 10h4l3 3v3h-7z"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></symbol>
 </svg>
 
 <header id="top" hidden>
@@ -349,7 +355,7 @@ async function allBrands() {
 	const HL = { good: ["All healthy", "check"], ok: ["Needs a look", "alert"], bad: ["Needs you now", "alert"] };
 	const mark = (b) => (b.logo ? `<img class="abmark" src="${esc(b.logo)}" alt="">` : `<span class="abmark" style="background:${esc(b.colour)};border:0">${esc((b.name || "?").trim().charAt(0).toUpperCase())}</span>`);
 	const svcName = (p) => (PROVIDERS.find((x) => x[0] === p) || [])[1];
-	const row = (b) => `<div class="abrow">
+	const row = (b) => `<div class="abopts">
 		<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span></span></button></div>
 		<div class="abnum"><b>${num(b.subscribers)}</b><span class="muted">subscribers</span><br><span class="muted">${b.provider ? `Sends with ${esc(svcName(b.provider) || b.provider)}` : `<a href="#" data-open="${b.id}" data-to="#settings/sending">${icon("alert")} No sending service yet</a>`}</span></div>
 		<div class="abnum"><b>${num(b.sentMonth)}${b.limit ? ` <span class="muted" style="font-size:14px;font-weight:400">of ${num(b.limit)}</span>` : ""}</b><span class="muted">sent this month${b.limit ? " (client's limit)" : ""}</span>${b.limit ? `<div class="hmeter"><i style="width:${Math.min(100, (b.sentMonth / b.limit) * 100)}%"></i></div>` : ""}
@@ -586,7 +592,7 @@ const TOOLS = [
 	["bold", "bold", "Bold"], ["italic", "italic", "Italic"], ["underline", "underline", "Underline"], "|",
 	["insertUnorderedList", "ul", "Bullet list"], ["insertOrderedList", "ol", "Numbered list"], ["quote", "quote", "Quote"], "|",
 	["justifyLeft", "align-left", "Line up on the left"], ["justifyCenter", "align-center", "Centre"], "|",
-	["link", "link", "Add a link"], ["unlink", "unlink", "Take the link off"], ["image", "image", "Add a picture"], ["button", "btn", "Add a button"], ["divider", "minus", "Add a line"], "|",
+	["link", "link", "Add a link"], ["unlink", "unlink", "Take the link off"], ["image", "image", "Add a picture"], ["button", "btn", "Add a button"], ["poll", "poll", "Add a one click poll"], ["divider", "minus", "Add a line"], "|",
 	["name", "user", "Put in the reader's first name"], ["removeFormat", "eraser", "Clear the formatting"],
 ];
 async function editor(id, kind) {
@@ -600,6 +606,7 @@ async function editor(id, kind) {
 	let docMode = false;
 	let html = c.html || "";
 	const tags = new Set(c.audience.tags);
+	let resend = c.audience.resend || null; // sending again to people who didn't open an earlier campaign
 	const allTags = [...new Set([...tagList.map((t) => t.tag), ...c.audience.tags])];
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="${isT ? "#templates" : "#campaigns"}">${icon("back")}${isT ? "All templates" : "All campaigns"}</a><h1 class="grow">${isT ? "Edit template" : c.status === "scheduled" ? "Scheduled campaign" : "Edit campaign"}</h1><span class="muted" id="saveState">Saved</span></div>
 	${c.status === "scheduled" ? `<div class="card" style="margin-top:16px"><p>${icon("clock")} Goes out ${when(c.send_at)}. <button class="btn ghost small" id="unschedule">${icon("x")}Don't send then</button></p></div>` : ""}
@@ -608,6 +615,7 @@ async function editor(id, kind) {
 		<div class="card"><h2>About this campaign</h2>
 			<label for="cname">Campaign name <span class="hint">(only you see this, such as November news)</span></label><input id="cname" value="${esc(c.name || "")}" placeholder="Such as November news">
 			<label for="subject">Subject line <span class="hint">(what readers see in their inbox)</span></label><input id="subject" value="${esc(c.subject === "Untitled email" ? "" : c.subject)}" placeholder="Such as Our autumn news">
+			${isT ? "" : abBox(c)}
 			<label for="pre">Preview text <span class="hint">(optional: the line inboxes show after the subject)</span></label><input id="pre" value="${esc(c.preheader || "")}">
 			${isT ? "" : `<div class="row" style="gap:12px"><div class="grow"><label for="fromName">From name</label><input id="fromName" value="${esc(c.from_name || c.defaults?.from_name || "")}" autocomplete="off"></div>
 			<div class="grow"><label for="fromEmail">From address</label><input id="fromEmail" type="email" value="${esc(c.from_email || c.defaults?.from_email || "")}" autocomplete="off"></div></div>
@@ -616,6 +624,7 @@ async function editor(id, kind) {
 			<p class="hint">These start as your <a href="#settings">Settings</a>. Change them here for just this campaign.</p>`}
 		</div>
 		<div class="card"><h2>Who it goes to</h2>
+			${c.audience.resend ? `<div class="info" id="rsn">${icon("refresh")}<p>Only people who got <a href="#email/${esc(c.audience.resend.campaign)}"><b>${esc(c.resendOf?.name || "the first one")}</b></a> and didn't open it, and are still on these lists. A new subject line often helps.<br><button type="button" class="btn ghost small" id="rsnOff" style="margin-top:8px">${icon("x")}Send to everyone on the lists instead</button></p></div>` : ""}
 			<p class="step"><b>1</b>Choose the lists</p>
 			<div class="choices">${ls.map((l) => `<label class="choice"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}><span><b>${esc(l.name)}</b><small>${num(l.active)} subscribed</small></span></label>`).join("")}</div>
 			<p class="step"><b>2</b>Only people with these tags <span class="hint">(optional)</span></p>
@@ -702,6 +711,26 @@ async function editor(id, kind) {
 			$("#igo", m).onclick = () => { const u = $("#isrc", m).value.trim(); if (!/^https:\/\//i.test(u)) { $("#ie", m).textContent = "Please upload a picture or paste its https:// address."; return; } m.remove(); insert(`<img src="${esc(u)}" alt="${esc($("#ialt", m).value)}" style="display:block;max-width:100%;height:auto;border:0;margin:8px 0 16px">`); };
 			return;
 		}
+		if (cmd === "poll") {
+			const m = modal(`<h2>Add a one click poll</h2><p class="muted">Readers answer with one click on the answer they pick. You see the results on the campaign's report. Clicking another answer changes theirs.</p>
+			<label for="pq">Question</label><input id="pq" placeholder="Such as What should we write about next?">
+			<label>Answers <span class="hint">(two to five)</span></label>${[1, 2, 3, 4, 5].map((n) => `<input class="pa" style="margin-bottom:8px" placeholder="${n <= 2 ? `Answer ${n}` : `Answer ${n} (optional)`}">`).join("")}
+			<p class="err" id="pe"></p><div class="row" style="margin-top:14px"><button class="btn" id="pgo">${icon("poll")}Add poll</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pq", m).focus();
+			$("#pgo", m).onclick = () => {
+				const q = $("#pq", m).value.trim(), as = $$(".pa", m).map((x) => x.value.trim()).filter(Boolean);
+				if (!q) return ($("#pe", m).textContent = "Please write the question.");
+				if (as.length < 2) return ($("#pe", m).textContent = "Please give at least two answers.");
+				m.remove();
+				// Put in as it is: the browser's own insert drops link colours it thinks are already there.
+				restore();
+				const d = frameDoc(), r = range || d.createRange(), t = d.createElement("template");
+				t.innerHTML = pollHtml(Math.random().toString(36).slice(2, 10).padEnd(8, "0"), q, as, c.colour || "#a3195b");
+				if (!range) r.selectNodeContents(d.body), r.collapse(false);
+				r.deleteContents(); r.insertNode(t.content); changed();
+			};
+			return;
+		}
 		if (cmd === "button") {
 			const m = modal(`<h2>Add a button</h2><label for="bl">Button words</label><input id="bl" value="Read more"><label for="bu">Where it goes</label><input id="bu" placeholder="https://..."><div class="row" style="margin-top:14px"><button class="btn" id="bgo">${icon("btn")}Add button</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			$("#bgo", m).onclick = () => { const u = $("#bu", m).value.trim(); if (!/^https?:\/\//i.test(u)) return toast("Please use a full web address, starting https://"); m.remove(); const col = esc(c.colour || "#a3195b"); insert(`<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px"><tr><td style="background:${col};border-radius:8px"><a href="${esc(u)}" style="display:inline-block;padding:14px 24px;font:600 16px Helvetica,Arial,sans-serif;color:#ffffff;text-decoration:none">${esc($("#bl", m).value || "Read more")}</a></td></tr></table><p><br></p>`); };
@@ -720,7 +749,7 @@ async function editor(id, kind) {
 		toast(/src=["'](?!https?:|data:|cid:)/i.test(text) ? "Design loaded. Some pictures use short addresses: upload them, or use full https:// addresses." : "Design loaded");
 	};
 
-	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null }, public: $("#public").checked });
+	const gather = () => isT ? { name: $("#tname").value, html: current() } : ({ name: $("#cname").value, subject: $("#subject").value, preheader: $("#pre").value, from_name: $("#fromName").value, from_email: $("#fromEmail").value, reply_to: $("#replyTo").value, html: current(), audience: { lists: $$("[name=list]:checked").map((x) => x.value), tags: [...tags], activity: $("#act").value ? { kind: $("#act").value, days: Number($("#actDays").value) } : null, resend }, public: $("#public").checked, ab: { on: $("#abOn").checked, subject: $("#abSub").value, pct: $("#abPct").value, hours: $("#abHours").value, by: $("#abBy").value } });
 	let saving = null;
 	const save = async () => {
 		clearTimeout(t);
@@ -729,11 +758,12 @@ async function editor(id, kind) {
 	};
 	let t = null;
 	const changed = () => { saved = false; $("#saveState").textContent = "Saving…"; clearTimeout(t); t = setTimeout(save, 900); };
-	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")} Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.`; } catch {} };
-	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo"].includes(e.target.id)) changed(); }, { signal });
+	const recount = async () => { if (isT) return; const a = gather().audience; if (!a.lists.length) { $("#count").innerHTML = `${icon("users")} Choose at least one list.`; return; } try { const r = await api("/api/audience", { body: a }); $("#count").innerHTML = `${icon("users")}<span>Goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}. Sending takes ${esc(r.time)}.</span>`; } catch {} };
+	main.addEventListener("input", (e) => { if (["cname", "tname", "subject", "pre", "code", "fromName", "fromEmail", "replyTo", "abSub"].includes(e.target.id)) changed(); }, { signal });
 	if (!isT) watchFrom($("#fromEmail"), $("#fromCheck"));
-	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public") changed(); }, { signal });
+	main.addEventListener("change", (e) => { if (e.target.matches("[name=list]")) { recount(); changed(); } if (e.target.id === "public" || /^ab/.test(e.target.id)) changed(); if (e.target.id === "abOn") $("#abSet").hidden = !e.target.checked; if (/^ab/.test(e.target.id)) $("#abHint").textContent = abHint(); }, { signal });
 	if (!isT) {
+		$("#rsnOff") && ($("#rsnOff").onclick = () => { resend = null; $("#rsn").remove(); recount(); changed(); });
 		const act = c.audience.activity;
 		if (act && $(`#act option[value=${act.kind}]`)) { $("#act").value = act.kind; $("#actDays").value = String(act.days); }
 		$("#actDays").disabled = !$("#act").value;
@@ -768,7 +798,7 @@ async function editor(id, kind) {
 		if (h?.bounceLevel === "bad") warn.push("Your bounces are high. Sending to an old list could put your account at risk.");
 		const odd = [...new Set((current() + " " + $("#subject").value).match(/\*\|[A-Z0-9_:]+\|\*/g) || [])].filter((t) => !/^\*\|(FNAME|EMAIL|UNSUB|ARCHIVE)\|\*$/.test(t));
 		if (odd.length) warn.push(`These tags won't be filled in: ${odd.map(esc).join(", ")}. Use {{first_name|there}}, {{name}} or {{email}} instead.`);
-		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"} straight away and takes ${esc(r.time)}. You can't change it once it's gone.</p>${warn.map((w) => `<p class="hwarn">${icon("alert")}<span>${w}</span></p>`).join("")}<p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
+		const m = modal(`<h2>Send "${esc($("#subject").value || "Untitled email")}" now?</h2><p>It goes to <b>${num(r.count)}</b> ${r.count === 1 ? "person" : "people"}${$("#abOn")?.checked && $("#abSub").value.trim() && r.count >= 20 ? `: first a test of two subject lines to ${$("#abPct").value}% of them, then the winner to everyone else after ${hoursText(Number($("#abHours").value))}` : ` straight away and takes ${esc(r.time)}`}. You can't change it once it's gone.</p>${warn.map((w) => `<p class="hwarn">${icon("alert")}<span>${w}</span></p>`).join("")}<p class="err" id="me"></p><div class="row"><button class="btn" id="go">${icon("send")}Yes, send it</button><button class="btn ghost" data-close>${icon("x")}Not yet</button></div>`);
 		$("#seeChk", m) && ($("#seeChk", m).onclick = (ev) => { ev.preventDefault(); m.remove(); checkModal(chk.items); });
 		$("#go", m).onclick = async (ev) => { ev.currentTarget.disabled = true; try { await api(`/api/campaigns/${id}/send`, { body: {} }); m.remove(); route(); } catch (err) { $("#me", m).textContent = err.message; ev.currentTarget.disabled = false; } };
 	};
@@ -899,6 +929,45 @@ function healthHtml(h) {
 
 // -- Live sending: percentage, speed and time left, updated in place while it goes ------------------------------
 const doneOf = (s) => s.sent + s.failed + s.skipped;
+// One click polls: the box the editor puts in (the same as pollHtml in src/polls.ts), and the results on the report.
+function pollHtml(id, question, answers, colour) {
+	const col = /^#[0-9a-f]{6}$/i.test(colour) ? colour : "#a3195b";
+	return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-poll="${id}" data-poll-q="${esc(question)}" style="margin:8px 0 24px;border:1px solid #eadfe5;border-radius:12px"><tr><td style="padding:18px 20px">`
+		+ `<p style="margin:0 0 12px;font:700 18px/1.4 Helvetica,Arial,sans-serif;color:#1d1424">${esc(question)}</p>`
+		+ answers.map((a, i) => `<a href="{{poll:${id}:${i + 1}}}" style="display:block;margin:0 0 8px;padding:12px 16px;border:2px solid ${col};border-radius:8px;font:600 16px Helvetica,Arial,sans-serif;color:${col};text-decoration:none">${esc(a)}</a>`).join("")
+		+ `<p style="margin:8px 0 0;font:13px Helvetica,Arial,sans-serif;color:#6b5a73">One click and you're done.</p></td></tr></table><p><br></p>`;
+}
+function pollsHtml(c) {
+	return (c.polls || []).map((p) => {
+		const total = p.answers.reduce((n, a) => n + a.votes, 0), top = Math.max(1, ...p.answers.map((a) => a.votes));
+		return `<div class="card rchart"><h2>${icon("poll")}${esc(p.question || "Poll")}</h2>${p.answers.map((a) => `<div class="rbar"><span>${esc(a.text)}</span><div class="rtrack"><i style="width:${Math.max(a.votes ? 0.6 : 0, (a.votes / top) * 100)}%;background:var(--c)"></i></div><b>${num(a.votes)}</b><small>${pct(a.votes, total)}</small></div>`).join("")}<p class="hint" style="margin-top:10px">${total ? `${ppl(total)} answered.` : "No answers yet."}</p></div>`;
+	}).join("");
+// Testing two subject lines: the editor box, and the results on the report.
+const AB_PCTS = [10, 20, 30, 40, 50], AB_HOURS = [1, 2, 4, 8, 12, 24];
+const hoursText = (h) => `${h} hour${h === 1 ? "" : "s"}`;
+function abBox(c) {
+	const can = c.tracking?.opens || c.tracking?.clicks, ab = c.ab || { pct: 20, hours: 4, by: c.tracking?.opens ? "opens" : "clicks" };
+	const opt = (v, t, cur) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${t}</option>`;
+	return `<div class="abbox"><label class="check"><input type="checkbox" id="abOn" ${c.ab ? "checked" : ""} ${can ? "" : "disabled"}> Test two subject lines and send the winner</label>
+	${can ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to test two subject lines.</p>`}
+	<div id="abSet" ${c.ab ? "" : "hidden"}><label for="abSub">Second subject line</label><input id="abSub" value="${esc(c.ab?.subject || "")}" placeholder="Such as What's new this autumn">
+	<div class="abopts"><div><label for="abPct">Test on</label><select id="abPct">${AB_PCTS.map((p) => opt(p, `${p}%`, ab.pct)).join("")}</select></div>
+	<div><label for="abHours">Then wait</label><select id="abHours">${AB_HOURS.map((h) => opt(h, hoursText(h), ab.hours)).join("")}</select></div>
+	<div><label for="abBy">Pick the winner by</label><select id="abBy">${c.tracking?.opens ? opt("opens", "Opens", ab.by) : ""}${c.tracking?.clicks ? opt("clicks", "Clicks", ab.by) : ""}</select></div></div>
+	<p class="hint" id="abHint">${abHint(ab)}</p></div></div>`;
+}
+function abHint(ab) {
+	ab = ab || { pct: Number($("#abPct").value), hours: Number($("#abHours").value), by: $("#abBy").value };
+	return `${ab.pct / 2}% of people get the first subject line and ${ab.pct / 2}% get the second, picked at random. After ${hoursText(Number(ab.hours))}, the one with more ${ab.by} goes to the other ${100 - ab.pct}%. With fewer than 20 people, everyone gets the first.`;
+}
+function abHtml(c) {
+	const ab = c.ab;
+	if (!ab || !ab.results) return "";
+	const lead = ab.winner || ab.leading, rows = [["a", c.subject], ["b", ab.subject]];
+	const cell = (g) => `<td>${num(g.sent)}</td>${c.tracking.opens ? `<td>${pct(g.opens, g.sent)}</td>` : ""}${c.tracking.clicks ? `<td>${pct(g.clicks, g.sent)}</td>` : ""}`;
+	const head = ab.winner ? `${icon("check")}<b>The winner went to everyone else.</b>` : `${icon("clock")}<b>Testing two subject lines.</b> The winner goes to everyone else ${when(ab.at)}.`;
+	return `<div class="card abres"><p>${head}</p><div class="scroll"><table class="data"><thead><tr><th>Subject line</th><th>Sent</th>${c.tracking.opens ? "<th>Opened</th>" : ""}${c.tracking.clicks ? "<th>Clicked</th>" : ""}</tr></thead><tbody>${rows.map(([k, s]) => `<tr><td>${k === lead ? `<span class="pill sent">${ab.winner ? "Winner" : "Ahead"}</span> ` : ""}${esc(s)}</td>${cell(ab.results[k])}</tr>`).join("")}</tbody></table></div><p class="hint">Picked by ${esc(ab.by)}. A tie goes to the first subject line.</p></div>`;
+}
 function liveHtml(c, speed) {
 	const done = doneOf(c.stats), total = Math.max(1, c.total), p = Math.min(100, (done / total) * 100);
 	const left = speed > 0 ? Math.ceil((total - done) / speed) : 0;
@@ -947,16 +1016,17 @@ function addToList(c, ls, b) {
 }
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
-	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
-	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
-	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
+	<div id="abr">${abHtml(c)}</div>${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>${pollsHtml(c)}
+	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
 	$("#pause") && ($("#pause").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/pause`, { body: {} }); toast("Paused. Nothing more goes until you carry on."); route(); }));
 	$("#resume") && ($("#resume").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/resume`, { body: {} }); route(); }));
 	main.addEventListener("click", (e) => { const b = e.target.closest("[data-addto]"); if (b) addToList(c, ls, b); }, { signal: view.signal });
 	$("#dup").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/duplicate`, { body: {} }); location.hash = `email/${r.id}`; });
+	$("#again") && ($("#again").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/resend`, { body: {} }); toast("A copy is ready. Give it a new subject line, check it, then send."); location.hash = `email/${r.id}`; }));
 	if (c.status === "sending") {
 		// Only the progress updates in place; the page redraws when sending finishes or pauses.
 		let last = { at: Date.now(), done: doneOf(c.stats) }, speed = 0;
@@ -970,6 +1040,7 @@ async function report(c, ls) {
 			last = { at: now, done };
 			const el = $("#live");
 			if (el) el.innerHTML = liveHtml(fresh, speed);
+			if ($("#abr")) $("#abr").innerHTML = abHtml(fresh);
 			const rep = $("#rep");
 			if (rep) rep.innerHTML = reportHtml(fresh) || statsHtml(fresh.stats, fresh.total, fresh.tracking);
 		}, 3000);
@@ -1053,30 +1124,39 @@ function parseCsv(text) {
 	row.push(cell); if (row.some((x) => x.trim())) rows.push(row); return rows;
 }
 const fkey = (h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
-const SKIP = new Set("email email_address e_mail name full_name first_name firstname fname last_name lastname surname lname tags status member_rating optin_time optin_ip confirm_time confirm_ip latitude longitude gmtoff dstoff timezone cc region last_changed leid euid notes date_added date_created signup_date unsubscribed bounced complaint joined subscribed list".split(" "));
+const SKIP = new Set("email email_address e_mail name full_name first_name firstname fname last_name lastname surname lname tags status member_rating optin_time optin_ip confirm_time confirm_ip latitude longitude gmtoff dstoff timezone cc region last_changed leid euid notes date_added date_created signup_date unsubscribed bounced complaint joined subscribed list subscription_status member_status state created_at created subscribed_at last_activity".split(" "));
+// Status words other services use (same as importStatus in src/move.ts).
+const impStatus = (x) => { const s = String(x || "").trim().toLowerCase(); return /^(unsub|opted.?out|optout|left|removed)/.test(s) ? "unsubscribed" : /(spam|complain|abuse)/.test(s) ? "complained" : /^(bounce|clean|hard|invalid|undeliverable)/.test(s) ? "bounced" : "active"; };
 function readImport(rows) {
-	if (!rows.length) return { rows: [], skipped: 0, columns: [] };
+	if (!rows.length) return { rows: [], skipped: 0, columns: [], hasStatus: false };
 	const head = rows[0].map(fkey); let emailCol = head.findIndex((h) => ["email", "email_address", "e_mail", "mail"].includes(h)); let start = 1;
 	const isEmail = (x) => /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i.test(String(x || "").trim());
-	if (emailCol < 0) { emailCol = rows[0].findIndex(isEmail); start = 0; if (emailCol < 0) return { rows: [], skipped: rows.length, columns: [] }; }
+	if (emailCol < 0) { emailCol = rows[0].findIndex(isEmail); start = 0; if (emailCol < 0) return { rows: [], skipped: rows.length, columns: [], hasStatus: false }; }
 	const col = (...n) => (start ? head.findIndex((h) => n.includes(h)) : -1);
-	const nameCol = col("name", "full_name"), firstCol = col("first_name", "firstname", "fname"), lastCol = col("last_name", "lastname", "surname", "lname"), tagCol = col("tags");
+	const nameCol = col("name", "full_name"), firstCol = col("first_name", "firstname", "fname"), lastCol = col("last_name", "lastname", "surname", "lname"), tagCol = col("tags"), statusCol = col("status", "subscription_status", "member_status", "state"), joinedCol = col("joined", "optin_time", "confirm_time", "date_added", "date_created", "created_at", "created", "signup_date", "subscribed_at", "subscribed");
 	const extra = start ? head.map((h, i) => ({ h, i })).filter(({ h, i }) => h && !SKIP.has(h) && i !== emailCol) : [];
 	const seen = new Set(); const out = []; let skipped = 0;
 	for (const r of rows.slice(start)) { const email = String(r[emailCol] || "").trim().toLowerCase(); if (!isEmail(email) || seen.has(email)) { skipped++; continue; } seen.add(email);
 		const joined = [r[firstCol] || "", r[lastCol] || ""].map((s) => s.trim()).filter(Boolean).join(" ");
 		const fields = {}; for (const { h, i } of extra) if ((r[i] || "").trim()) fields[h] = r[i].trim();
-		out.push({ email, name: ((nameCol >= 0 ? r[nameCol] : "") || joined || "").trim() || null, fields, tags: tagCol >= 0 ? (r[tagCol] || "").split(/[,;|]/).map((t) => t.trim()).filter(Boolean) : [] }); }
-	return { rows: out, skipped, columns: extra.map((e) => e.h) };
+		out.push({ email, name: ((nameCol >= 0 ? r[nameCol] : "") || joined || "").trim() || null, fields, tags: tagCol >= 0 ? (r[tagCol] || "").split(/[,;|]/).map((t) => t.trim()).filter(Boolean) : [], status: statusCol >= 0 ? impStatus(r[statusCol]) : "active", joined: joinedCol >= 0 ? (r[joinedCol] || "").trim() : "" }); }
+	return { rows: out, skipped, columns: extra.map((e) => e.h), hasStatus: statusCol >= 0 };
 }
-function importer(ls, reload, pick = "") {
-	const m = modal(`<h2>Import a list</h2><p>A CSV file from your old newsletter tool (Mailchimp, Sendy, Substack, Kit and others) or a spreadsheet. We find the email column ourselves.</p>
+const STATUS_NAMES = { active: "Subscribed", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam" };
+const statusLine = (c) => Object.entries(STATUS_NAMES).filter(([k]) => c[k]).map(([k, n]) => `${num(c[k])} ${n.toLowerCase()}`).join(", ");
+// A file's people, guessed from its status column or its name (Mailchimp and Sendy export each group as its own file).
+const guessStatus = (name, d) => (d.hasStatus ? "column" : /unsub|opt.?out/i.test(name) ? "unsubscribed" : /spam|complain|abuse/i.test(name) ? "complained" : /clean|bounce/i.test(name) ? "bounced" : "active");
+function importer(ls, reload, pick = "", how = "") {
+	const intro = how === "sendy" ? `<h2>Move from Sendy</h2><div class="nsteps"><p><b>1</b><span>In Sendy, open your brand, then View all lists, then the list.</span></p><p><b>2</b><span>Export each group you have: Active, Unsubscribed, Bounced and Marked as spam. Each one downloads as its own CSV file.</span></p><p><b>3</b><span>Choose all the files below. We work out which group each one is, so the people who left or bounced come across that way and are never emailed by mistake.</span></p></div>`
+		: `<h2>Import a list</h2><p>A CSV file from your old newsletter tool (Substack, Kit, Mailchimp, Sendy and others) or a spreadsheet. We find the email column ourselves. You can choose more than one file.</p>${how ? "" : `<p class="hint"><a href="#" id="imv">${icon("truck")}Moving everyone from Mailchimp or Sendy? Use the step by step move</a></p>`}`;
+	const m = modal(`${intro}
 	<div class="info">${icon("download")}<p>Not sure how it should look? Download our template: one person per row, with their email address, name, tags and any custom fields this list has. Fill it in with Excel, Numbers or Google Sheets, save it as CSV, then choose it below.<br><button type="button" class="btn ghost small" id="itpl" style="margin-top:8px">${icon("download")}Download the template</button></p></div>
-	<label>The file</label><input type="file" id="if" accept=".csv,text/csv,text/plain"><p id="ip" class="muted"></p><label>Into this list</label><select id="il">${ls.map((l) => `<option value="${l.id}" ${l.id === pick ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
+	<label>The file</label><input type="file" id="if" accept=".csv,text/csv,text/plain" multiple><div id="ifs"></div><p id="ip" class="muted"></p><label>Into this list</label><select id="il">${ls.map((l) => `<option value="${l.id}" ${l.id === pick ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>
 	<label>Tag them <span class="hint">(optional)</span></label><input id="it" placeholder="such as imported">
-	<label class="check"><input type="checkbox" id="ic"> Everyone on this list agreed to get emails from me</label><p class="hint">Nobody who has unsubscribed, bounced or marked you as spam is added back.</p><p class="err" id="ie"></p>
+	<label class="check"><input type="checkbox" id="ic"> Everyone on this list agreed to get emails from me</label><p class="hint">Nobody who has unsubscribed, bounced or marked you as spam is added back, and anyone your old service had down as unsubscribed, bounced or spam comes across that way.</p><p class="err" id="ie"></p>
 	<div class="row"><button class="btn" id="igo" disabled>${icon("upload")}Import</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
-	let data = null;
+	let files = [];
+	$("#imv", m) && ($("#imv", m).onclick = (e) => { e.preventDefault(); m.remove(); mover(ls, reload); });
 	$("#itpl", m).onclick = () => {
 		const l = ls.find((x) => x.id === $("#il", m).value) || ls[0] || {};
 		const extra = (l.fields || []).filter((f) => f.key && !["email", "first_name", "last_name", "name", "tags"].includes(f.key));
@@ -1090,26 +1170,83 @@ function importer(ls, reload, pick = "") {
 		a.click();
 		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 	};
-	$("#if", m).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; data = readImport(parseCsv(await f.text())); $("#ip", m).textContent = data.rows.length ? `${num(data.rows.length)} people found${data.skipped ? `, ${num(data.skipped)} rows skipped (no email, or a repeat)` : ""}.${data.columns.length ? ` Also keeping: ${data.columns.join(", ")}.` : ""}` : "We couldn't find any email addresses in that file."; $("#igo", m).disabled = !data.rows.length; };
+	$("#if", m).onchange = async (e) => {
+		files = [];
+		for (const f of e.target.files) { const d = readImport(parseCsv(await f.text())); files.push({ name: f.name, ...d, as: guessStatus(f.name, d) }); }
+		const found = files.reduce((n, f) => n + f.rows.length, 0), skipped = files.reduce((n, f) => n + f.skipped, 0), cols = [...new Set(files.flatMap((f) => f.columns))];
+		$("#ifs", m).innerHTML = files.map((f, i) => `<div class="filerow"><span class="grow"><b>${esc(f.name)}</b><br><span class="hint">${f.rows.length ? `${num(f.rows.length)} ${f.rows.length === 1 ? "person" : "people"}` : "No email addresses found"}</span></span><label class="sr" for="ifa${i}">These people are</label><select id="ifa${i}" data-i="${i}" ${f.rows.length ? "" : "disabled"}>${f.hasStatus ? `<option value="column">As the file says</option>` : ""}${Object.entries(STATUS_NAMES).map(([k, n]) => `<option value="${k}" ${f.as === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>`).join("");
+		$$("#ifs select", m).forEach((x) => (x.onchange = () => (files[x.dataset.i].as = x.value)));
+		$("#ip", m).textContent = found ? `${num(found)} people found${skipped ? `, ${num(skipped)} rows skipped (no email, or a repeat)` : ""}.${cols.length ? ` Also keeping: ${cols.join(", ")}.` : ""}${files.length > 1 || files.some((f) => f.hasStatus) ? " Check each file says who these people are." : ""}` : "We couldn't find any email addresses in that file.";
+		$("#igo", m).disabled = !found;
+	};
 	$("#igo", m).onclick = async (e) => {
-		const btn = e.currentTarget; btn.disabled = true; let added = 0;
-		try { for (let i = 0; i < data.rows.length; i += 1000) { const r = await api("/api/import", { body: { list: $("#il", m).value, rows: data.rows.slice(i, i + 1000), tags: $("#it", m).value.split(",").map((t) => t.trim()).filter(Boolean), consent: $("#ic", m).checked } }); added += r.added; $("#ip", m).textContent = `Imported ${num(added)} of ${num(data.rows.length)}…`; }
-			m.remove(); toast(`Imported ${num(added)} people`); reload();
+		const btn = e.currentTarget; btn.disabled = true;
+		// Subscribed first, so a later unsubscribed or bounced file has the final say on anyone in both.
+		const order = { active: 0, column: 1, bounced: 2, complained: 3, unsubscribed: 4 };
+		const rows = [...files].sort((a, b) => order[a.as] - order[b.as]).flatMap((f) => f.rows.map((r) => ({ ...r, status: f.as === "column" ? r.status : f.as })));
+		const total = { active: 0, unsubscribed: 0, bounced: 0, complained: 0 }; let added = 0;
+		try { for (let i = 0; i < rows.length; i += 1000) { const r = await api("/api/import", { body: { list: $("#il", m).value, rows: rows.slice(i, i + 1000), tags: $("#it", m).value.split(",").map((t) => t.trim()).filter(Boolean), consent: $("#ic", m).checked } }); added += r.added; for (const k in total) total[k] += r.counts?.[k] || 0; $("#ip", m).textContent = `Imported ${num(added)} of ${num(rows.length)}…`; }
+			m.remove(); toast(`Imported ${num(added)} people: ${statusLine(total)}`); reload();
 		} catch (err) { $("#ie", m).textContent = err.message; btn.disabled = false; }
 	};
 }
 
 // -- View all lists --------------------------------------------------------------------------------------------
 const share = (n, of) => `${num(n)}${of && n ? ` <span class="muted small">${Math.round((n / of) * 1000) / 10}%</span>` : ""}`;
+// Move from Mailchimp (through its API, the key is never kept), Sendy or anything else (CSV files).
+function mover(ls, reload) {
+	const m = modal(`<h2>Move from another service</h2><p>Bring everyone across, including who has unsubscribed or bounced, so nobody is emailed by mistake.</p>
+	<div class="picks"><button class="pick" data-how="mailchimp">${icon("key")}<b>Mailchimp</b><span>Straight from your account with an API key</span></button>
+	<button class="pick" data-how="sendy">${icon("upload")}<b>Sendy</b><span>Export your lists, then choose the files</span></button>
+	<button class="pick" data-how="other">${icon("download")}<b>Another service</b><span>Substack, Kit, MailerLite and others: any CSV file</span></button></div>
+	<div class="row"><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+	$$("[data-how]", m).forEach((x) => (x.onclick = () => { m.remove(); x.dataset.how === "mailchimp" ? moveMailchimp(ls, reload) : importer(ls, reload, "", x.dataset.how); }));
+}
+function moveMailchimp(ls, reload) {
+	const m = modal(`<h2>Move from Mailchimp</h2><div class="nsteps"><p><b>1</b><span>In Mailchimp, open <a href="https://us1.admin.mailchimp.com/account/api/" target="_blank" rel="noopener">Profile, Extras, API keys</a>.</span></p><p><b>2</b><span>Choose Create A Key, call it Newsletter Sender, then copy the key.</span></p><p><b>3</b><span>Paste it here. We use it only for this move and never keep it.</span></p></div>
+	<label for="mck">Mailchimp API key</label><input id="mck" type="password" autocomplete="off" data-lpignore="true" placeholder="ends with something like -us21"><p class="err" id="mce"></p>
+	<div class="row"><button class="btn" id="mcgo">${icon("next")}Show my audiences</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div><div id="mcb"></div>`);
+	let key = "";
+	$("#mcgo", m).onclick = (e) => run(e.currentTarget, async () => {
+		$("#mce", m).textContent = ""; key = $("#mck", m).value.trim();
+		let r; try { r = await api("/api/move/mailchimp", { body: { key } }); } catch (err) { $("#mce", m).textContent = err.message; return; }
+		if (!r.audiences.length) { $("#mce", m).textContent = "There are no audiences in that Mailchimp account."; return; }
+		$("#mcgo", m).closest(".row").remove();
+		$("#mcb", m).innerHTML = `<label>Which audience?</label>${r.audiences.map((a, i) => `<label class="aud"><input type="radio" name="mca" value="${esc(a.id)}" ${i ? "" : "checked"}><span><b>${esc(a.name)}</b><br><span class="hint">${num(a.subscribed)} subscribed, ${num(a.unsubscribed)} unsubscribed, ${num(a.cleaned)} cleaned</span></span></label>`).join("")}
+		<label for="mcl">Into this list</label><select id="mcl"><option value="">A new list with the same name</option>${ls.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select>
+		<label class="check"><input type="checkbox" id="mcc"> Everyone on this audience agreed to get emails from me</label><p class="hint">Subscribed people come across as subscribed, unsubscribed as unsubscribed, and cleaned (bounced) addresses as bounced. Mailchimp tags, first and last names and other fields come too.</p><p class="err" id="mce2"></p><p class="muted" id="mcp"></p>
+		<div class="row"><button class="btn" id="mcrun">${icon("truck")}Move them</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`;
+		$("#mcrun", m).onclick = async (ev) => {
+			const btn = ev.currentTarget, audience = $("[name=mca]:checked", m).value, a = r.audiences.find((x) => x.id === audience);
+			if (!$("#mcc", m).checked) { $("#mce2", m).textContent = "Please confirm everyone on this audience agreed to hear from you."; return; }
+			btn.disabled = true; $("#mce2", m).textContent = "";
+			const total = { active: 0, unsubscribed: 0, bounced: 0, complained: 0 };
+			try {
+				let list = $("#mcl", m).value;
+				if (!list) list = (await api("/api/lists", { body: { name: a.name } })).id;
+				for (let offset = 0; offset !== null; ) {
+					const page = await api("/api/move/mailchimp", { body: { key, audience, offset } });
+					if (page.rows.length) { const done = await api("/api/import", { body: { list, rows: page.rows, consent: true } }); for (const k in total) total[k] += done.counts?.[k] || 0; }
+					$("#mcp", m).textContent = `Moved ${num(Math.min(page.total, offset + 1000))} of ${num(page.total)}…`;
+					offset = page.next;
+				}
+				key = "";
+				$("#mcb", m).innerHTML = `<div class="info">${icon("check")}<p><b>All done.</b> ${statusLine(total) || "Nobody to move"}.<br>You can now delete the Newsletter Sender key in Mailchimp, under Profile, Extras, API keys.</p></div><div class="row"><a class="btn" href="#list/${list}">${icon("list")}Open the list</a><button class="btn ghost" data-close>${icon("x")}Close</button></div>`;
+				reload();
+			} catch (err) { $("#mce2", m).textContent = err.message; btn.disabled = false; }
+		};
+	});
+}
 async function lists() {
 	const [ls, b] = await Promise.all([api("/api/lists"), api("/api/brand")]);
 	main.innerHTML = `<h1>Lists</h1><p class="muted lead">Your main list, a test list, one for each brand or topic: use as many as you like. Each has its own subscribe form.</p>
-	<div class="row toolbar-row"><button class="btn" id="add">${icon("plus")}Add a new list</button><span class="grow"></span><input id="q" class="search" placeholder="Search lists" aria-label="Search lists"></div>
+	<div class="row toolbar-row"><button class="btn" id="add">${icon("plus")}Add a new list</button><button class="btn ghost" id="move">${icon("truck")}Move from another service</button><span class="grow"></span><input id="q" class="search" placeholder="Search lists" aria-label="Search lists"></div>
 	<div class="card flush"><div class="scroll"><table class="data"><thead><tr><th>List</th><th>Active</th><th>Unconfirmed</th><th>Unsubscribed</th><th>Bounced</th><th>Marked as spam</th><th class="c">Edit</th><th class="c">Delete</th></tr></thead><tbody>${ls.map((l) => `<tr data-id="${l.id}" data-q="${esc(l.name.toLowerCase())}"><td><a href="#list/${l.id}"><b>${esc(l.name)}</b></a></td><td><b>${num(l.active)}</b></td><td>${num(l.pending)}</td><td>${share(l.left_count, l.everyone)}</td><td>${share(l.bounced, l.everyone)}</td><td>${share(l.complained, l.everyone)}</td>
 		<td class="c"><button class="icon-btn" data-edit title="List settings" aria-label="List settings">${icon("pencil")}</button></td><td class="c">${ls.length > 1 ? `<button class="icon-btn" data-del title="Delete list" aria-label="Delete list">${icon("trash")}</button>` : ""}</td></tr>`).join("")}</tbody></table></div></div>
 	<p class="hint">Whether someone can be on more than one list, and what unsubscribing does, are under <a href="#settings/lists">Settings, Lists</a>.</p>`;
 	$("#q").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$("tr[data-q]").forEach((tr) => (tr.hidden = q && !tr.dataset.q.includes(q))); };
 	$("#add").onclick = () => listForm({ name: "", description: "", double_optin: 1, fields: [], also_lists: [] }, ls, b);
+	$("#move").onclick = () => mover(ls, route);
 	$$("[data-edit]").forEach((x) => (x.onclick = () => listForm(ls.find((l) => l.id === x.closest("tr").dataset.id), ls, b)));
 	$$("[data-del]").forEach((x) => (x.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this list? The people on it stay on your other lists.")) return; await api(`/api/lists/${x.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));
 }
