@@ -162,6 +162,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .rlinks td{padding:10px 8px;border-bottom:1px solid var(--line)}.rlinks td:first-child{word-break:break-all;min-width:220px}.rlinks td:not(:first-child){white-space:nowrap}
 @media(max-width:760px){.rcards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.rbar{grid-template-columns:1fr 56px;row-gap:4px}.rbar>span{grid-column:1/-1}.rbar .rtrack{grid-column:1}.rbar small{display:none}}
+#main h1{margin-top:0}.printonly{display:none}@media print{@page{margin:14mm}html,body{background:#fff!important}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}#top,#side,footer,.appver,#main iframe,.toast,#main .btn,#main .icon-btn,#main .hint a{display:none!important}.shell{display:block!important}main{padding:0!important;max-width:none!important}.card,.stat,.htile{break-inside:avoid;box-shadow:none!important}.printonly{display:block;color:#6b5a73;font-size:13px;margin:0 0 8px}}
 </style>
 </head>
 <body>
@@ -253,7 +254,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 	<main id="main"></main>
 </div>
 <script>/* Signed in last time: show the header and menu straight away, so the page doesn't jump when it loads. */try{if(localStorage.getItem("ns.in")){document.getElementById("top").hidden=false;document.getElementById("side").hidden=false;}}catch(e){}</script>
-<p class="muted" style="text-align:center;font-size:13px">Newsletter Sender {{VERSION}} · <a href="https://newslettersender.com/">newslettersender.com</a></p>
+<p class="muted appver" style="text-align:center;font-size:13px">Newsletter Sender {{VERSION}} · <a href="https://newslettersender.com/">newslettersender.com</a></p>
 {{ADDON}}
 <script>
 "use strict";
@@ -876,7 +877,7 @@ function healthHtml(h) {
 		${tile(LV[h.bounceLevel][1], pc2(h.bounced, h.sent), "Bounced", `${LV[h.bounceLevel][0]}. Under 2% is healthy; Amazon SES starts flagging accounts at 5%.`)}
 		${tile(LV[h.complaintLevel][1], pc2(h.complained, h.sent), "Marked as spam", `${h.complaintLevel === "few" ? "Not enough sent yet to calculate" : LV[h.complaintLevel][0]}. Under 0.05% is healthy; Amazon flags concerns at 0.1%.`)}
 		${ses ? tile(used > 90 ? "bad" : used > 70 ? "ok" : "good", num(left), "Remaining today", `${num(ses.sent24)} of ${num(ses.max24)} sent in the last 24 hours`, `<div class="hmeter"><i style="width:${used}%"></i></div>`) : tile("few", num(h.sent), "Sent", "In the last 30 days")}
-		${ses ? tile(acctBad ? "bad" : ses.production ? "good" : "ok", acctBad ? "Stopped" : ses.production ? "Active" : "Sandbox", `${esc(name)}${region ? ` (${region})` : ""}`, acctBad ? "Amazon has paused or is reviewing your account. Check the SES console and your email from AWS." : ses.production ? `Up to ${num(ses.rate)} emails per second` : `Only verified addresses get emails. <a href="https://newslettersender.com/help/amazon-ses/#sandbox" target="_blank" rel="noopener">Leave the sandbox</a>`) : tile("good", "On", esc(name), "Connected")}
+		${ses ? tile(acctBad ? "bad" : ses.production ? "good" : "ok", acctBad ? "Stopped" : ses.production ? "Active" : "Sandbox", `${esc(name)}${region ? ` (${region})` : ""}`, acctBad ? "Amazon has paused or is reviewing your account. Check the SES console and your email from AWS." : ses.production ? `Up to ${num(ses.rate)} emails per second` : `Only verified addresses get emails. <a href="https://newslettersender.com/help/amazon-ses/#sandbox" target="_blank" rel="noopener">Leave the sandbox</a>`) : tile("good", "Active", esc(name), "Connected")}
 	</div>
 	${h.ses?.error ? `<p class="err">We couldn't check Amazon SES just now: ${esc(h.ses.error)}</p>` : ""}
 	${h.paused.map((p) => `<div class="hpaused">${icon("alert")}<div><a href="#email/${p.id}"><b>${esc(p.name)}</b> is paused</a>${p.why ? `<br><span class="muted">${esc(p.why)}</span>` : ""}</div></div>`).join("")}
@@ -973,15 +974,17 @@ function addToList(c, ls, b) {
 }
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
+	<p class="printonly">Campaign report from ${esc(document.getElementById("appName")?.textContent || "Newsletter Sender")}, made ${new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
 	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	<div id="abr">${abHtml(c)}</div>${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>${pollsHtml(c)}
-	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
+	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.status === "sent" ? `<button class="btn ghost" id="pdf">${icon("download")}Download PDF report</button>` : ""}${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
 	$("#pause") && ($("#pause").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/pause`, { body: {} }); toast("Paused. Nothing more goes until you carry on."); route(); }));
 	$("#resume") && ($("#resume").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${c.id}/resume`, { body: {} }); route(); }));
 	main.addEventListener("click", (e) => { const b = e.target.closest("[data-addto]"); if (b) addToList(c, ls, b); }, { signal: view.signal });
+	$("#pdf") && ($("#pdf").onclick = () => { const t = document.title; document.title = `${c.name || c.subject} report`; window.print(); setTimeout(() => (document.title = t), 1000); });
 	$("#dup").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/duplicate`, { body: {} }); location.hash = `email/${r.id}`; });
 	$("#again") && ($("#again").onclick = (e) => run(e.currentTarget, async () => { const r = await api(`/api/campaigns/${c.id}/resend`, { body: {} }); toast("A copy is ready. Give it a new subject line, check it, then send."); location.hash = `email/${r.id}`; }));
 	if (c.status === "sending") {
