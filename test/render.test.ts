@@ -45,7 +45,7 @@ test("every newsletter carries one click unsubscribe headers", () => {
 
 test("slugs", () => {
 	assert.equal(slugify("Spring news! Café opens"), "spring-news-cafe-opens");
-	assert.equal(slugify("!!!"), "issue");
+	assert.equal(slugify("!!!"), "campaign");
 });
 
 test("HTML from the editor gets the template, styles, merge tags and tracked links", () => {

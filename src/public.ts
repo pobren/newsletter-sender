@@ -322,7 +322,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		const x = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 		const clean = (v: string) => v.replace(/\{\{[^}]*\}\}/g, "").replace(/\s+/g, " ").trim();
 		const items = results.map((c) => `<item><title>${x(clean(c.subject))}</title><link>${x(`${base}/archive/${c.slug}`)}</link><guid>${x(`${base}/archive/${c.slug}`)}</guid><pubDate>${new Date(c.started_at!).toUTCString()}</pubDate>${c.preheader ? `<description>${x(clean(c.preheader))}</description>` : ""}</item>`).join("");
-		const xml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>${x(b.name || "Newsletter")}</title><link>${x(`${base}/archive`)}</link><atom:link href="${x(`${base}/archive/feed.xml`)}" rel="self" type="application/rss+xml"/><description>${x(`Past issues of ${b.name || "the newsletter"}`)}</description><language>en-gb</language>${items}</channel></rss>`;
+		const xml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>${x(b.name || "Newsletter")}</title><link>${x(`${base}/archive`)}</link><atom:link href="${x(`${base}/archive/feed.xml`)}" rel="self" type="application/rss+xml"/><description>${x(`Past campaigns from ${b.name || "the newsletter"}`)}</description><language>en-gb</language>${items}</channel></rss>`;
 		return new Response(xml, { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=600" } });
 	}
 
@@ -337,12 +337,12 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			const { results } = await db.prepare("SELECT subject, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 200").bind(b.id).all<CampaignRow>();
 			const items = results.map((c) => `<li><a href="/archive/${esc(c.slug!)}">${esc(c.subject.replace(/\{\{[^}]*\}\}/g, "").trim())}</a><span>${new Date(c.started_at!).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></li>`).join("");
 			const forms = (await db.prepare("SELECT slug, name FROM lists WHERE brand_id = ? ORDER BY created_at LIMIT 1").bind(b.id).first<{ slug: string; name: string }>());
-			return html(publicPage(b, "Past issues", `<div class="card"><h1>Past issues</h1>${items ? `<ul class="issues">${items}</ul>` : "<p>Nothing here yet.</p>"}${forms ? `<a class="btn" href="/s/${esc(forms.slug)}">${ICON_SEND}Subscribe</a>` : ""}<p class="small" style="margin-top:16px"><a href="/archive/feed.xml">${ICON_RSS}Follow by RSS</a></p></div>`, { index: true }));
+			return html(publicPage(b, "Past campaigns", `<div class="card"><h1>Past campaigns</h1>${items ? `<ul class="issues">${items}</ul>` : "<p>Nothing here yet.</p>"}${forms ? `<a class="btn" href="/s/${esc(forms.slug)}">${ICON_SEND}Subscribe</a>` : ""}<p class="small" style="margin-top:16px"><a href="/archive/feed.xml">${ICON_RSS}Follow by RSS</a></p></div>`, { index: true }));
 		}
 		const c = await db.prepare("SELECT * FROM campaigns WHERE slug = ? AND brand_id = ? AND status IN ('sent', 'sending') AND public = 1").bind(am[1], b.id).first<CampaignRow>();
 		if (!c) return null;
 		const out = renderEmail(c.subject, campaignContent(c), { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: "/archive", track: null }, { email: "" });
-		return html(out.html.replace("<title>", '<meta name="robots" content="index"><link rel="alternate" href="/archive"><title>').replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, '<a href="/archive" style="color:#6b5a73">More issues</a>'), 200, { "content-security-policy": "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:" });
+		return html(out.html.replace("<title>", '<meta name="robots" content="index"><link rel="alternate" href="/archive"><title>').replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, '<a href="/archive" style="color:#6b5a73">More campaigns</a>'), 200, { "content-security-policy": "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:" });
 	}
 
 	// -- Images -------------------------------------------------------------------------------
