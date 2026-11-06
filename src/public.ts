@@ -3,7 +3,7 @@
 // report bounces and spam complaints to.
 
 import { csvLine, cleanEmail } from "./csv.ts";
-import { getMeta, isBlocked, iso, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
+import { getMeta, isBlocked, iso, linkBase, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
 import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
 import { campaignContent, safeJson, sendSig, shareSig } from "./sending.ts";
@@ -112,7 +112,7 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 	if (s.suppressed === "bounced") await db.prepare("UPDATE subscribers SET suppressed = NULL, suppressed_at = NULL WHERE id = ?").bind(s.id).run();
 	await logEvent(db, b.id, direct ? "subscribed" : "signed_up", s.id, null, `${l.name} (${source})`).run();
 	if (direct) for (const id of [l.id, ...also]) await fireSafely(db, b.id, s.id, { kind: "joined", list: id });
-	const base = await origin(db);
+	const base = linkBase(b, await origin(db));
 	if (!direct) await oneOff(env, b, email, `Please confirm: ${l.name}`, [`Hello${name ? ` ${name.split(" ")[0]}` : ""},`, `Please confirm you'd like to get ${l.name === b.name ? b.name : `${l.name} from ${b.name}`}. Just press the button below.`, `If you didn't ask for this, you can ignore this email and you won't hear from us again.`], { label: "Yes, sign me up", href: `${base}/c/${token}` });
 	else if (l.welcome_subject && l.welcome_text) await oneOff(env, b, email, l.welcome_subject, l.welcome_text.split(/\n{2,}/));
 	return { ok: true, status: direct ? "active" : "pending" };
@@ -124,7 +124,7 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
  */
 export async function oneOff(env: Env, b: BrandRow, to: string, subject: string, paras: string[], button?: { label: string; href: string }): Promise<boolean> {
 	const blocks = [{ type: "text" as const, text: paras.join("\n\n") }, ...(button ? [{ type: "button" as const, label: button.label, href: button.href }] : [])];
-	const base = await origin(env.DB);
+	const base = linkBase(b, await origin(env.DB));
 	const out = renderEmail(subject, blocks, { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: `${base}/archive`, track: null }, { email: to });
 	const text = [...paras, button ? `${button.label}: ${button.href}` : ""].filter(Boolean).join("\n\n") + `\n\n${b.name}\n`;
 	if (env.EMAIL) {

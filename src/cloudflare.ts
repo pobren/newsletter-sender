@@ -12,14 +12,14 @@ async function cf(token: string, method: string, path: string, body: unknown, fe
 }
 
 /** The Cloudflare zone a domain (or one of its subdomains) lives in, if this token can see it. */
-export async function findZone(token: string, domain: string, fetcher: typeof fetch = fetch): Promise<{ id: string; name: string } | { error: string }> {
+export async function findZone(token: string, domain: string, fetcher: typeof fetch = fetch): Promise<{ id: string; name: string; accountId: string } | { error: string }> {
 	const labels = domain.toLowerCase().split(".");
 	for (let i = 0; i < labels.length - 1; i++) {
 		const name = labels.slice(i).join(".");
 		const r = await cf(token, "GET", `/zones?name=${encodeURIComponent(name)}`, null, fetcher);
 		if (!r.ok) return { error: r.message.includes("Invalid") || r.message.includes("Authentication") ? "Cloudflare didn't accept that token. Please check you copied all of it." : `Cloudflare said: ${r.message}` };
 		const z = r.data?.result?.[0];
-		if (z?.id) return { id: z.id, name: z.name };
+		if (z?.id) return { id: z.id, name: z.name, accountId: z.account?.id ?? "" };
 	}
 	return { error: `That token can't see ${domain} in Cloudflare. Make sure the token covers this domain's zone, or that the domain is on Cloudflare.` };
 }
@@ -49,6 +49,34 @@ export async function addRecords(token: string, zoneId: string, records: DnsReco
 
 /** The Cloudflare page that makes a token with just DNS editing filled in. */
 export const TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }]))}&name=${encodeURIComponent("Newsletter Sender DNS")}`;
+
+/** The Cloudflare page that makes a token for your own link domain: DNS, plus adding a custom domain to this Worker. */
+export const LINKS_TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }, { key: "workers_routes", type: "edit" }, { key: "workers_scripts", type: "edit" }]))}&name=${encodeURIComponent("Newsletter Sender links")}`;
+
+/** Which Worker is answering: the first part of a workers.dev address, or the Worker a custom domain points at. */
+export async function workerName(token: string, accountId: string, host: string, fetcher: typeof fetch = fetch): Promise<string> {
+	const dev = /^([a-z0-9-]+)\.[a-z0-9-]+\.workers\.dev$/i.exec(host);
+	if (dev) return dev[1].toLowerCase();
+	const r = await cf(token, "GET", `/accounts/${accountId}/workers/domains?hostname=${encodeURIComponent(host)}`, null, fetcher);
+	return r.data?.result?.[0]?.service || "newsletter-sender";
+}
+
+/**
+ * Points a hostname such as news.yourdomain.com at this Worker as a Cloudflare custom domain. Cloudflare makes the DNS
+ * record and the certificate itself. Says plainly when the token can't do it, so the app can ask for a better one.
+ */
+export async function addWorkerDomain(token: string, zone: { id: string; accountId: string }, hostname: string, service: string, fetcher: typeof fetch = fetch): Promise<{ ok: true; already: boolean } | { error: string; token?: boolean }> {
+	const have = await cf(token, "GET", `/accounts/${zone.accountId}/workers/domains?hostname=${encodeURIComponent(hostname)}`, null, fetcher);
+	if (!have.ok) return { error: "Your Cloudflare token can't add custom domains to Workers yet. Please make a new token with the button below.", token: true };
+	const there = (have.data?.result ?? []).find((d: any) => d.hostname === hostname);
+	if (there?.service === service) return { ok: true, already: true };
+	if (there) return { error: `${hostname} already points at another Worker (${there.service}). Choose another name, such as links.${hostname.split(".").slice(1).join(".")}.` };
+	const r = await cf(token, "PUT", `/accounts/${zone.accountId}/workers/domains`, { hostname, service, zone_id: zone.id, environment: "production" }, fetcher);
+	if (r.ok) return { ok: true, already: false };
+	if (/auth|permission|10000|9109/i.test(r.message)) return { error: "Your Cloudflare token can't add custom domains to Workers yet. Please make a new token with the button below.", token: true };
+	if (/record|cname|exist/i.test(r.message)) return { error: `There's already a DNS record for ${hostname}. Delete it in Cloudflare (DNS, Records), or choose another name, then try again.` };
+	return { error: `Cloudflare said: ${r.message}` };
+}
 
 /** Well known DNS hosts, by the end of their nameserver names. */
 const HOSTS: [RegExp, string][] = [

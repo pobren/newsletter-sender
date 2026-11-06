@@ -5,7 +5,7 @@
 import { alreadyThere, awsError, ses, sesAccount, sns, xmlValue } from "./aws.ts";
 import { addRecords, findZone } from "./cloudflare.ts";
 import { getMeta, iso, newId, origin, setMeta, type BrandRow } from "./db.ts";
-import { seal, sesKeys, unseal, type ProviderConfig } from "./providers.ts";
+import { seal, sealText, sesKeys, unseal, unsealText, type ProviderConfig } from "./providers.ts";
 
 /** The key that encrypts sending keys in the database, made once per install. */
 export async function sealSecret(db: D1Database): Promise<string> {
@@ -15,6 +15,21 @@ export async function sealSecret(db: D1Database): Promise<string> {
 		await setMeta(db, "seal_key", key);
 	}
 	return key;
+}
+
+/** A short id for this install, so we can tell a link domain really reaches this Worker and not something else. */
+export async function installId(db: D1Database): Promise<string> {
+	const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ns-link:${await sealSecret(db)}`));
+	return [...new Uint8Array(d).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The Cloudflare token for a brand's own link domain, kept sealed. Falls back to the one saved for Amazon SES DNS. */
+export async function linksToken(db: D1Database, brand: BrandRow): Promise<string | null> {
+	const own = await unsealText(await sealSecret(db), await getMeta(db, `links_token:${brand.id}`));
+	return own || (await loadProvider(db, brand))?.cfToken || null;
+}
+export async function saveLinksToken(db: D1Database, brandId: string, token: string): Promise<void> {
+	await setMeta(db, `links_token:${brandId}`, await sealText(await sealSecret(db), token));
 }
 
 export async function loadProvider(db: D1Database, brand: BrandRow): Promise<ProviderConfig | null> {

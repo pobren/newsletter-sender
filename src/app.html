@@ -353,6 +353,50 @@ function ago(s) {
 }
 const rate = (n, of, cls) => (of ? `<span class="rate ${cls}">${(Math.round((n / of) * 10000) / 100).toFixed(2)}%</span> ${num(n)}` : `<span class="muted">-</span>`);
 
+// -- Your own domain for links (Settings, Tracking) -------------------------------------------------------------
+async function linksCard(needToken = false) {
+	const box = $("#lkBody");
+	if (!box) return;
+	const s = await api("/api/links");
+	if (s.domain) {
+		box.innerHTML = `<p class="hint" id="lkState">${icon("refresh")} Checking ${esc(s.domain)}…</p>
+		<div class="row"><button class="btn ghost" id="lkCheck">${icon("refresh")}Check again</button><button class="btn ghost" id="lkStop">${icon("x")}Stop using it</button></div>`;
+		let tries = 0, timer = null;
+		const check = async () => {
+			clearTimeout(timer);
+			if (!$("#lkState")) return;
+			const r = await api("/api/links?check=1").catch((e) => ({ live: false, message: e.message }));
+			if (!$("#lkState")) return;
+			$("#lkState").className = r.live ? "hint good" : "hint";
+			$("#lkState").innerHTML = `${icon(r.live ? "check" : "refresh")} ${esc(r.message)}`;
+			if (!r.live && ++tries < 12) timer = setTimeout(check, 20000);
+		};
+		check();
+		$("#lkCheck").onclick = () => { tries = 0; check(); };
+		$("#lkStop").onclick = (e) => run(e.currentTarget, async () => { await api("/api/links", { method: "DELETE" }); toast("Links use this app's address again"); linksCard(); });
+		return;
+	}
+	const ask = needToken || !s.hasToken;
+	box.innerHTML = `<label for="lkd">Your domain for links</label><input id="lkd" placeholder="news.yourdomain.com" autocomplete="off">
+	<p class="hint">A new subdomain of your website that isn't used for anything else. Your domain needs to be on Cloudflare.</p>
+	${ask ? `<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Cloudflare opens with the right permissions filled in. Under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
+	<div class="helplinks"><a class="btn ghost small" href="${esc(s.tokenUrl)}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
+	<input id="lkt" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token">` : ""}
+	<p class="err" id="lke"></p>
+	<div class="row"><button class="btn" id="lkGo">${icon("wand")}Set it up for me</button></div>
+	<details class="embed" style="margin-top:14px"><summary>${icon("cog")}Set it up yourself instead</summary>
+	<ol class="hint"><li>In Cloudflare, open Workers and Pages, then <b>${esc(s.appHost.split(".")[0])}</b>, then Settings, then Domains and routes.</li><li>Press Add, choose Custom domain, type your domain for links and press Add domain.</li><li>Type the same domain below and press Save.</li></ol>
+	<div class="row"><input id="lkm" class="grow" placeholder="news.yourdomain.com" style="width:auto"><button class="btn ghost small" id="lkSave">${icon("save")}Save</button></div></details>`;
+	$("#lkGo").onclick = (e) => run(e.currentTarget, async () => {
+		$("#lke").textContent = "";
+		const res = await fetch("/api/links", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ domain: $("#lkd").value, token: $("#lkt")?.value || undefined }) });
+		const r = await res.json().catch(() => ({}));
+		if (!res.ok) { if (r.needToken && !$("#lkt")) { const d = $("#lkd").value; await linksCard(true); $("#lkd").value = d; } $("#lke").textContent = r.error || "That didn't work. Please try again."; return; }
+		toast(r.already ? "Already set up" : "Added in Cloudflare"); linksCard();
+	});
+	$("#lkSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/brand", { body: { track_domain: $("#lkm").value } }); toast("Saved"); linksCard(); });
+}
+
 // -- Checking a From address can be sent from (Amazon SES needs the address or its domain verified) -------------
 async function checkFrom(input, out) {
 	const email = input.value.trim();
@@ -1236,10 +1280,12 @@ async function settings(section) {
 		<p class="muted">Both are off to start with. Bounces and spam complaints are always looked after: they come back from your sending service, show on <a href="#reports">Reports</a>, and those addresses are never emailed again.</p>
 		<label class="check"><input type="checkbox" id="to" ${b.track_opens ? "checked" : ""}> <span>Track opens <span class="hint">(adds a tiny invisible picture to each email. Apple Mail opens these for everyone, so treat opens as a rough guide)</span></span></label>
 		<label class="check"><input type="checkbox" id="tc" ${b.track_clicks ? "checked" : ""}> <span>Track clicks <span class="hint">(each link goes through your Newsletter Sender address first, then straight on)</span></span></label>
-		<label for="td">Custom tracking domain <span class="hint">(optional)</span></label><input id="td" value="${esc(b.track_domain || "")}" placeholder="news.yourdomain.com">
-		<p class="hint">Open and click links then use your own domain rather than ${esc(location.host)}, which looks better and can help delivery. Add it to this Worker in Cloudflare first: Workers, newsletter-sender, Settings, Domains and routes, Add, Custom domain.</p>
-		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save</button><a class="btn ghost" href="#reports">${icon("chart")}See reports</a><a class="btn ghost" href="#settings/sending">${icon("shield")}Bounce set-up</a></div></form>`;
-		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked, track_domain: $("#td").value } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
+		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save</button><a class="btn ghost" href="#reports">${icon("chart")}See reports</a><a class="btn ghost" href="#settings/sending">${icon("shield")}Bounce set-up</a></div></form>
+		<div class="card" id="lk"><h2>Your own domain for links</h2>
+		<p class="muted">Every link in your emails (unsubscribe, view online, and opens and clicks when they're on) can use your own domain, such as news.yourdomain.com, rather than ${esc(location.host)}. It looks better to readers and helps your emails reach the inbox.</p>
+		<div id="lkBody"><p class="muted">Loading…</p></div></div>`;
+		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
+		linksCard();
 	}
 	if (sec === "backups") {
 		const s = await api("/api/backups");

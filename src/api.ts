@@ -8,11 +8,11 @@ import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
-import { canSendFrom, loadProvider, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
+import { canSendFrom, installId, linksToken, loadProvider, saveLinksToken, saveProvider, sesRecords, sesSetup, sesStatus, setUpSes } from "./settings.ts";
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
-import { dnsHost, findZone, TOKEN_URL } from "./cloudflare.ts";
+import { addWorkerDomain, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
 const DEFAULT_BRAND = "My newsletter";
@@ -157,15 +157,16 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				const logo = typeof b.logo === "string" && /^https:\/\/\S{1,1000}$/.test(b.logo.trim()) ? b.logo.trim() : null;
 				Object.assign(set, { name: str(b.name, 80), from_name: str(b.from_name, 80) || str(b.name, 80), from_email: fromEmail, reply_to: cleanEmail(b.reply_to), footer: multi(b.footer, 300) || null, colour: /^#[0-9a-f]{6}$/i.test(b.colour) ? b.colour : brand.colour, logo, archive: b.archive === false ? 0 : 1, app_name: str(b.app_name, 60) || null, footer_links: (b.manage_link === false ? 0 : 1) | (b.forward_link ? 2 : 0), done_email: b.done_email === false ? 0 : 1 });
 			}
-			if ("track_opens" in b) {
+			if ("track_opens" in b) Object.assign(set, { track_opens: b.track_opens ? 1 : 0, track_clicks: b.track_clicks ? 1 : 0 });
+			if ("track_domain" in b) {
 				let domain: string | null = null;
 				if (typeof b.track_domain === "string" && b.track_domain.trim()) {
 					const d = b.track_domain.trim().replace(/\/+$/, "");
 					const u = /^https?:\/\//i.test(d) ? d : `https://${d}`;
-					if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(u)) return bad("The tracking address should be a web address you've added to this Worker, such as news.yourdomain.com.");
+					if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(u)) return bad("Your domain for links should be a web address you've added to this Worker, such as news.yourdomain.com.");
 					domain = u.toLowerCase();
 				}
-				Object.assign(set, { track_opens: b.track_opens ? 1 : 0, track_clicks: b.track_clicks ? 1 : 0, track_domain: domain });
+				set.track_domain = domain;
 			}
 			if ("one_list" in b) Object.assign(set, { one_list: b.one_list ? 1 : 0, unsub_scope: b.unsub_scope === "list" ? "list" : "all" });
 			const keys = Object.keys(set);
@@ -269,6 +270,39 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		} catch (e) {
 			return bad(`The restore stopped part way: ${(e as Error).message}. Your backup from just before is in the list, so you can put that back.`);
 		}
+	// Your own domain for links: every link in your emails (unsubscribe, view online, opens and clicks) uses it.
+	if (path === "/api/links") {
+		const host = brand.track_domain ? new URL(brand.track_domain).hostname : null;
+		if (method === "DELETE") {
+			await db.prepare("UPDATE brands SET track_domain = NULL WHERE id = ?").bind(brand.id).run();
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			const hostname = String(b.domain ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+			if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(hostname) || hostname.split(".").length < 3) return bad("Please enter a subdomain of your website, such as news.yourdomain.com.");
+			if (hostname === url.hostname) return bad("That's this app's own address. Please choose a new name, such as news.yourdomain.com.");
+			let token = typeof b.token === "string" ? b.token.trim() : "";
+			if (token && (token.length < 20 || token.length > 200 || /\s/.test(token))) return bad("Please paste the whole Cloudflare token, with no spaces.");
+			if (!token) token = (await linksToken(db, brand)) ?? "";
+			if (!token) return bad("Please make a Cloudflare token first, with the button below.", 409);
+			const zone = await findZone(token, hostname);
+			if ("error" in zone) return bad(zone.error);
+			if (!zone.accountId) return bad("Cloudflare didn't tell us which account that domain is in. Please try again.");
+			const service = await workerName(token, zone.accountId, url.hostname);
+			const r = await addWorkerDomain(token, zone, hostname, service);
+			if ("error" in r) return r.token ? Response.json({ error: r.error, needToken: true }, { status: 409 }) : bad(r.error);
+			if (b.token) await saveLinksToken(db, brand.id, token);
+			await db.prepare("UPDATE brands SET track_domain = ? WHERE id = ?").bind(`https://${hostname}`, brand.id).run();
+			return ok({ ok: true, domain: hostname, already: r.already });
+		}
+		if (url.searchParams.has("check")) {
+			if (!host) return ok({ live: false, message: "No domain for links yet." });
+			const want = await installId(db);
+			const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cf: { cacheTtl: 0 } } as RequestInit).then((r) => (r.ok ? r.text() : ""), () => "");
+			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
+		}
+		return ok({ domain: host, hasToken: Boolean(await linksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname });
 	}
 	if (path === "/api/health") {
 		const h = await brandHealth(db, brand.id);
