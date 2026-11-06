@@ -1470,7 +1470,7 @@ async function blocklist(type) {
 	main.innerHTML = `<h1>Blocklist</h1>
 	<nav class="subtabs"><a href="#blocklist" class="${domains ? "" : "on"}">${icon("mail")}Suppression list <span class="n">${num(r0.counts.emails)}</span></a><a href="#blocklist/domains" class="${domains ? "on" : ""}">${icon("shield")}Blocked domains <span class="n">${num(r0.counts.domains)}</span></a></nav>
 	<div class="info">${icon("shield")}<p>${domains ? "Nobody at these domains can sign up or be added or imported, and they're never emailed. Handy for throwaway email services, or a competitor." : "Addresses on your blocklist are permanently suppressed: they are never emailed, prevented from signing up again and automatically skipped during list imports. Use this for anyone who has explicitly asked not to be contacted. Hard bounces and spam complaints are already filtered out for you automatically."}</p></div>
-	<div class="row toolbar-row"><button class="btn" id="imp">${icon("upload")}Import</button><a class="btn ghost" href="/api/blocklist/export${domains ? "?type=domains" : ""}">${icon("download")}Export</a><button class="btn danger" id="all">${icon("trash")}Delete all</button><span class="grow"></span><input id="q" class="search" placeholder="${domains ? "Search domains" : "Search email addresses"}" aria-label="Search"></div>
+	<div class="row toolbar-row"><button class="btn" id="add">${icon("plus")}${domains ? "Add a domain" : "Add an address"}</button><button class="btn ghost" id="imp">${icon("upload")}Import</button><a class="btn ghost" href="/api/blocklist/export${domains ? "?type=domains" : ""}">${icon("download")}Export</a><button class="btn danger" id="all">${icon("trash")}Delete all</button><span class="grow"></span><input id="q" class="search" placeholder="${domains ? "Search domains" : "Search email addresses"}" aria-label="Search"></div>
 	<div class="card flush" id="rows"></div>`;
 	const paint = (r) => {
 		const from = q.page * 50;
@@ -1485,6 +1485,14 @@ async function blocklist(type) {
 	paint(r0);
 	let t; $("#q").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.q = e.target.value; q.page = 0; load(); }, 300); };
 	$("#all").onclick = (e) => run(e.currentTarget, async () => { if (!confirm(domains ? "Take every domain off the blocklist?" : "Take everyone off your blocklist? They could then be emailed again.")) return; await api("/api/blocklist", { body: { type: q.type, remove: true, all: true } }); route(); });
+	$("#add").onclick = () => {
+		const m = modal(`<h2>${domains ? "Block a domain" : "Add an address to your suppression list"}</h2><label for="ba">${domains ? "Domain, such as example.com" : "Email address"}</label><input id="ba" ${domains ? 'placeholder="example.com"' : 'type="email" placeholder="name@example.com"'} autocomplete="off"><p class="err" id="ae"></p>
+		<div class="row" style="margin-top:14px"><button class="btn" id="ago">${icon("plus")}Add to the blocklist</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+		$("#ba", m).focus();
+		const go = (e) => run(e.currentTarget || $("#ago", m), async () => { const v = $("#ba", m).value.trim(); if (!v) { $("#ae", m).textContent = domains ? "Please type a domain." : "Please type an email address."; return; } try { const r = await api("/api/blocklist", { body: { type: q.type, items: v } }); m.remove(); toast(`${v.toLowerCase()} is on your blocklist`); route(); } catch (err) { $("#ae", m).textContent = err.message; } });
+		$("#ago", m).onclick = go;
+		$("#ba", m).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("#ago", m).click(); } };
+	};
 	$("#imp").onclick = () => {
 		const m = modal(`<h2>${domains ? "Block domains" : "Add to your suppression list"}</h2><label for="bi">${domains ? "Domains, such as example.com" : "Email addresses"} <span class="hint">(one per line, or separated by commas)</span></label><textarea id="bi" rows="8"></textarea>
 		<label class="btn ghost small" style="margin:10px 0 0;width:max-content">${icon("upload")}Or choose a CSV or text file<input type="file" id="bf" accept=".csv,.txt,text/csv,text/plain" hidden></label><p class="err" id="be"></p>
