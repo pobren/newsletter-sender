@@ -11,6 +11,7 @@ import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkCampaign } from "./health.ts";
 import { fireSafely } from "./automations.ts";
+import { popupScript, popupSettings, popupTestPage } from "./popup.ts";
 
 export { csvLine };
 
@@ -164,6 +165,15 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	const path = url.pathname;
 	const ip = request.headers.get("cf-connecting-ip") ?? "local";
 
+	// -- The pop up form for websites, and a page to try it on ------------------------------------
+	const pum = /^\/s\/([a-z0-9-]{1,60})\/(popup\.js|popup)$/.exec(path);
+	if (pum && request.method === "GET") {
+		const found = await listBySlug(db, pum[1]);
+		if (!found) return new Response("// That list has gone.", { status: 404, headers: { "content-type": "text/javascript; charset=utf-8" } });
+		if (pum[2] === "popup") return html(popupTestPage(`${url.origin}/s/${found.l.slug}/popup.js`, url.searchParams));
+		return new Response(popupScript(popupSettings(found.l, found.b, url.origin, turnstileKey(env))), { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" } });
+	}
+
 	// -- Sign up -----------------------------------------------------------------
 	const sm = /^\/s\/([a-z0-9-]{1,60})\/?$/.exec(path);
 	if (sm) {
@@ -180,7 +190,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			if (!(await turnstileOk(env, request, form.ts ?? form["cf-turnstile-response"]))) return fail("We couldn't check you're a person. Please try again.");
 			const fields: Record<string, unknown> = {};
 			for (const f of listFields(l)) fields[f.key] = form[f.key];
-			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? new URL(request.headers.get("referer")!).hostname : "form");
+			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? `${form.via === "popup" ? "pop up on " : ""}${new URL(request.headers.get("referer")!).hostname}` : form.via === "popup" ? "pop up" : "form");
 			if ("error" in r) return fail(r.error);
 			if (wantsJson) return Response.json({ ok: true, confirm: r.status === "pending" }, { headers: cors });
 			return Response.redirect(l.thanks_url || `${url.origin}/s/${l.slug}?done=${r.status === "pending" ? 1 : 2}`, 303);

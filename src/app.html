@@ -127,6 +127,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .svc dl{display:grid;grid-template-columns:auto auto;gap:6px 12px;margin:0}.svc dt{color:var(--muted)}.svc dd{margin:0;font-weight:700;text-align:right}
 .hmeter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}.hmeter i{display:block;height:100%;background:var(--hc)}
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
+.abopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 12px}
 .hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
 @media(max-width:900px){.htiles{grid-template-columns:repeat(2,1fr)}}
 .act select{width:auto;flex:1 1 200px}
@@ -764,6 +765,23 @@ async function editor(id, kind) {
 	recount();
 	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
 }
+// The pop up sign up form for any website: choose the words and when it shows, then copy one line of code.
+function popupBuilder(l) {
+	const m = modal(`<h2>Pop up form</h2><p class="muted">A sign up box that pops up on your website. Paste the code into your site once, just before &lt;/body&gt;, or in your site builder's "custom code" box. It works on any website.</p>
+	<label for="puT">Heading</label><input id="puT" value="${esc(`Join ${l.name}`)}">
+	<label for="puX">A line about it</label><input id="puX" value="${esc(l.description || "Get new posts straight to your inbox.")}">
+	<label for="puB">Button words</label><input id="puB" value="Subscribe">
+	<div class="abopts"><div><label for="puW">When it pops up</label><select id="puW"><option value="time:5">After 5 seconds</option><option value="time:10" selected>After 10 seconds</option><option value="time:30">After 30 seconds</option><option value="scroll:50">Halfway down the page</option><option value="exit">When they go to leave</option></select></div>
+	<div><label for="puE">If they close it</label><select id="puE"><option value="1">Show again the next day</option><option value="7" selected>Show again after a week</option><option value="30">Show again after a month</option><option value="36500">Never show again</option></select></div></div>
+	<p class="hint">Once someone signs up, it never shows to them again. On phones, "When they go to leave" shows after 20 seconds instead.</p>
+	<label>The code</label><pre class="codebox" id="puC"></pre>
+	<div class="row"><button class="btn" id="puCopy">${icon("copy")}Copy the code</button><a class="btn ghost" id="puTry" target="_blank">${icon("eye")}Try it</a><button class="btn ghost" data-close>${icon("x")}Close</button></div>`);
+	const v = (q) => $(q, m).value.trim();
+	const code = () => `<script src="${l.url}/popup.js" data-title="${esc(v("#puT"))}" data-text="${esc(v("#puX"))}" data-button="${esc(v("#puB"))}" data-when="${v("#puW")}" data-every="${v("#puE")}" async></` + `script>`;
+	const draw = () => { $("#puC", m).textContent = code(); $("#puTry", m).href = `${l.url}/popup?${new URLSearchParams({ title: v("#puT"), text: v("#puX"), button: v("#puB") })}`; };
+	m.addEventListener("input", draw); m.addEventListener("change", draw); draw();
+	$("#puCopy", m).onclick = () => { navigator.clipboard.writeText(code()); toast("Copied. Paste it into your website."); };
+}
 // -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
 const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
 const hourText = (h) => (h === 0 ? "midnight" : h === 12 ? "midday" : `${h % 12}${h < 12 ? "am" : "pm"}`);
@@ -965,7 +983,7 @@ async function listView(id, status = "all") {
 	if (!TABS.some((t) => t[0] === status)) status = "all";
 	const q = { list: id, status, q: "", page: 0 };
 	main.innerHTML = `<a class="crumb" href="#lists">${icon("back")}Back to lists</a>
-	<div class="row"><h1 class="grow">List: ${esc(l.name)}</h1><button class="btn ghost small" id="form">${icon("code")}Subscribe form</button><button class="btn ghost small" id="fields">${icon("text")}Custom fields</button><button class="btn ghost small" id="lset">${icon("cog")}List settings</button></div>
+	<div class="row"><h1 class="grow">List: ${esc(l.name)}</h1><button class="btn ghost small" id="form">${icon("code")}Subscribe form</button><button class="btn ghost small" id="popup">${icon("ext")}Pop up form</button><button class="btn ghost small" id="fields">${icon("text")}Custom fields</button><button class="btn ghost small" id="lset">${icon("cog")}List settings</button></div>
 	${l.description ? `<p class="muted" style="margin:6px 0 0">${esc(l.description)}</p>` : ""}
 	<div class="row toolbar-row"><button class="btn" id="add">${icon("plus")}Add subscribers</button><button class="btn ghost" id="del">${icon("trash")}Delete subscribers</button><button class="btn ghost" id="mass">${icon("x")}Mass unsubscribe</button><a class="btn ghost" href="/api/export?list=${l.id}">${icon("download")}Export subscribers</a><span class="grow"></span><input id="q" class="search" placeholder="Search name or email" aria-label="Search name or email"></div>
 	<nav class="subtabs">${TABS.map(([k, n, c]) => `<a href="#list/${id}/${k}" class="${k === status ? "on" : ""}">${n} <span class="n">${num(c)}</span></a>`).join("")}</nav>
@@ -986,6 +1004,7 @@ async function listView(id, status = "all") {
 	};
 	let t; $("#q").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.q = e.target.value; q.page = 0; load(); }, 300); };
 	$("#lset").onclick = $("#fields").onclick = () => listForm(l, ls, b);
+	$("#popup").onclick = () => popupBuilder(l);
 	$("#form").onclick = () => modal(`<h2>Subscribe form</h2><label>Sign up page</label><div class="lrow"><code class="copy"><a class="grow" href="${esc(l.url)}" target="_blank">${esc(l.url)}</a></code><button class="btn ghost small" data-copy="${esc(l.url)}">${icon("copy")}Copy</button></div>
 		<label>Form for your website</label><p class="hint">Paste it into any page, and style it to match your site.</p><pre class="codebox">${esc(l.embed)}</pre><div class="row"><button class="btn" data-copy="${esc(l.embed)}">${icon("copy")}Copy the code</button><button class="btn ghost" data-close>${icon("x")}Close</button></div>`);
 	$("#add").onclick = () => {
