@@ -2,6 +2,7 @@
 
 import { checkPassword, clearCookie, clearFailures, currentAccount, hashPassword, noteFailure, passwordProblem, sessionCookie, setupCodeMatches, setupTokenOk, signOutEverywhere, tooManyTries } from "./auth.ts";
 import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
+import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, makeKey, MAX_HOOKS, MAX_KEYS } from "./v1.ts";
 import { getBackup, KEEP, listBackups, makeBackup, restoreBackup } from "./backup.ts";
 import { firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
@@ -304,6 +305,43 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
 		}
 		return ok({ domain: host, hasToken: Boolean(await linksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname });
+	}
+	// The public API's keys and webhooks (Settings, API).
+	if (path === "/api/developer" && method === "GET") {
+		return ok({ keys: await listKeys(db, brand.id), hooks: await listHooks(db, brand.id), events: EVENTS, docs: DOCS, base: `${url.origin}/api/v1`, maxKeys: MAX_KEYS, maxHooks: MAX_HOOKS });
+	}
+	if (path === "/api/developer/keys" && method === "POST") {
+		const r = await makeKey(db, brand.id, str((await body(request)).name, 60));
+		return "error" in r ? bad(r.error) : ok(r);
+	}
+	const dk = /^\/api\/developer\/keys\/([0-9a-f]{16})$/.exec(path);
+	if (dk && method === "DELETE") {
+		await db.prepare("DELETE FROM api_keys WHERE id = ? AND brand_id = ?").bind(dk[1], brand.id).run();
+		return ok();
+	}
+	if (path === "/api/developer/hooks" && method === "POST") {
+		const b = await body(request);
+		const hookUrl = cleanHookUrl(b.url);
+		if (!hookUrl) return bad("Please enter the full https:// address that should get the events.");
+		const r = await makeHook(db, brand.id, hookUrl, Array.isArray(b.events) ? b.events.map(String) : []);
+		return "error" in r ? bad(r.error) : ok(r);
+	}
+	const dh = /^\/api\/developer\/hooks\/([0-9a-f]{16})(\/test|\/on)?$/.exec(path);
+	if (dh) {
+		const h = await db.prepare("SELECT * FROM webhooks WHERE id = ? AND brand_id = ?").bind(dh[1], brand.id).first<any>();
+		if (!h) return bad("That webhook has gone.", 404);
+		if (!dh[2] && method === "DELETE") {
+			await db.prepare("DELETE FROM webhooks WHERE id = ?").bind(h.id).run();
+			return ok();
+		}
+		if (dh[2] === "/on" && method === "POST") {
+			await db.prepare("UPDATE webhooks SET active = 1, failures = 0 WHERE id = ?").bind(h.id).run();
+			return ok();
+		}
+		if (dh[2] === "/test" && method === "POST") {
+			const status = await deliver(db, h, "test", { message: "This is a test from Newsletter Sender." });
+			return ok({ status, ok: status >= 200 && status < 300 });
+		}
 	}
 	if (path === "/api/health") {
 		const h = await brandHealth(db, brand.id);
