@@ -127,6 +127,8 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 .svc dl{display:grid;grid-template-columns:auto auto;gap:6px 12px;margin:0}.svc dt{color:var(--muted)}.svc dd{margin:0;font-weight:700;text-align:right}
 .hmeter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}.hmeter i{display:block;height:100%;background:var(--hc)}
 .hpaused{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;border-radius:12px;padding:12px 14px;margin:8px 0;color:#78350f}.hpaused .muted{color:#92400e;font-size:14px}
+.rwd{border:1px solid var(--line);border-radius:12px;padding:4px 14px 14px;margin:10px 0}.rwtop{display:flex;gap:12px;align-items:flex-end}.rwtop>div:first-child{width:130px;flex:none}.rwtop .icon-btn{margin-bottom:6px}
+.rfstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:10px 0 14px}.rfstats>div{background:var(--soft);border-radius:12px;padding:12px 14px}.rfstats b{display:block;font-size:24px;line-height:1.2;color:var(--ink)}.rfstats span{font-size:13px;color:var(--muted)}
 .hwarn{display:flex;gap:10px;align-items:flex-start;background:#fef3c7;color:#78350f;border-radius:12px;padding:10px 14px}.hwarn .ico{flex:none;margin-top:3px}
 @media(max-width:900px){.htiles{grid-template-columns:repeat(2,1fr)}}
 .act select{width:auto;flex:1 1 200px}
@@ -164,6 +166,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></symbol>
 <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v9h14v-9M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5"/></symbol>
 <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8V3"/><path d="M8 21v-7h8v7"/></symbol>
 <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
 <symbol id="i-test" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/></symbol>
@@ -586,7 +589,7 @@ const TOOLS = [
 	["insertUnorderedList", "ul", "Bullet list"], ["insertOrderedList", "ol", "Numbered list"], ["quote", "quote", "Quote"], "|",
 	["justifyLeft", "align-left", "Line up on the left"], ["justifyCenter", "align-center", "Centre"], "|",
 	["link", "link", "Add a link"], ["unlink", "unlink", "Take the link off"], ["image", "image", "Add a picture"], ["button", "btn", "Add a button"], ["divider", "minus", "Add a line"], "|",
-	["name", "user", "Put in the reader's first name"], ["removeFormat", "eraser", "Clear the formatting"],
+	["name", "user", "Put in the reader's first name"], ["referral", "gift", "Add a share with friends box (referrals)"], ["removeFormat", "eraser", "Clear the formatting"],
 ];
 async function editor(id, kind) {
 	const signal = view.signal;
@@ -689,6 +692,7 @@ async function editor(id, kind) {
 		if (cmd === "quote") return exec("formatBlock", "<blockquote>");
 		if (cmd === "name") return exec("insertText", "{{first_name|there}}");
 		if (cmd === "divider") return insert("<hr><p><br></p>");
+		if (cmd === "referral") { const col = esc(c.colour || "#a3195b"); return insert(`<p><b>Enjoying this?</b> Share it with a friend. Friends you've brought so far: {{referral_count}}.</p><table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px"><tr><td style="background:${col};border-radius:8px"><a href="{{referral_url}}" style="display:inline-block;padding:14px 24px;font:600 16px Helvetica,Arial,sans-serif;color:#ffffff;text-decoration:none">Share with friends</a></td></tr></table><p><br></p>`); }
 		if (cmd === "link") {
 			const m = modal(`<h2>Add a link</h2><label for="lu">Web address</label><input id="lu" placeholder="https://..." value="https://"><p class="hint">Select some words first to turn them into the link.</p><div class="row" style="margin-top:14px"><button class="btn" id="lgo">${icon("link")}Add link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			$("#lu", m).focus();
@@ -965,7 +969,7 @@ async function listView(id, status = "all") {
 	if (!TABS.some((t) => t[0] === status)) status = "all";
 	const q = { list: id, status, q: "", page: 0 };
 	main.innerHTML = `<a class="crumb" href="#lists">${icon("back")}Back to lists</a>
-	<div class="row"><h1 class="grow">List: ${esc(l.name)}</h1><button class="btn ghost small" id="form">${icon("code")}Subscribe form</button><button class="btn ghost small" id="fields">${icon("text")}Custom fields</button><button class="btn ghost small" id="lset">${icon("cog")}List settings</button></div>
+	<div class="row"><h1 class="grow">List: ${esc(l.name)}</h1><button class="btn ghost small" id="form">${icon("code")}Subscribe form</button><button class="btn ghost small" id="refs">${icon("gift")}Referrals</button><button class="btn ghost small" id="fields">${icon("text")}Custom fields</button><button class="btn ghost small" id="lset">${icon("cog")}List settings</button></div>
 	${l.description ? `<p class="muted" style="margin:6px 0 0">${esc(l.description)}</p>` : ""}
 	<div class="row toolbar-row"><button class="btn" id="add">${icon("plus")}Add subscribers</button><button class="btn ghost" id="del">${icon("trash")}Delete subscribers</button><button class="btn ghost" id="mass">${icon("x")}Mass unsubscribe</button><a class="btn ghost" href="/api/export?list=${l.id}">${icon("download")}Export subscribers</a><span class="grow"></span><input id="q" class="search" placeholder="Search name or email" aria-label="Search name or email"></div>
 	<nav class="subtabs">${TABS.map(([k, n, c]) => `<a href="#list/${id}/${k}" class="${k === status ? "on" : ""}">${n} <span class="n">${num(c)}</span></a>`).join("")}</nav>
@@ -986,6 +990,7 @@ async function listView(id, status = "all") {
 	};
 	let t; $("#q").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.q = e.target.value; q.page = 0; load(); }, 300); };
 	$("#lset").onclick = $("#fields").onclick = () => listForm(l, ls, b);
+	$("#refs").onclick = () => referrals(l);
 	$("#form").onclick = () => modal(`<h2>Subscribe form</h2><label>Sign up page</label><div class="lrow"><code class="copy"><a class="grow" href="${esc(l.url)}" target="_blank">${esc(l.url)}</a></code><button class="btn ghost small" data-copy="${esc(l.url)}">${icon("copy")}Copy</button></div>
 		<label>Form for your website</label><p class="hint">Paste it into any page, and style it to match your site.</p><pre class="codebox">${esc(l.embed)}</pre><div class="row"><button class="btn" data-copy="${esc(l.embed)}">${icon("copy")}Copy the code</button><button class="btn ghost" data-close>${icon("x")}Close</button></div>`);
 	$("#add").onclick = () => {
@@ -1092,6 +1097,31 @@ async function lists() {
 	$("#add").onclick = () => listForm({ name: "", description: "", double_optin: 1, fields: [], also_lists: [] }, ls, b);
 	$$("[data-edit]").forEach((x) => (x.onclick = () => listForm(ls.find((l) => l.id === x.closest("tr").dataset.id), ls, b)));
 	$$("[data-del]").forEach((x) => (x.onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Delete this list? The people on it stay on your other lists.")) return; await api(`/api/lists/${x.closest("tr").dataset.id}`, { method: "DELETE" }); route(); })));
+}
+// Referrals: readers share their own link, and rewards go out by email when enough friends sign up.
+async function referrals(l) {
+	const r = await api(`/api/lists/${l.id}/referrals`);
+	const s = r.settings;
+	const rows = s.rewards.length ? s.rewards : [{ at: 3, name: "", subject: "", text: "", link: "" }];
+	const rewardHtml = (x) => `<div class="rwd"><div class="rwtop"><div><label>Friends it takes</label><input type="number" min="1" max="100000" data-k="at" value="${esc(x.at)}"></div><div class="grow"><label>The reward <span class="hint">(shown on their referral page)</span></label><input data-k="name" value="${esc(x.name)}" placeholder="Such as our spring guide"></div><button type="button" class="icon-btn" data-rm title="Remove this reward" aria-label="Remove this reward">${icon("trash")}</button></div>
+		<label>Email subject</label><input data-k="subject" value="${esc(x.subject)}" placeholder="Such as Here's your spring guide">
+		<label>Message</label><textarea data-k="text" rows="3" placeholder="Thank you for sharing! Here's your reward.">${esc(x.text)}</textarea>
+		<label>Link for a button <span class="hint">(optional, such as a download)</span></label><input data-k="link" value="${esc(x.link || "")}" placeholder="https://..."></div>`;
+	const m = modal(`<h2>Referrals: ${esc(l.name)}</h2><p class="muted">Each reader gets their own link to share. When friends sign up through it and confirm, they count towards the rewards you set here, and we email each reward automatically. Only people new to the list count.</p>
+	<label class="switch" style="margin:10px 0"><input type="checkbox" id="rfOn" ${s.on ? "checked" : ""}><span></span>Referrals are on</label>
+	${r.double_optin ? "" : `<p class="hwarn">${icon("alert")}<span>This list doesn't ask people to confirm by email, so made up addresses could count. We suggest switching on confirming in List settings.</span></p>`}
+	<h3>How it's going</h3><div class="rfstats"><div><b>${num(r.referred)}</b><span>Friends signed up</span></div><div><b>${num(r.rewards_sent)}</b><span>Rewards sent</span></div></div>
+	${r.top.length ? `<div class="scroll"><table class="data"><thead><tr><th>Top sharers</th><th>Friends</th></tr></thead><tbody>${r.top.map((t) => `<tr><td>${esc(t.name ? `${t.name} (${t.email})` : t.email)}</td><td><b>${num(t.n)}</b></td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Nobody's shared it yet.</p>`}
+	<h3 style="margin-top:22px">Rewards</h3><div id="rfList">${rows.map(rewardHtml).join("")}</div><button type="button" class="btn ghost small" id="rfAdd">${icon("plus")}Add another reward</button>
+	<h3 style="margin-top:22px">Put it in your emails</h3><p class="hint">In the email editor, press ${icon("gift")} to add a "Share with friends" box. Or use <code>{{referral_url}}</code> for each reader's own referral page and <code>{{referral_count}}</code> for how many friends they've brought.</p>
+	<p class="err" id="rfErr"></p><div class="row"><button class="btn" id="rfSave">${icon("save")}Save</button><button class="btn ghost" data-close>${icon("x")}Close</button></div>`);
+	const list = $("#rfList", m);
+	list.addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) b.closest(".rwd").remove(); });
+	$("#rfAdd", m).onclick = () => { const last = [...$$(".rwd [data-k=at]", m)].map((i) => Number(i.value) || 0); list.insertAdjacentHTML("beforeend", rewardHtml({ at: Math.max(0, ...last) + 2, name: "", subject: "", text: "", link: "" })); };
+	$("#rfSave", m).onclick = (e) => run(e.currentTarget, async () => {
+		const rewards = [...$$(".rwd", m)].map((d) => Object.fromEntries([...$$("[data-k]", d)].map((i) => [i.dataset.k, i.value]))).filter((x) => x.name.trim());
+		try { await api(`/api/lists/${l.id}/referrals`, { body: { on: $("#rfOn", m).checked, rewards } }); m.remove(); toast($("#rfOn", m).checked ? "Saved. Referrals are on." : "Saved"); } catch (err) { $("#rfErr", m).textContent = err.message; }
+	});
 }
 function listForm(l, ls, b) {
 	const others = ls.filter((x) => x.id !== l.id);

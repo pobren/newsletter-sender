@@ -72,6 +72,9 @@ export interface Look {
 	manageUrl?: string | null;
 	/** A page to share this email with a friend (it signs them up, never emails them). */
 	forwardUrl?: string | null;
+	/** The reader's own referral page, for {{referral_url}}, and how many friends they've brought, for {{referral_count}}. */
+	referralUrl?: string | null;
+	referralCount?: number;
 	/** Which of those links the footer shows: 1 = manage, 2 = forward. */
 	footerLinks?: number;
 	/** Opens and clicks, each only when switched on: links go through `link`, and `pixel` is an invisible picture. */
@@ -177,7 +180,8 @@ export function renderEmail(subject: string, content: Content, look: Look, reade
 	const colour = /^#[0-9a-f]{6}$/i.test(look.colour) ? look.colour : "#a3195b";
 	let body = foreignTags(sanitise(typeof content === "string" ? content : blocksToHtml(content, colour)));
 	const whole = isDocument(body);
-	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? "")).replace(/\{\{\s*manage_url\s*\}\}/gi, esc(look.manageUrl ?? look.unsubscribeUrl)).replace(/\{\{\s*forward_url\s*\}\}/gi, esc(look.forwardUrl ?? look.webUrl ?? ""));
+	const specials = (h: string) => h.replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, esc(look.unsubscribeUrl)).replace(/\{\{\s*web_url\s*\}\}/gi, esc(look.webUrl ?? "")).replace(/\{\{\s*manage_url\s*\}\}/gi, esc(look.manageUrl ?? look.unsubscribeUrl)).replace(/\{\{\s*forward_url\s*\}\}/gi, esc(look.forwardUrl ?? look.webUrl ?? ""))
+		.replace(/\{\{\s*referral_url\s*\}\}/gi, esc(look.referralUrl ?? look.forwardUrl ?? look.webUrl ?? "")).replace(/\{\{\s*referral_count\s*\}\}/gi, String(look.referralCount ?? 0));
 	// The plain text version shows the real links, not the click counting ones.
 	const bodyText = htmlToText(mergeHtml(specials(body), reader));
 	// Every web link, counted when clicks are on. Links with merge tags in them stay as they are.

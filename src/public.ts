@@ -11,6 +11,7 @@ import { loadProvider, sealSecret } from "./settings.ts";
 import { turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkCampaign } from "./health.ts";
 import { fireSafely } from "./automations.ts";
+import { dueRewards, parseReferrals, referralBody, refFrom } from "./referrals.ts";
 
 export { csvLine };
 
@@ -45,14 +46,14 @@ interface Field {
 export const listFields = (l: ListRow): Field[] => (safeJson(l.fields) ?? []).filter((f: any) => f && typeof f.key === "string" && typeof f.label === "string");
 
 /** The sign up form, as a hosted page or as code to paste into any website. */
-export function formHtml(l: ListRow, action: string, siteKey: string | null): string {
+export function formHtml(l: ListRow, action: string, siteKey: string | null, ref?: string | null): string {
 	const fields = listFields(l)
 		.map((f) => `<label for="f_${esc(f.key)}">${esc(f.label)}</label><input id="f_${esc(f.key)}" name="${esc(f.key)}"${f.required ? " required" : ""}>`)
 		.join("");
 	return `<form method="post" action="${esc(action)}">
 <label for="ns_email">Your email address</label><input id="ns_email" type="email" name="email" required autocomplete="email">
 <label for="ns_name">Your name (optional)</label><input id="ns_name" name="name" autocomplete="name">${fields}
-<div class="hp" aria-hidden="true"><label for="ns_hp">Leave this empty</label><input id="ns_hp" name="hp" tabindex="-1" autocomplete="off"></div>
+<div class="hp" aria-hidden="true"><label for="ns_hp">Leave this empty</label><input id="ns_hp" name="hp" tabindex="-1" autocomplete="off"></div>${ref ? `<input type="hidden" name="r" value="${esc(ref)}">` : ""}
 ${siteKey ? `<div class="cf-turnstile" data-sitekey="${esc(siteKey)}" data-response-field-name="ts" style="margin-top:16px"></div>` : ""}
 <button type="submit">${ICON_SEND}Subscribe</button></form>`;
 }
@@ -81,7 +82,7 @@ async function tooMany(db: D1Database, ip: string): Promise<boolean> {
 }
 
 /** Someone signing up, from the hosted page, a form on any website or the API. */
-export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false): Promise<{ ok: true; status: "pending" | "active" | "already" | "elsewhere" | "blocked" } | { error: string }> {
+export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: unknown; name?: unknown; fields?: Record<string, unknown> }, source: string, confirmed = false, referrer: string | null = null): Promise<{ ok: true; status: "pending" | "active" | "already" | "elsewhere" | "blocked" } | { error: string }> {
 	const db = env.DB;
 	const email = cleanEmail(input.email);
 	if (!email) return { error: "Please check your email address." };
@@ -107,9 +108,11 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 	if (b.one_list && (await db.prepare("SELECT 1 FROM memberships WHERE subscriber_id = ? AND list_id != ? AND status IN ('active', 'pending')").bind(s.id, l.id).first())) return { ok: true, status: "elsewhere" };
 	const direct = confirmed || !l.double_optin;
 	const token = direct ? null : newId(16);
-	await db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, confirm_token, created_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+	// A referral counts only for someone new to this list, brought by someone else on the same brand.
+	const by = referrer && !m && referrer !== s.id && (await db.prepare("SELECT 1 FROM subscribers WHERE id = ? AND brand_id = ?").bind(referrer, b.id).first()) ? referrer : null;
+	await db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, confirm_token, created_at, confirmed_at, referred_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (list_id, subscriber_id) DO UPDATE SET status = excluded.status, source = excluded.source, confirm_token = excluded.confirm_token, confirmed_at = excluded.confirmed_at, left_at = NULL`)
-		.bind(l.id, s.id, direct ? "active" : "pending", source, token, now, direct ? now : null).run();
+		.bind(l.id, s.id, direct ? "active" : "pending", by ? "referral" : source, token, now, direct ? now : null, by).run();
 	// The other lists this list's form adds people to. They're confirmed along with this one.
 	const also: string[] = b.one_list ? [] : (safeJson(l.also_lists) ?? []).filter((x: unknown) => typeof x === "string");
 	if (also.length) await db.batch(also.map((id) => db.prepare(`INSERT INTO memberships (list_id, subscriber_id, status, source, created_at, confirmed_at) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM lists WHERE id = ? AND brand_id = ?)
@@ -118,6 +121,7 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 	if (s.suppressed === "bounced") await db.prepare("UPDATE subscribers SET suppressed = NULL, suppressed_at = NULL WHERE id = ?").bind(s.id).run();
 	await logEvent(db, b.id, direct ? "subscribed" : "signed_up", s.id, null, `${l.name} (${source})`).run();
 	if (direct) for (const id of [l.id, ...also]) await fireSafely(db, b.id, s.id, { kind: "joined", list: id });
+	if (direct && by) await creditReferral(env, l.id, s.id);
 	const base = linkBase(b, await origin(db));
 	if (!direct) await oneOff(env, b, email, `Please confirm: ${l.name}`, [`Hello${name ? ` ${name.split(" ")[0]}` : ""},`, `Please confirm you'd like to get ${l.name === b.name ? b.name : `${l.name} from ${b.name}`}. Just press the button below.`, `If you didn't ask for this, you can ignore this email and you won't hear from us again.`], { label: "Yes, sign me up", href: `${base}/c/${token}` });
 	else if (l.welcome_subject && l.welcome_text) await oneOff(env, b, email, l.welcome_subject, l.welcome_text.split(/\n{2,}/));
@@ -147,6 +151,39 @@ export async function oneOff(env: Env, b: BrandRow, to: string, subject: string,
 	return r.ok;
 }
 
+/**
+ * Someone brought by a referral is now on the list: send the person who referred them any rewards they've just
+ * earned. Never stops the sign up if something goes wrong.
+ */
+export async function creditReferral(env: Env, listId: string, subscriberId: string): Promise<void> {
+	try {
+		const db = env.DB;
+		const row = await db.prepare("SELECT m.referred_by, l.referrals, l.name, l.brand_id FROM memberships m JOIN lists l ON l.id = m.list_id WHERE m.list_id = ? AND m.subscriber_id = ?").bind(listId, subscriberId).first<{ referred_by: string | null; referrals: string | null; name: string; brand_id: string }>();
+		if (!row?.referred_by) return;
+		const r = parseReferrals(row.referrals);
+		if (!r.on || !r.rewards.length) return;
+		const who = await db.prepare("SELECT s.id, s.email, s.suppressed FROM subscribers s JOIN memberships m ON m.subscriber_id = s.id WHERE s.id = ? AND m.list_id = ? AND m.status = 'active'").bind(row.referred_by, listId).first<{ id: string; email: string; suppressed: string | null }>();
+		if (!who || who.suppressed) return;
+		const n = await db.prepare("SELECT COUNT(*) AS n FROM memberships WHERE list_id = ? AND referred_by = ? AND status = 'active'").bind(listId, who.id).first<{ n: number }>();
+		const given = (await db.prepare("SELECT at FROM referral_rewards WHERE list_id = ? AND subscriber_id = ?").bind(listId, who.id).all<{ at: number }>()).results.map((x) => x.at);
+		const due = dueRewards(r, n?.n ?? 0, given);
+		if (!due.length) return;
+		const b = await db.prepare("SELECT * FROM brands WHERE id = ?").bind(row.brand_id).first<BrandRow>();
+		if (!b) return;
+		for (const x of due) {
+			// Claim it first, so two friends confirming at once can't send the same reward twice.
+			const claimed = await db.prepare("INSERT INTO referral_rewards (list_id, subscriber_id, at, sent_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING").bind(listId, who.id, x.at, iso()).run();
+			if (!claimed.meta.changes) continue;
+			const sent = await oneOff(env, b, who.email, x.subject, x.text.split(/\n{2,}/), x.link ? { label: "Get your reward", href: x.link } : undefined);
+			// Not sent: let it go, so the next friend who confirms tries again.
+			if (!sent) { await db.prepare("DELETE FROM referral_rewards WHERE list_id = ? AND subscriber_id = ? AND at = ?").bind(listId, who.id, x.at).run(); continue; }
+			await logEvent(db, b.id, "reward", who.id, null, `${row.name}: ${x.name} (${x.at} ${x.at === 1 ? "friend" : "friends"})`).run();
+		}
+	} catch (e) {
+		console.error("Referral reward failed", e);
+	}
+}
+
 /** An open or click: start any automations it triggers (never stopping the reader getting where they're going). */
 async function fireForCampaign(db: D1Database, campaign: string, subscriber: string, e: Parameters<typeof fireSafely>[3]): Promise<void> {
 	const c = await db.prepare("SELECT brand_id FROM campaigns WHERE id = ?").bind(campaign).first<{ brand_id: string }>().catch(() => null);
@@ -174,20 +211,22 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		if (request.method === "POST") {
 			const wantsJson = (request.headers.get("accept") ?? "").includes("application/json") || (request.headers.get("content-type") ?? "").includes("application/json");
 			const form: Record<string, unknown> = wantsJson ? ((await request.json().catch(() => ({}))) as any) : Object.fromEntries(await request.formData().catch(() => new FormData()));
-			const fail = (msg: string, status = 400) => (wantsJson ? Response.json({ error: msg }, { status, headers: cors }) : html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1><p class="err">${esc(msg)}</p>${formHtml(l, `/s/${l.slug}`, siteKey)}</div>`, { turnstile: !!siteKey }), status));
+			const fail = (msg: string, status = 400) => (wantsJson ? Response.json({ error: msg }, { status, headers: cors }) : html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1><p class="err">${esc(msg)}</p>${formHtml(l, `/s/${l.slug}`, siteKey, typeof form.r === "string" ? form.r : null)}</div>`, { turnstile: !!siteKey }), status));
 			if (form.hp) return wantsJson ? Response.json({ ok: true }, { headers: cors }) : Response.redirect(`${url.origin}/s/${l.slug}?done=1`, 303);
 			if (await tooMany(db, ip)) return fail("Lots of sign ups from here just now. Please try again in a few minutes.", 429);
 			if (!(await turnstileOk(env, request, form.ts ?? form["cf-turnstile-response"]))) return fail("We couldn't check you're a person. Please try again.");
 			const fields: Record<string, unknown> = {};
 			for (const f of listFields(l)) fields[f.key] = form[f.key];
-			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? new URL(request.headers.get("referer")!).hostname : "form");
+			const referrer = form.r ? await refFrom(await sealSecret(db), form.r) : null;
+			const r = await signUp(env, l, b, { email: form.email, name: form.name, fields }, request.headers.get("referer") ? new URL(request.headers.get("referer")!).hostname : "form", false, referrer);
 			if ("error" in r) return fail(r.error);
 			if (wantsJson) return Response.json({ ok: true, confirm: r.status === "pending" }, { headers: cors });
 			return Response.redirect(l.thanks_url || `${url.origin}/s/${l.slug}?done=${r.status === "pending" ? 1 : 2}`, 303);
 		}
 		const done = url.searchParams.get("done");
 		if (done) return html(publicPage(b, l.name, `<div class="card"><h1>${done === "1" ? "Nearly there" : "You're on the list"}</h1><p>${done === "1" ? "Please check your inbox and press the button in the email we've just sent, so we know it's really you." : `Thanks for signing up to ${esc(l.name)}.`}</p></div>`));
-		return html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1>${l.description ? `<p>${esc(l.description)}</p>` : ""}${formHtml(l, `/s/${l.slug}`, siteKey)}<p class="small" style="margin-top:16px">You can unsubscribe at any time with the link in every email.</p></div>`, { index: true, turnstile: !!siteKey }));
+		const ref = /^[0-9a-f]{26}$/.test(url.searchParams.get("r") ?? "") ? url.searchParams.get("r") : null;
+		return html(publicPage(b, l.name, `<div class="card"><h1>${esc(l.name)}</h1>${ref ? `<p class="small">A friend thought you'd like this.</p>` : ""}${l.description ? `<p>${esc(l.description)}</p>` : ""}${formHtml(l, `/s/${l.slug}`, siteKey, ref)}<p class="small" style="margin-top:16px">You can unsubscribe at any time with the link in every email.</p></div>`, { index: true, turnstile: !!siteKey }));
 	}
 	if (request.method === "OPTIONS" && /^\/s\//.test(path)) return new Response(null, { status: 204, headers: cors });
 
@@ -207,6 +246,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 		]);
 		await logEvent(db, b.id, "subscribed", m.subscriber_id, null, `${m.list_name} (confirmed)`).run();
 		for (const id of [m.list_id, ...((safeJson(m.also_lists) ?? []) as string[])]) await fireSafely(db, b.id, m.subscriber_id, { kind: "joined", list: id });
+		if (m.referred_by) await creditReferral(env, m.list_id, m.subscriber_id);
 		const s = await db.prepare("SELECT email FROM subscribers WHERE id = ?").bind(m.subscriber_id).first<{ email: string }>();
 		if (s && m.welcome_subject && m.welcome_text) await oneOff(env, b, s.email, m.welcome_subject, String(m.welcome_text).split(/\n{2,}/));
 		return html(publicPage(b, "Confirmed", `<div class="card"><h1>You're on the list</h1><p>Thanks for confirming. ${esc(m.list_name)} will arrive in your inbox.</p></div>`));
@@ -286,6 +326,22 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			<p style="margin:22px 0 8px;font-weight:600">${one ? "The list you'd like" : "The emails you'd like"}</p>${lists.map(row).join("")}${one ? `<label class="opt"><input type="radio" name="list" value=""><span><b>None</b></span></label>` : ""}
 			${s.suppressed ? `<p class="small">We can't email this address at the moment (it bounced or was marked as spam), so lists can't be turned back on here.</p>` : ""}
 			<div class="btns"><button type="submit">${ICON_CHECK}Save</button><a class="btn ghost" href="/u/${esc(s.token)}">${ICON_X}Unsubscribe from everything</a></div></form></div>`));
+	}
+
+	// -- Referrals: the reader's own link to share, and how many friends they've brought ------------------------
+	const rm = /^\/r\/(?:([a-z0-9-]{1,60})\/([0-9a-f]{26})|test)\/?$/.exec(path);
+	if (rm) {
+		const found = rm[1] ? await listBySlug(db, rm[1]) : null;
+		const brand = found?.b ?? (await brandForHost(db, url));
+		if (!brand) return null;
+		if (!rm[1]) return html(publicPage(brand, "Share", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link opens the reader's own referral page, with their link to share and how many friends they've brought.</p></div>`));
+		const who = found ? await refFrom(await sealSecret(db), rm[2]) : null;
+		const r = found ? parseReferrals(found.l.referrals) : null;
+		const on = who && found && r?.on ? await db.prepare("SELECT 1 FROM memberships WHERE list_id = ? AND subscriber_id = ? AND status = 'active'").bind(found.l.id, who).first() : null;
+		if (!found || !who || !r?.on || !on) return html(publicPage(brand, "Share", `<div class="card"><h1>Referrals aren't open just now</h1><p>Thanks for wanting to share. You can still send friends to the sign up page.</p>${found ? `<a class="btn" href="/s/${esc(found.l.slug)}">${ICON_SEND}Go to the sign up page</a>` : ""}</div>`), 404);
+		const n = await db.prepare("SELECT COUNT(*) AS n FROM memberships WHERE list_id = ? AND referred_by = ? AND status = 'active'").bind(found.l.id, who).first<{ n: number }>();
+		const link = `${linkBase(found.b, await origin(db, request))}/s/${found.l.slug}?r=${rm[2]}`;
+		return html(publicPage(found.b, `Share ${found.l.name}`, referralBody({ listName: found.l.name, brandName: found.b.name, link, count: n?.n ?? 0, settings: r })));
 	}
 
 	// -- Forward to a friend: the email on a page with share buttons, and a sign up button for the friend ---------------
