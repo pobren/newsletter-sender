@@ -1247,7 +1247,7 @@ async function blocklist(type) {
 }
 
 // -- Settings: everything else lives here ----------------------------------------------------------------------
-const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["account", "Account", "user"]];
+const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
 async function settings(section) {
 	const sec = SETTINGS.some((s) => s[0] === section) ? section : "company";
 	const head = `<h1>Settings</h1><nav class="subtabs">${SETTINGS.map(([k, n, i]) => `<a href="#settings/${k}" class="${k === sec ? "on" : ""}">${icon(i)}${n}</a>`).join("")}</nav>`;
@@ -1307,6 +1307,35 @@ async function settings(section) {
 				catch (err) { m.querySelector("#re").textContent = err.message; }
 			});
 		});
+	}
+	if (sec === "api") {
+		const s = await api("/api/developer");
+		const when = (t) => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Never";
+		const LABEL = { "subscriber.subscribed": "Someone subscribes", "subscriber.pending": "Someone signs up and needs to confirm", "subscriber.unsubscribed": "Someone unsubscribes", "subscriber.bounced": "An email bounces", "subscriber.complained": "Someone marks you as spam", "campaign.started": "A campaign starts sending", "campaign.sent": "A campaign finishes", "campaign.paused": "A campaign is paused" };
+		main.innerHTML = `${head}<div class="card"><h2>API keys</h2>
+		<p class="muted">Add subscribers from your website or shop, make draft campaigns and send one off emails, all from your own code. Send the key in the Authorization header. Keep keys on your server, never in a web page.</p>
+		<label>Your API address</label><code class="row" style="display:flex;gap:8px;align-items:center"><span class="grow">${esc(s.base)}</span>${copyBtn(s.base)}</code>
+		${s.keys.length ? `<table class="data" style="margin-top:14px"><thead><tr><th>Name</th><th>Key</th><th>Made</th><th>Last used</th><th></th></tr></thead><tbody>${s.keys.map((k) => `<tr><td>${esc(k.name)}</td><td><code>ns_live_…${esc(k.tail)}</code></td><td>${when(k.created_at)}</td><td>${when(k.last_used_at)}</td><td style="text-align:right"><button class="btn ghost small" data-delkey="${k.id}">${icon("trash")}Remove</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">No keys yet.</p>`}
+		${s.keys.length < s.maxKeys ? `<div class="row" style="margin-top:14px"><input id="kname" class="grow" placeholder="What it's for, such as My website" style="width:auto"><button class="btn" id="kmake">${icon("plus")}Make a key</button></div>` : ""}
+		<div class="row" style="margin-top:14px"><a class="btn ghost" href="${esc(s.docs)}" target="_blank" rel="noopener">${icon("ext")}API guide</a></div></div>
+		<div class="card"><h2>Webhooks</h2>
+		<p class="muted">We tell your own system the moment something happens, such as someone subscribing. Each one is signed so you can check it came from us. One that fails 10 times in a row is switched off until you turn it back on.</p>
+		${s.hooks.length ? `<table class="data"><thead><tr><th>Address</th><th>Events</th><th>Last sent</th><th></th></tr></thead><tbody>${s.hooks.map((h) => `<tr><td style="word-break:break-all">${esc(h.url)}${h.active ? "" : `<br><span class="err">Switched off after 10 failures</span>`}</td><td>${h.events.length}</td><td>${h.last_at ? `${when(h.last_at)} (${h.last_status || "no answer"})` : "Not yet"}</td><td class="row" style="justify-content:flex-end;gap:8px">${h.active ? "" : `<button class="btn ghost small" data-hookon="${h.id}">${icon("play")}Turn on</button>`}<button class="btn ghost small" data-hooktest="${h.id}">${icon("send")}Send a test</button><button class="btn ghost small" data-delhook="${h.id}">${icon("trash")}Remove</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">No webhooks yet.</p>`}
+		${s.hooks.length < s.maxHooks ? `<details class="embed" style="margin-top:14px"><summary>${icon("plus")}Add a webhook</summary>
+		<label for="hurl">Address that gets the events</label><input id="hurl" type="url" placeholder="https://yoursite.com/hooks/newsletter">
+		<label>Events</label>${s.events.map((e) => `<label class="check"><input type="checkbox" name="hev" value="${e}" ${e.startsWith("subscriber.") ? "checked" : ""}> <span>${esc(LABEL[e] || e)} <span class="hint">(${e})</span></span></label>`).join("")}
+		<p class="err" id="he"></p><div class="row"><button class="btn" id="hadd">${icon("plus")}Add webhook</button></div></details>` : ""}</div>`;
+		const showSecret = (title, value, note) => modal(`<h2>${title}</h2><p>${note}</p><code class="row" style="display:flex;gap:8px;align-items:center;word-break:break-all"><span class="grow">${esc(value)}</span>${copyBtn(value)}</code><div class="row" style="margin-top:14px"><button class="btn" data-close>${icon("check")}I've copied it</button></div>`);
+		const again = () => settings("api");
+		$("#kmake") && ($("#kmake").onclick = (e) => run(e.currentTarget, async () => { const r = await api("/api/developer/keys", { body: { name: $("#kname").value } }); await again(); showSecret("Your new API key", r.key, "Copy it now and keep it somewhere safe. We only keep a fingerprint of it, so we can't show it again."); }));
+		main.querySelectorAll("[data-delkey]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/developer/keys/${b.dataset.delkey}`, { method: "DELETE" }); toast("Key removed. Anything using it stops working now."); again(); }));
+		main.querySelectorAll("[data-delhook]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/developer/hooks/${b.dataset.delhook}`, { method: "DELETE" }); toast("Webhook removed"); again(); }));
+		main.querySelectorAll("[data-hookon]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/developer/hooks/${b.dataset.hookon}/on`, { body: {} }); toast("Turned back on"); again(); }));
+		main.querySelectorAll("[data-hooktest]").forEach((b) => b.onclick = () => run(b, async () => { const r = await api(`/api/developer/hooks/${b.dataset.hooktest}/test`, { body: {} }); toast(r.ok ? `Test sent, your system answered ${r.status}` : `Your system answered ${r.status || "nothing"}. Please check the address.`); again(); }));
+		$("#hadd") && ($("#hadd").onclick = (e) => run(e.currentTarget, async () => {
+			try { const r = await api("/api/developer/hooks", { body: { url: $("#hurl").value, events: [...main.querySelectorAll("[name=hev]:checked")].map((x) => x.value) } }); await again(); showSecret("Your webhook signing secret", r.secret, "Use it to check each webhook really came from us. Copy it now: we can't show it again."); }
+			catch (err) { $("#he").textContent = err.message; }
+		}));
 	}
 	if (sec === "account") {
 		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show getting started again</button>` : ""}</div></div>

@@ -3,6 +3,7 @@
 //
 //   /                     the dashboard (set-up, sign in and the app are one page: ui.ts)
 //   /api/*                its JSON (api.ts)
+//   /api/v1/*             the public API, with keys made under Settings, API (v1.ts)
 //   /s/<list>             sign up forms (public.ts), /c/<code> confirming, /u/<code> unsubscribing
 //   /archive              past issues, when the archive is on
 //   /img/*                pictures used in emails (R2)
@@ -22,6 +23,7 @@ import { handlePublic } from "./public.ts";
 import { consume, startDue } from "./sending.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
+import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
 
 const VERSION = "0.1.0";
 
@@ -44,6 +46,14 @@ export default {
 		if (!env.DB) return new Response("Newsletter Sender needs its D1 database: add a D1 binding called DB (see the README).", { status: 500 });
 		await ensureSchema(env.DB);
 
+		if (path === "/api/v1" || path.startsWith("/api/v1/")) {
+			try {
+				return withHeaders(await handleV1(request, env, url), { "x-frame-options": "DENY" });
+			} catch (e) {
+				console.error(e);
+				return withHeaders(Response.json({ error: "Something went wrong on our side. Please try again.", docs: DOCS }, { status: 500 }));
+			}
+		}
 		if (path.startsWith("/api/")) {
 			try {
 				return withHeaders(await handleApi(request, env, url), { "x-frame-options": url.pathname.endsWith("/preview") ? "SAMEORIGIN" : "DENY" });
@@ -79,6 +89,7 @@ export default {
 			startDue(env),
 			runDue(env).catch((e) => console.error("automations", e)),
 			backupIfDue(env).catch((e) => console.error("backup", e)),
+			dispatchHooks(env).catch((e) => console.error("webhooks", e)),
 			// Sign up rate limits only matter for ten minutes.
 			env.DB.prepare("DELETE FROM meta WHERE key LIKE 'rl:%' AND key < ?").bind(`rl:${Math.floor(Date.now() / 600_000) - 1}:`).run(),
 		]));

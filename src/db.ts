@@ -186,6 +186,9 @@ const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS links (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, url TEXT NOT NULL, clicks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (campaign_id, n))`,
 	// Who clicked which link (one row per person per link), for unique clicks and "add these people to a list".
 	`CREATE TABLE IF NOT EXISTS link_clicks (campaign_id TEXT NOT NULL, n INTEGER NOT NULL, send_id INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, n, send_id))`,
+	// The public API: keys (only their hash is kept) and signed webhooks (the secret is sealed).
+	`CREATE TABLE IF NOT EXISTS api_keys (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, name TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, tail TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT)`,
+	`CREATE TABLE IF NOT EXISTS webhooks (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, url TEXT NOT NULL, events TEXT NOT NULL, secret TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, failures INTEGER NOT NULL DEFAULT 0, last_status INTEGER, last_at TEXT, created_at TEXT NOT NULL)`,
 ];
 // Columns added after the first version. Each runs once; "duplicate column" means it's already there.
 const MIGRATIONS = [
@@ -212,7 +215,7 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN from_email TEXT",
 	"ALTER TABLE campaigns ADD COLUMN reply_to TEXT",
 ];
-const SCHEMA_VERSION = "11";
+const SCHEMA_VERSION = "12";
 
 let ready: Promise<void> | null = null;
 
