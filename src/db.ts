@@ -36,7 +36,11 @@ export interface AccountRow {
 	email: string;
 	name: string | null;
 	password: string | null;
-	role: "owner";
+	role: "owner" | "client";
+	/** A client's one brand (the owner has none: they see every brand). */
+	brand_id?: string | null;
+	/** A client's permissions as JSON (team.ts). */
+	limits?: string | null;
 	session_ver: number;
 	reset_token: string | null;
 	reset_until: string | null;
@@ -166,10 +170,9 @@ const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS sends (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, campaign_id TEXT NOT NULL, subscriber_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
 		message_id TEXT, error TEXT, sent_at TEXT, opened_at TEXT, clicked_at TEXT, UNIQUE (campaign_id, subscriber_id))`,
-	`CREATE INDEX IF NOT EXISTS sends_campaign_status ON sends (campaign_id, status)`,
-	`CREATE INDEX IF NOT EXISTS sends_message ON sends (message_id)`,
-	// Segments by activity: what each person did with recent emails.
-	`CREATE INDEX IF NOT EXISTS sends_subscriber ON sends (subscriber_id, sent_at)`,
+	// Segments by activity: what each person did with recent emails. Just the person, so marking an email sent doesn't
+	// touch it: every index is written to as well as the table, and D1 counts each of those writes.
+	`CREATE INDEX IF NOT EXISTS sends_sub ON sends (subscriber_id)`,
 	// Automations: "when someone does this, then do that", and where each person is up to in each one.
 	`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, brand_id TEXT NOT NULL, name TEXT NOT NULL, trigger TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS automation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, automation_id TEXT NOT NULL, subscriber_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, due_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', created_at TEXT NOT NULL, UNIQUE (automation_id, subscriber_id))`,
@@ -214,8 +217,16 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN from_name TEXT",
 	"ALTER TABLE campaigns ADD COLUMN from_email TEXT",
 	"ALTER TABLE campaigns ADD COLUMN reply_to TEXT",
+	// Client logins: which brand they can open, and what they're allowed to do there.
+	"ALTER TABLE accounts ADD COLUMN brand_id TEXT",
+	"ALTER TABLE accounts ADD COLUMN limits TEXT",
+	// Fewer writes per email (9 down to 4): batches find their rows by number, nothing looks up the sending service's
+	// message ID, and the activity index no longer needs the time it was sent.
+	"DROP INDEX IF EXISTS sends_campaign_status",
+	"DROP INDEX IF EXISTS sends_message",
+	"DROP INDEX IF EXISTS sends_subscriber",
 ];
-const SCHEMA_VERSION = "12";
+const SCHEMA_VERSION = "14";
 
 let ready: Promise<void> | null = null;
 

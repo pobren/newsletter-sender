@@ -57,6 +57,12 @@ ${siteKey ? `<div class="cf-turnstile" data-sitekey="${esc(siteKey)}" data-respo
 <button type="submit">${ICON_SEND}Subscribe</button></form>`;
 }
 
+/** The brand a public page belongs to: the one whose own domain for links this is, otherwise the first. */
+async function brandForHost(db: D1Database, url: URL): Promise<BrandRow | null> {
+	return (await db.prepare("SELECT * FROM brands WHERE track_domain = ?").bind(`https://${url.hostname}`).first<BrandRow>())
+		?? db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+}
+
 async function listBySlug(db: D1Database, slug: string) {
 	const l = await db.prepare("SELECT * FROM lists WHERE slug = ?").bind(slug).first<ListRow>();
 	const b = l ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(l.brand_id).first<BrandRow>() : null;
@@ -285,7 +291,8 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	// -- Forward to a friend: the email on a page with share buttons, and a sign up button for the friend ---------------
 	const fm = /^\/f\/(?:([0-9a-f]{16})\.([0-9a-f]{12})|test)\/?$/.exec(path);
 	if (fm) {
-		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		const owner = fm[1] ? await db.prepare("SELECT brand_id FROM campaigns WHERE id = ?").bind(fm[1]).first<{ brand_id: string }>() : null;
+		const b = owner ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(owner.brand_id).first<BrandRow>() : await brandForHost(db, url);
 		if (!b) return null;
 		if (!fm[1]) return html(publicPage(b, "Forward to a friend", `<div class="card"><h1>This was a test email</h1><p>In a real email, this link opens a page where the reader can share the email with a friend, and the friend can sign up.</p></div>`));
 		if ((await shareSig(await sealSecret(db), fm[1])) !== fm[2]) return null;
@@ -308,7 +315,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 
 	// -- The archive as an RSS feed, so readers and other apps can follow new issues -----
 	if (path === "/archive/feed.xml") {
-		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		const b = await brandForHost(db, url);
 		if (!b || !b.archive) return null;
 		const base = await origin(db, request);
 		const { results } = await db.prepare("SELECT subject, preheader, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 50").bind(b.id).all<CampaignRow>();
@@ -322,7 +329,9 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	// -- The archive of past issues ------------------------------------------------------
 	const am = /^\/archive(?:\/([a-z0-9-]{1,80}))?\/?$/.exec(path);
 	if (am) {
-		const b = await db.prepare("SELECT * FROM brands ORDER BY created_at LIMIT 1").first<BrandRow>();
+		// An issue's own page belongs to its brand; the list of issues to the brand whose domain for links this is.
+		const mine = am[1] ? await db.prepare("SELECT brand_id FROM campaigns WHERE slug = ?").bind(am[1]).first<{ brand_id: string }>() : null;
+		const b = mine ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(mine.brand_id).first<BrandRow>() : await brandForHost(db, url);
 		if (!b || !b.archive) return null;
 		if (!am[1]) {
 			const { results } = await db.prepare("SELECT subject, slug, started_at FROM campaigns WHERE brand_id = ? AND status IN ('sent', 'sending') AND public = 1 AND slug IS NOT NULL ORDER BY started_at DESC LIMIT 200").bind(b.id).all<CampaignRow>();
