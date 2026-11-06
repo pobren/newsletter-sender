@@ -18,7 +18,7 @@ import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { inlineStyleSheets } from "./pagecss.ts";
-import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
+import { addWorkerDomain, canAddWorkerDomains, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkEmail } from "./check.ts";
 import { pollsIn } from "./polls.ts";
@@ -388,7 +388,14 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cf: { cacheTtl: 0 } } as RequestInit).then((r) => (r.ok ? r.text() : ""), () => "");
 			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
 		}
-		return ok({ domain: host, hasToken: Boolean(await ownLinksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname, suggest: `news.${(brand.from_email ?? "").split("@")[1] || "yourdomain.com"}` });
+		// A saved links token works; the token from the Amazon SES wizard only counts if it can add Worker custom domains.
+		const linksTokenWorks = async () => {
+			if (await ownLinksToken(db, brand)) return true;
+			const t = (await loadProvider(db, brand))?.cfToken;
+			const domain = (brand.from_email ?? "").split("@")[1];
+			return Boolean(t && domain && (await canAddWorkerDomains(t, domain)));
+		};
+		return ok({ domain: host, hasToken: await linksTokenWorks(), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname, suggest: `news.${(brand.from_email ?? "").split("@")[1] || "yourdomain.com"}` });
 	}
 	// The public API's keys and webhooks (Settings, API).
 	if (path === "/api/developer" && method === "GET") {
