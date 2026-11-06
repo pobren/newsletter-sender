@@ -13,7 +13,7 @@ import { canSendFrom, installId, linksToken, loadProvider, saveLinksToken, saveP
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
-import { addWorkerDomain, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
+import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 
 const DEFAULT_BRAND = "My newsletter";
@@ -291,6 +291,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const zone = await findZone(token, hostname);
 			if ("error" in zone) return bad(zone.error);
 			if (!zone.accountId) return bad("Cloudflare didn't tell us which account that domain is in. Please try again.");
+			const problem = await linksNameProblem(token, zone, hostname);
+			if (problem) return bad(problem);
 			const service = await workerName(token, zone.accountId, url.hostname);
 			const r = await addWorkerDomain(token, zone, hostname, service);
 			if ("error" in r) return r.token ? Response.json({ error: r.error, needToken: true }, { status: 409 }) : bad(r.error);
@@ -304,7 +306,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const got = await fetch(`https://${host}/.well-known/newsletter-sender`, { cf: { cacheTtl: 0 } } as RequestInit).then((r) => (r.ok ? r.text() : ""), () => "");
 			return ok(got.trim() === want ? { live: true, message: `${host} is working. Every link in your emails now uses it.` } : { live: false, message: `Waiting for ${host}. Cloudflare usually takes a minute or two to make the certificate.` });
 		}
-		return ok({ domain: host, hasToken: Boolean(await linksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname });
+		return ok({ domain: host, hasToken: Boolean(await linksToken(db, brand)), tokenUrl: LINKS_TOKEN_URL, appHost: url.hostname, suggest: `news.${(brand.from_email ?? "").split("@")[1] || "yourdomain.com"}` });
 	}
 	// The public API's keys and webhooks (Settings, API).
 	if (path === "/api/developer" && method === "GET") {
