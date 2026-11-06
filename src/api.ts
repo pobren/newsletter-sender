@@ -8,7 +8,7 @@ import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { getBackup, KEEP, listBackups, makeBackup, restoreBackup } from "./backup.ts";
 import { firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
-import { isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
+import { addWebhook, isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
@@ -199,8 +199,14 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${c.provider}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${c.provider}. Your newsletters will go out the same way.</p>`, headers: {} });
 				if (!r.ok) return bad(`The test email didn't go: ${r.error}`);
 			}
+			// Add our bounce and complaint webhook in their account for them. If we can't, the page shows the address to add.
+			let hook: { ok: true } | { error: string } | null = null;
+			if (c.provider !== "ses") {
+				hook = await addWebhook(c, `${base}/hooks/${c.provider}/${brand.hook_key}`);
+				c.hookAdded = "ok" in hook;
+			}
 			await saveProvider(db, brand.id, c, rate);
-			return ok({ ok: true, rate });
+			return ok({ ok: true, rate, hook: hook && "error" in hook ? hook.error : null });
 		}
 		const setup = await sesSetup(db, brand.id);
 		return ok({
@@ -211,6 +217,15 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			ses: setup ? { ...setup, records: sesRecords(setup.domain, setup.tokens, setup.region) } : null,
 			cloudflareEmail: Boolean(env.EMAIL),
 		});
+	}
+	// Try adding the bounce webhook again (Settings, Sending), say after the owner swapped to a Full access key.
+	if (path === "/api/sending/webhook" && method === "POST") {
+		const p = await loadProvider(db, brand);
+		if (!p || p.provider === "ses") return bad("Please save your sending service first.");
+		const r = await addWebhook(p, `${await origin(db, request)}/hooks/${p.provider}/${brand.hook_key}`);
+		if ("error" in r) return bad(r.error);
+		await saveProvider(db, brand.id, { ...p, hookAdded: true }, brand.rate);
+		return ok();
 	}
 	// A Cloudflare token so we can add the Amazon SES DNS records ourselves.
 	if (path === "/api/sending/dns-host") {
