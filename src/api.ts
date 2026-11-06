@@ -16,6 +16,7 @@ import { canSendFrom, installId, linksToken, loadProvider, saveLinksToken, saveP
 import { sesAccount } from "./aws.ts";
 import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
+import { inlineStyleSheets } from "./pagecss.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
 import { checkEmail } from "./check.ts";
@@ -784,7 +785,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				return _m;
 			}
 		});
-		return ok({ html: sanitise(fixed), title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text)?.[1]?.trim() ?? "" });
+		return ok({ html: sanitise(await inlineStyleSheets(fixed, u)), title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(text)?.[1]?.trim() ?? "" });
 	}
 
 	// -- Automations ------------------------------------------------------------------------------------
