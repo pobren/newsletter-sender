@@ -47,11 +47,19 @@ export async function addRecords(token: string, zoneId: string, records: DnsReco
 	return { added, there, failed };
 }
 
-/** The Cloudflare page that makes a token with just DNS editing filled in. */
-export const TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }]))}&name=${encodeURIComponent("Newsletter Sender DNS")}`;
+/**
+ * The Cloudflare page that makes one token for everything Newsletter Sender does in Cloudflare: Amazon SES's DNS records,
+ * and pointing your own domain for links at this Worker.
+ */
+export const TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }, { key: "workers_routes", type: "edit" }, { key: "workers_scripts", type: "edit" }]))}&name=${encodeURIComponent("Newsletter Sender")}`;
+export const LINKS_TOKEN_URL = TOKEN_URL;
 
-/** The Cloudflare page that makes a token for your own link domain: DNS, plus adding a custom domain to this Worker. */
-export const LINKS_TOKEN_URL = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }, { key: "workers_routes", type: "edit" }, { key: "workers_scripts", type: "edit" }]))}&name=${encodeURIComponent("Newsletter Sender links")}`;
+/** Whether a token can add custom domains to Workers in this zone's account (tokens made before it could only do DNS). */
+export async function canAddWorkerDomains(token: string, domain: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+	const zone = await findZone(token, domain, fetcher);
+	if ("error" in zone || !zone.accountId) return false;
+	return (await cf(token, "GET", `/accounts/${zone.accountId}/workers/domains?hostname=${encodeURIComponent(`check.${zone.name}`)}`, null, fetcher)).ok;
+}
 
 /** Which Worker is answering: the first part of a workers.dev address, or the Worker a custom domain points at. */
 export async function workerName(token: string, accountId: string, host: string, fetcher: typeof fetch = fetch): Promise<string> {
