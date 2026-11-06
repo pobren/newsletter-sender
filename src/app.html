@@ -64,7 +64,7 @@ details.embed{margin-top:16px;border:1px solid var(--line);border-radius:12px;pa
 @media(max-width:700px){header{position:static}.bar{padding:10px 16px;gap:10px}nav.tabs{order:3;flex:0 0 100%;flex-wrap:nowrap;overflow-x:auto;margin:0 -16px;padding:0 16px}nav.tabs a{flex:none}#signout{margin-left:auto}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat b{font-size:24px}main{padding:20px 16px 60px}h1{font-size:24px}}
 header{overflow:hidden}
 #busy{position:absolute;left:0;bottom:0;height:3px;width:35%;background:var(--c);animation:busy 1s ease-in-out infinite}@keyframes busy{from{transform:translateX(-100%)}to{transform:translateX(300%)}}
-.bar{max-width:1320px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.bar{max-width:1320px}#brandPick select{width:auto;min-height:36px;padding:4px 10px;font-weight:600;max-width:240px}
 #settingsLink.on{border-color:var(--c);background:var(--soft);color:var(--cd)}
 .shell{max-width:1320px;margin:0 auto;display:grid;grid-template-columns:232px minmax(0,1fr)}
 .shell:has(>#side[hidden]){display:block}
@@ -203,6 +203,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 <header id="top" hidden>
 	<div class="bar">
 		<a class="mark" href="#campaigns"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="9" fill="#a3195b"/><path d="M8 18 L27 9 L22 27 L17 20 Z" fill="#fff"/><path d="M17 20 L27 9" stroke="#a3195b" stroke-width="1.5"/></svg><span id="appName">Newsletter Sender</span></a>
+		<span id="brandPick"></span>
 		<span class="grow"></span>
 		<a class="btn ghost small" href="#settings" id="settingsLink"><svg class="ico"><use href="#i-cog"/></svg><span class="lbl">Settings</span></a>
 		<button class="btn ghost small" id="signout"><svg class="ico"><use href="#i-out"/></svg><span class="lbl">Sign out</span></button>
@@ -274,9 +275,13 @@ async function boot() {
 	const state = await api("/api/state", { quiet: true });
 	const code = new URLSearchParams(location.search).get("code");
 	if (code || !state.setUp) return setupScreen(state, code);
+	const invite = /^#invite\/([0-9a-f]{32})$/.exec(location.hash);
+	if (invite) return inviteScreen(invite[1]);
 	if (!state.signedIn) return signinScreen(state);
 	$("#top").hidden = $("#side").hidden = false;
 	store.set("ns.in", "1");
+	try { ME = await api("/api/brands"); } catch { ME = null; }
+	brandPicker();
 	api("/api/brand").then(showName).catch(() => {});
 	window.onhashchange = route;
 	route();
@@ -302,6 +307,31 @@ function setupScreen(state, code) {
 		} catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); }
 	};
 }
+// -- Brands: the picker at the top, and a client's invite link -------------------------------------------------
+let ME = null;
+function brandPicker() {
+	const box = $("#brandPick");
+	if (!ME || (ME.brands.length < 2 && ME.role !== "owner")) { box.innerHTML = ""; return; }
+	box.innerHTML = `<label class="sr" for="brandSel">Brand</label><select id="brandSel" title="Which brand you're working on">${ME.brands.map((b) => `<option value="${b.id}" ${b.id === ME.current ? "selected" : ""}>${esc(b.name)}</option>`).join("")}${ME.role === "owner" ? `<option value="new">+ Add a brand</option>` : ""}</select>`;
+	$("#brandSel").onchange = async (e) => {
+		const v = e.target.value;
+		if (v !== "new") { await api("/api/brands/switch", { body: { id: v } }); location.hash = "#campaigns"; location.reload(); return; }
+		e.target.value = ME.current;
+		const m = modal(`<h2>Add a brand</h2><p>Each brand has its own lists, campaigns, templates, sending and settings. You can let a client sign in to just their brand under Settings, People.</p><label for="bn">Brand name</label><input id="bn" placeholder="Such as Acme Ltd"><p class="err" id="be"></p><div class="row"><button class="btn" id="bgo">${icon("plus")}Add brand</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+		$("#bgo", m).onclick = (ev) => run(ev.currentTarget, async () => { try { await api("/api/brands", { body: { name: $("#bn", m).value } }); location.hash = "#settings/company"; location.reload(); } catch (err) { $("#be", m).textContent = err.message; } });
+	};
+}
+async function inviteScreen(token) {
+	$("#top").hidden = $("#side").hidden = true;
+	let inv;
+	try { inv = await api(`/api/invite?token=${token}`, { quiet: true }); } catch (err) { main.innerHTML = `<div class="center card"><h1>This link has run out</h1><p>${esc(err.message)}</p><a class="btn" href="/">${icon("back")}Go to sign in</a></div>`; return; }
+	main.innerHTML = `<form class="center card" id="f"><h1>Welcome${inv.brand ? ` to ${esc(inv.brand)}` : ""}</h1><p class="muted">Choose a password to sign in as <b>${esc(inv.email)}</b>.</p>
+	<label for="name">Your name</label><input id="name" autocomplete="name" value="${esc(inv.name || "")}">
+	<label for="pw">Password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password"><p class="hint">At least 10 characters.</p>
+	<p class="err" id="e"></p><button class="btn">${icon("check")}Save and sign in</button></form>`;
+	$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/invite", { body: { token, name: $("#name").value, password: $("#pw").value } }); history.replaceState(null, "", "/#campaigns"); boot(); } catch (err) { $("#e").textContent = err.message; } };
+}
+
 function signinScreen(state) {
 	$("#top").hidden = $("#side").hidden = true;
 	store.set("ns.in", null);
@@ -1248,9 +1278,14 @@ async function blocklist(type) {
 
 // -- Settings: everything else lives here ----------------------------------------------------------------------
 const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
+const settingsTabs = () => {
+	const owner = !ME || ME.role === "owner";
+	return [...SETTINGS.slice(0, -1), ...(owner ? [["people", "People", "users"]] : []), SETTINGS[SETTINGS.length - 1]].filter(([k]) => owner || k === "account" || (k !== "backups" && ME.can.settings));
+};
 async function settings(section) {
-	const sec = SETTINGS.some((s) => s[0] === section) ? section : "company";
-	const head = `<h1>Settings</h1><nav class="subtabs">${SETTINGS.map(([k, n, i]) => `<a href="#settings/${k}" class="${k === sec ? "on" : ""}">${icon(i)}${n}</a>`).join("")}</nav>`;
+	const tabs = settingsTabs();
+	const sec = tabs.some((s) => s[0] === section) ? section : "company";
+	const head = `<h1>Settings</h1><nav class="subtabs">${tabs.map(([k, n, i]) => `<a href="#settings/${k}" class="${k === sec ? "on" : ""}">${icon(i)}${n}</a>`).join("")}</nav>`;
 	if (sec === "sending") return sending(head);
 	const b = await api("/api/brand");
 	if (sec === "company") {
@@ -1336,6 +1371,33 @@ async function settings(section) {
 			try { const r = await api("/api/developer/hooks", { body: { url: $("#hurl").value, events: [...main.querySelectorAll("[name=hev]:checked")].map((x) => x.value) } }); await again(); showSecret("Your webhook signing secret", r.secret, "Use it to check each webhook really came from us. Copy it now: we can't show it again."); }
 			catch (err) { $("#he").textContent = err.message; }
 		}));
+	}
+	if (sec === "people") {
+		const s = await api("/api/people");
+		const PERMS = [["send", "Send and schedule campaigns, and run automations"], ["import", "Import subscribers"], ["export", "Download subscribers"], ["delete", "Delete subscribers and lists"], ["settings", "Change settings (sending, tracking, API)"]];
+		const summary = (c) => { const on = PERMS.filter(([k]) => c[k]).map(([, t]) => t.split(" (")[0].toLowerCase()); return `${on.length ? `Can ${on.join(", ")}` : "Can write and test campaigns only"}${c.month_limit ? `. Up to ${num(c.month_limit)} emails a month` : ""}.`; };
+		const form = (p = { can: s.start }) => `<label for="pn">Their name</label><input id="pn" value="${esc(p.name || "")}">
+			${p.id ? "" : `<label for="pe">Their email address</label><input id="pe" type="email">`}
+			<label for="pb">Their brand</label><select id="pb">${s.brands.map((b) => `<option value="${b.id}" ${b.id === (p.brand_id || ME?.current) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
+			<label>What they can do</label>${PERMS.map(([k, t]) => `<label class="check"><input type="checkbox" name="pc" value="${k}" ${p.can[k] ? "checked" : ""}> <span>${t}</span></label>`).join("")}
+			<label for="pl">Most emails they can send a month <span class="hint">(leave empty for no limit)</span></label><input id="pl" type="number" min="0" step="1" value="${p.can.month_limit || ""}" placeholder="No limit">`;
+		const read = (m) => ({ name: $("#pn", m).value, email: $("#pe", m)?.value, brand: $("#pb", m).value, can: { ...Object.fromEntries([...m.querySelectorAll("[name=pc]")].map((x) => [x.value, x.checked])), month_limit: Number($("#pl", m).value) || 0 } });
+		const showLink = (link, who) => modal(`<h2>Invite link for ${esc(who)}</h2><p>Send this to them yourself. It works once and runs out in 14 days. They choose their own password.</p><code class="row" style="display:flex;gap:8px;align-items:center;word-break:break-all"><span class="grow">${esc(link)}</span>${copyBtn(link)}</code><div class="row" style="margin-top:14px"><button class="btn" data-close>${icon("check")}Done</button></div>`);
+		main.innerHTML = `${head}<div class="card"><h2>People</h2><p class="muted">Let a client sign in to just their own brand, and choose what they can do there. You can always see and do everything.</p>
+		<table class="data"><thead><tr><th>Who</th><th>Brand</th><th>What they can do</th><th></th></tr></thead><tbody>${s.people.map((p) => `<tr><td><b>${esc(p.name || p.email)}</b><br><span class="muted">${esc(p.email)}</span></td><td>${p.role === "owner" ? "Every brand" : esc(p.brand || "")}</td><td>${p.role === "owner" ? "Everything (owner)" : `${summary(p.can)}${p.joined ? "" : `<br><span class="muted">${icon("clock")} Hasn't used their invite yet</span>`}`}</td>
+		<td>${p.role === "owner" ? "" : `<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn ghost small" data-edit="${p.id}">${icon("pencil")}Edit</button><button class="btn ghost small" data-link="${p.id}">${icon("link")}New invite link</button><button class="btn ghost small" data-del="${p.id}">${icon("trash")}Remove</button></div>`}</td></tr>`).join("")}</tbody></table>
+		<div class="row" style="margin-top:14px"><button class="btn" id="padd">${icon("plus")}Invite a client</button></div></div>`;
+		$("#padd").onclick = () => {
+			const m = modal(`<h2>Invite a client</h2>${form()}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("send")}Make an invite link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { const v = read(m); const r = await api("/api/people", { body: v }); m.remove(); await settings("people"); showLink(r.link, v.name || v.email); } catch (err) { $("#pe2", m).textContent = err.message; } });
+		};
+		main.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
+			const p = s.people.find((x) => x.id === b.dataset.edit);
+			const m = modal(`<h2>${esc(p.name || p.email)}</h2>${form(p)}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("save")}Save</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { await api(`/api/people/${p.id}`, { body: read(m) }); m.remove(); toast("Saved"); settings("people"); } catch (err) { $("#pe2", m).textContent = err.message; } });
+		});
+		main.querySelectorAll("[data-link]").forEach((b) => b.onclick = () => run(b, async () => { const p = s.people.find((x) => x.id === b.dataset.link); const r = await api(`/api/people/${p.id}/link`, { body: {} }); showLink(r.link, p.name || p.email); }));
+		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/people/${b.dataset.del}`, { method: "DELETE" }); toast("Removed. They can't sign in any more."); settings("people"); }));
 	}
 	if (sec === "account") {
 		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show getting started again</button>` : ""}</div></div>
