@@ -9,10 +9,13 @@
 //   /o/*, /l/*            opens and clicks, only when switched on
 //   /hooks/<service>/*    bounces and spam complaints coming back from the sending service
 //
+// Every night from 2am UTC a backup of the database goes into the R2 bucket (backup.ts); the last 30 are kept.
+//
 // The queue (sending.ts) sends each campaign in batches at the sending service's full speed. Every minute the cron
 // starts campaigns whose time has come.
 
 import { runDue } from "./automations.ts";
+import { backupIfDue } from "./backup.ts";
 import { handleApi } from "./api.ts";
 import { ensureSchema, type Env, type SendBatch } from "./db.ts";
 import { handlePublic } from "./public.ts";
@@ -75,6 +78,7 @@ export default {
 		ctx.waitUntil(Promise.all([
 			startDue(env),
 			runDue(env).catch((e) => console.error("automations", e)),
+			backupIfDue(env).catch((e) => console.error("backup", e)),
 			// Sign up rate limits only matter for ten minutes.
 			env.DB.prepare("DELETE FROM meta WHERE key LIKE 'rl:%' AND key < ?").bind(`rl:${Math.floor(Date.now() / 600_000) - 1}:`).run(),
 		]));

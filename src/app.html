@@ -1247,7 +1247,7 @@ async function blocklist(type) {
 }
 
 // -- Settings: everything else lives here ----------------------------------------------------------------------
-const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["account", "Account", "user"]];
+const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["account", "Account", "user"]];
 async function settings(section) {
 	const sec = SETTINGS.some((s) => s[0] === section) ? section : "company";
 	const head = `<h1>Settings</h1><nav class="subtabs">${SETTINGS.map(([k, n, i]) => `<a href="#settings/${k}" class="${k === sec ? "on" : ""}">${icon(i)}${n}</a>`).join("")}</nav>`;
@@ -1286,6 +1286,27 @@ async function settings(section) {
 		<div id="lkBody"><p class="muted">Loading…</p></div></div>`;
 		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
 		linksCard();
+	}
+	if (sec === "backups") {
+		const s = await api("/api/backups");
+		const size = (n) => n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
+		const when = (b) => new Date(b.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+		const kind = (n) => n.includes("before-restore") ? "Just before a restore" : n.includes("by-hand") ? "Made by hand" : "Nightly";
+		main.innerHTML = `${head}<div class="card"><h2>Backups</h2>
+		<p class="muted">Every night from 2am a copy of everything (lists, subscribers, campaigns, templates, automations, reports and settings) goes into your own Cloudflare storage. We keep the last ${s.keep}. Your sending keys and passwords are never in a backup, so a downloaded copy is safe to keep.</p>
+		${s.bucket ? "" : `<p class="hwarn">${icon("alert")}<span>Backups need the R2 bucket this app uses for pictures. See the README.</span></p>`}
+		${s.error ? `<p class="hwarn">${icon("alert")}<span>The last nightly backup didn't work: ${esc(s.error)}</span></p>` : ""}
+		<div class="row"><button class="btn" id="bkNow">${icon("save")}Back up now</button></div></div>
+		<div class="card"><h2>Your backups</h2>${s.backups.length ? `<table class="data"><thead><tr><th>When</th><th>Type</th><th>Rows</th><th>Size</th><th></th></tr></thead><tbody>
+		${s.backups.map((b) => `<tr><td>${esc(when(b))}</td><td>${kind(b.name)}</td><td>${b.rows == null ? "" : num(b.rows)}</td><td>${size(b.size)}</td><td class="row" style="justify-content:flex-end;gap:8px"><a class="btn ghost small" href="/api/backups/download?name=${encodeURIComponent(b.name)}">${icon("download")}Download</a><button class="btn ghost small" data-restore="${esc(b.name)}" data-when="${esc(when(b))}">${icon("undo")}Restore</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">No backups yet. The first one is made tonight, or press Back up now.</p>`}</div>`;
+		$("#bkNow").onclick = (e) => run(e.currentTarget, async () => { await api("/api/backups", { body: {} }); toast("Backed up"); settings("backups"); });
+		main.querySelectorAll("[data-restore]").forEach((btn) => btn.onclick = () => {
+			const m = modal(`<h2>Put back the backup from ${esc(btn.dataset.when)}?</h2><p>Everything goes back to how it was then. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
+				try { const r = await api("/api/backups/restore", { body: { name: btn.dataset.restore, confirm: true } }); m.remove(); toast(`Put back ${num(r.rows)} rows`); boot(); }
+				catch (err) { m.querySelector("#re").textContent = err.message; }
+			});
+		});
 	}
 	if (sec === "account") {
 		main.innerHTML = `${head}<div class="card"><h2>Your account</h2><p>To change your password, open your set-up link again.</p><div class="row"><button class="btn ghost" id="everywhere">${icon("out")}Sign out everywhere</button>${store.get("ns.gs") ? `<button class="btn ghost" id="gsback">${icon("check")}Show getting started again</button>` : ""}</div></div>
