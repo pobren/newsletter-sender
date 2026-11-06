@@ -204,6 +204,23 @@ export async function seal(secret: string, c: ProviderConfig): Promise<string> {
 	return `${b64(iv)}.${b64(new Uint8Array(out))}`;
 }
 
+/** Any other secret kept the same way, such as the Cloudflare token for your own link domain. */
+export async function sealText(secret: string, text: string): Promise<string> {
+	const iv = crypto.getRandomValues(new Uint8Array(12));
+	const out = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await sealKey(secret), new TextEncoder().encode(text));
+	return `${b64(iv)}.${b64(new Uint8Array(out))}`;
+}
+
+export async function unsealText(secret: string, sealed: string | null): Promise<string | null> {
+	if (!sealed) return null;
+	try {
+		const [iv, data] = sealed.split(".");
+		return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(iv) }, await sealKey(secret), unb64(data)));
+	} catch {
+		return null;
+	}
+}
+
 export async function unseal(secret: string, sealed: string | null): Promise<ProviderConfig | null> {
 	if (!sealed) return null;
 	try {

@@ -12,7 +12,7 @@ test("finds the Cloudflare zone from a subdomain upwards", async () => {
 		asked.push(new URL(url).searchParams.get("name")!);
 		return json({ success: true, result: url.includes("name=example.co.uk") ? [{ id: "z1", name: "example.co.uk" }] : [] });
 	}) as typeof fetch;
-	assert.deepEqual(await findZone("t".repeat(40), "news.example.co.uk", f), { id: "z1", name: "example.co.uk" });
+	assert.deepEqual(await findZone("t".repeat(40), "news.example.co.uk", f), { id: "z1", name: "example.co.uk", accountId: "" });
 	assert.deepEqual(asked, ["news.example.co.uk", "example.co.uk"]);
 	const none = await findZone("t".repeat(40), "other.com", (async () => json({ success: true, result: [] })) as typeof fetch);
 	assert.ok("error" in none);
