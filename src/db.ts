@@ -225,8 +225,10 @@ const MIGRATIONS = [
 	"DROP INDEX IF EXISTS sends_campaign_status",
 	"DROP INDEX IF EXISTS sends_message",
 	"DROP INDEX IF EXISTS sends_subscriber",
+	// One click polls (src/polls.ts): each reader's answer, one per poll.
+	"CREATE TABLE IF NOT EXISTS poll_votes (campaign_id TEXT NOT NULL, poll TEXT NOT NULL, subscriber_id TEXT NOT NULL, answer INTEGER NOT NULL, at TEXT NOT NULL, PRIMARY KEY (campaign_id, poll, subscriber_id))",
 ];
-const SCHEMA_VERSION = "14";
+const SCHEMA_VERSION = "15";
 
 let ready: Promise<void> | null = null;
 

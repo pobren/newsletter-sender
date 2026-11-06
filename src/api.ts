@@ -16,6 +16,7 @@ import { brandHealth } from "./health.ts";
 import { cleanSteps, cleanTrigger, newAutomationId } from "./automations.ts";
 import { addWorkerDomain, linksNameProblem, dnsHost, findZone, LINKS_TOKEN_URL, TOKEN_URL, workerName } from "./cloudflare.ts";
 import { ROBOT_ERROR, turnstileKey, turnstileOk } from "./turnstile.ts";
+import { pollsIn } from "./polls.ts";
 
 const DEFAULT_BRAND = "My newsletter";
 
@@ -581,7 +582,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (method === "DELETE") {
 			// Removes everything we hold about them (a right to be forgotten request).
-			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
+			await db.batch([db.prepare("DELETE FROM memberships WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM sends WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM events WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM poll_votes WHERE subscriber_id = ?").bind(s.id), db.prepare("DELETE FROM subscribers WHERE id = ?").bind(s.id)]);
 			return ok();
 		}
 		if (method === "POST") {
@@ -736,7 +737,10 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
-			return ok({ ...c, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			const polls = pollsIn(c.html);
+			const votes = polls.length ? (await db.prepare("SELECT poll, answer, COUNT(*) AS n FROM poll_votes WHERE campaign_id = ? GROUP BY poll, answer").bind(c.id).all<{ poll: string; answer: number; n: number }>()).results : [];
+			const pollResults = polls.map((p) => ({ ...p, answers: p.answers.map((a) => ({ ...a, votes: votes.find((v) => v.poll === p.id && v.answer === a.n)?.n ?? 0 })) }));
+			return ok({ ...c, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -754,7 +758,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (!action && method === "DELETE") {
 			if (c.status === "sending") return bad("This one is sending. Stop it first, then delete it.");
-			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
+			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
 			return ok();
 		}
 		if (action === "preview") {

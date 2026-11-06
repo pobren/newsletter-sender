@@ -16,6 +16,7 @@ import { cleanBlocks, foreignTags, hasContent, listHeaders, renderEmail, type Co
 import { canSendFrom, loadProvider, sealSecret } from "./settings.ts";
 import { checkCampaign } from "./health.ts";
 import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
+import { hasPoll } from "./polls.ts";
 
 /** Send rows in one queue message. Bigger batches spend less of each second waiting on the queue between
  * messages: the 100k load test on Cloudflare reached about 65 a second (of 100) with 10 workers, as each message
@@ -262,6 +263,7 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const base = linkBase(brand, await origin(db));
 	const secret = await sealSecret(db);
 	const content = campaignContent(c);
+	const polls = hasPoll(c.html);
 	const tb = trackBase(brand, base);
 	const share = `${base}/f/${c.id}.${await shareSig(secret, c.id)}`;
 	const from = senderOf(brand, c);
@@ -281,10 +283,10 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		else if (!s.throttled) pending.push(db.prepare("UPDATE sends SET status = 'failed', error = ? WHERE id = ?").bind((s.error ?? "Failed").slice(0, 240), id));
 	};
 	const outcome = await paced(rows, shareOfRate(test?.rate ?? brand.rate), async (r) => {
-		const sig = brand.track_opens || brand.track_clicks ? await sendSig(secret, r.id) : "";
+		const sig = brand.track_opens || brand.track_clicks || polls ? await sendSig(secret, r.id) : "";
 		const unsub = `${base}/u/${r.token}?c=${c.id}`;
 		const track: Look["track"] = { link: brand.track_clicks ? (_url, n) => `${tb}/l/${r.id}.${sig}/${n}` : null, pixel: brand.track_opens ? `${tb}/o/${r.id}.${sig}` : null };
-		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links };
+		const look = { ...(await lookFor(env, brand, c, unsub, track)), manageUrl: `${base}/p/${r.token}`, forwardUrl: share, footerLinks: brand.footer_links, poll: polls ? (pid: string, n: number) => `${base}/v/${r.id}.${sig}/${pid}/${n}` : null };
 		const reader: Reader = { email: r.email, name: r.name, fields: safeJson(r.fields) ?? {} };
 		const out = renderEmail(c.subject, content, look, reader);
 		const email: OutEmail = {

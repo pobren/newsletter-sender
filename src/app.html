@@ -207,6 +207,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v6H4V6h6"/></symbol>
 <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h11a4 4 0 0 0 .5-8A6 6 0 0 0 7 9.5 4.3 4.3 0 0 0 7 18z"/></symbol>
 <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+<symbol id="i-poll" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="2"/><rect x="3" y="10" width="12" height="4" rx="2"/><rect x="3" y="16" width="7" height="4" rx="2"/></symbol>
 </svg>
 
 <header id="top" hidden>
@@ -585,7 +586,7 @@ const TOOLS = [
 	["bold", "bold", "Bold"], ["italic", "italic", "Italic"], ["underline", "underline", "Underline"], "|",
 	["insertUnorderedList", "ul", "Bullet list"], ["insertOrderedList", "ol", "Numbered list"], ["quote", "quote", "Quote"], "|",
 	["justifyLeft", "align-left", "Line up on the left"], ["justifyCenter", "align-center", "Centre"], "|",
-	["link", "link", "Add a link"], ["unlink", "unlink", "Take the link off"], ["image", "image", "Add a picture"], ["button", "btn", "Add a button"], ["divider", "minus", "Add a line"], "|",
+	["link", "link", "Add a link"], ["unlink", "unlink", "Take the link off"], ["image", "image", "Add a picture"], ["button", "btn", "Add a button"], ["poll", "poll", "Add a one click poll"], ["divider", "minus", "Add a line"], "|",
 	["name", "user", "Put in the reader's first name"], ["removeFormat", "eraser", "Clear the formatting"],
 ];
 async function editor(id, kind) {
@@ -699,6 +700,26 @@ async function editor(id, kind) {
 			const m = modal(`<h2>Add a picture</h2><label class="btn ghost" style="margin:0">${icon("upload")}Upload a picture<input type="file" id="iu" accept="image/*" hidden></label><label for="isrc">Or its web address</label><input id="isrc" placeholder="https://..."><label for="ialt">Describe it <span class="hint">(for people who can't see pictures)</span></label><input id="ialt"><p class="err" id="ie"></p><div class="row" style="margin-top:14px"><button class="btn" id="igo">${icon("image")}Add picture</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			$("#iu", m).onchange = (ev) => run(null, async () => { const fd = new FormData(); fd.append("file", ev.target.files[0]); $("#ie", m).textContent = "Uploading…"; const r = await api("/api/images", { body: fd }); $("#isrc", m).value = r.url; $("#ie", m).textContent = ""; });
 			$("#igo", m).onclick = () => { const u = $("#isrc", m).value.trim(); if (!/^https:\/\//i.test(u)) { $("#ie", m).textContent = "Please upload a picture or paste its https:// address."; return; } m.remove(); insert(`<img src="${esc(u)}" alt="${esc($("#ialt", m).value)}" style="display:block;max-width:100%;height:auto;border:0;margin:8px 0 16px">`); };
+			return;
+		}
+		if (cmd === "poll") {
+			const m = modal(`<h2>Add a one click poll</h2><p class="muted">Readers answer with one click on the answer they pick. You see the results on the campaign's report. Clicking another answer changes theirs.</p>
+			<label for="pq">Question</label><input id="pq" placeholder="Such as What should we write about next?">
+			<label>Answers <span class="hint">(two to five)</span></label>${[1, 2, 3, 4, 5].map((n) => `<input class="pa" style="margin-bottom:8px" placeholder="${n <= 2 ? `Answer ${n}` : `Answer ${n} (optional)`}">`).join("")}
+			<p class="err" id="pe"></p><div class="row" style="margin-top:14px"><button class="btn" id="pgo">${icon("poll")}Add poll</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pq", m).focus();
+			$("#pgo", m).onclick = () => {
+				const q = $("#pq", m).value.trim(), as = $$(".pa", m).map((x) => x.value.trim()).filter(Boolean);
+				if (!q) return ($("#pe", m).textContent = "Please write the question.");
+				if (as.length < 2) return ($("#pe", m).textContent = "Please give at least two answers.");
+				m.remove();
+				// Put in as it is: the browser's own insert drops link colours it thinks are already there.
+				restore();
+				const d = frameDoc(), r = range || d.createRange(), t = d.createElement("template");
+				t.innerHTML = pollHtml(Math.random().toString(36).slice(2, 10).padEnd(8, "0"), q, as, c.colour || "#a3195b");
+				if (!range) r.selectNodeContents(d.body), r.collapse(false);
+				r.deleteContents(); r.insertNode(t.content); changed();
+			};
 			return;
 		}
 		if (cmd === "button") {
@@ -879,6 +900,20 @@ function healthHtml(h) {
 
 // -- Live sending: percentage, speed and time left, updated in place while it goes ------------------------------
 const doneOf = (s) => s.sent + s.failed + s.skipped;
+// One click polls: the box the editor puts in (the same as pollHtml in src/polls.ts), and the results on the report.
+function pollHtml(id, question, answers, colour) {
+	const col = /^#[0-9a-f]{6}$/i.test(colour) ? colour : "#a3195b";
+	return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-poll="${id}" data-poll-q="${esc(question)}" style="margin:8px 0 24px;border:1px solid #eadfe5;border-radius:12px"><tr><td style="padding:18px 20px">`
+		+ `<p style="margin:0 0 12px;font:700 18px/1.4 Helvetica,Arial,sans-serif;color:#1d1424">${esc(question)}</p>`
+		+ answers.map((a, i) => `<a href="{{poll:${id}:${i + 1}}}" style="display:block;margin:0 0 8px;padding:12px 16px;border:2px solid ${col};border-radius:8px;font:600 16px Helvetica,Arial,sans-serif;color:${col};text-decoration:none">${esc(a)}</a>`).join("")
+		+ `<p style="margin:8px 0 0;font:13px Helvetica,Arial,sans-serif;color:#6b5a73">One click and you're done.</p></td></tr></table><p><br></p>`;
+}
+function pollsHtml(c) {
+	return (c.polls || []).map((p) => {
+		const total = p.answers.reduce((n, a) => n + a.votes, 0), top = Math.max(1, ...p.answers.map((a) => a.votes));
+		return `<div class="card rchart"><h2>${icon("poll")}${esc(p.question || "Poll")}</h2>${p.answers.map((a) => `<div class="rbar"><span>${esc(a.text)}</span><div class="rtrack"><i style="width:${Math.max(a.votes ? 0.6 : 0, (a.votes / top) * 100)}%;background:var(--c)"></i></div><b>${num(a.votes)}</b><small>${pct(a.votes, total)}</small></div>`).join("")}<p class="hint" style="margin-top:10px">${total ? `${ppl(total)} answered.` : "No answers yet."}</p></div>`;
+	}).join("");
+}
 function liveHtml(c, speed) {
 	const done = doneOf(c.stats), total = Math.max(1, c.total), p = Math.min(100, (done / total) * 100);
 	const left = speed > 0 ? Math.ceil((total - done) / speed) : 0;
@@ -929,7 +964,7 @@ async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
 	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
-	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>
+	${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>${pollsHtml(c)}
 	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
 	<iframe class="preview" style="margin-top:18px" src="/api/campaigns/${c.id}/preview" title="The email" sandbox=""></iframe>`;
 	$("#stop") && ($("#stop").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop sending? People who haven't had it yet won't get it.")) { await api(`/api/campaigns/${c.id}/cancel`, { body: {} }); route(); } }));
