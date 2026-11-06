@@ -36,7 +36,11 @@ export interface AccountRow {
 	email: string;
 	name: string | null;
 	password: string | null;
-	role: "owner";
+	role: "owner" | "client";
+	/** A client's one brand (the owner has none: they see every brand). */
+	brand_id?: string | null;
+	/** A client's permissions as JSON (team.ts). */
+	limits?: string | null;
 	session_ver: number;
 	reset_token: string | null;
 	reset_until: string | null;
@@ -214,8 +218,11 @@ const MIGRATIONS = [
 	"ALTER TABLE campaigns ADD COLUMN from_name TEXT",
 	"ALTER TABLE campaigns ADD COLUMN from_email TEXT",
 	"ALTER TABLE campaigns ADD COLUMN reply_to TEXT",
+	// Client logins: which brand they can open, and what they're allowed to do there.
+	"ALTER TABLE accounts ADD COLUMN brand_id TEXT",
+	"ALTER TABLE accounts ADD COLUMN limits TEXT",
 ];
-const SCHEMA_VERSION = "12";
+const SCHEMA_VERSION = "13";
 
 let ready: Promise<void> | null = null;
 
