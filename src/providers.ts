@@ -97,6 +97,8 @@ const quoteName = (n: string) => `"${n.replace(/["\\\r\n]/g, "")}"`;
 export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: string, m: OutEmail): { url: string; init: RequestInit } {
 	const from = `${quoteName(fromName)} <${fromEmail}>`;
 	const headers = m.headers;
+	// Brevo turns down an empty headers object ("headers is blank"), so leave it out when there are none.
+	const someHeaders = Object.keys(headers).length > 0;
 	if (c.provider === "mailgun") {
 		const form = new URLSearchParams({ from, to: m.to, subject: m.subject, text: m.text, html: m.html });
 		if (m.replyTo) form.set("h:Reply-To", m.replyTo);
@@ -114,7 +116,7 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 			init: {
 				method: "POST",
 				headers: { "api-key": c.key, "content-type": "application/json", accept: "application/json" },
-				body: JSON.stringify({ sender: { name: fromName, email: fromEmail }, to: [{ email: m.to }], subject: m.subject, textContent: m.text, htmlContent: m.html, ...(m.replyTo ? { replyTo: { email: m.replyTo } } : {}), headers }),
+				body: JSON.stringify({ sender: { name: fromName, email: fromEmail }, to: [{ email: m.to }], subject: m.subject, textContent: m.text, htmlContent: m.html, ...(m.replyTo ? { replyTo: { email: m.replyTo } } : {}), ...(someHeaders ? { headers } : {}) }),
 			},
 		};
 	}
@@ -124,7 +126,7 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 			init: {
 				method: "POST",
 				headers: { authorization: `Bearer ${c.key}`, "content-type": "application/json" },
-				body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text, html: m.html, ...(m.replyTo ? { reply_to: m.replyTo } : {}), headers, ...(m.tags ? { tags: Object.entries(m.tags).map(([name, value]) => ({ name, value })) } : {}) }),
+				body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text, html: m.html, ...(m.replyTo ? { reply_to: m.replyTo } : {}), ...(someHeaders ? { headers } : {}), ...(m.tags ? { tags: Object.entries(m.tags).map(([name, value]) => ({ name, value })) } : {}) }),
 			},
 		};
 	}

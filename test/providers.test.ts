@@ -27,6 +27,13 @@ test("each provider gets a request for its own API", () => {
 	assert.match(providerRequest({ provider: "resend", key: "k" }, "Jo", "n@e.com", mail).url, /resend\.com/);
 });
 
+test("Brevo and Resend leave out headers when there are none (Brevo turns down an empty one)", () => {
+	const bare = { ...mail, headers: {} };
+	assert.equal("headers" in JSON.parse(String(providerRequest({ provider: "brevo", key: "k" }, "Jo", "n@e.com", bare).init.body)), false);
+	assert.equal("headers" in JSON.parse(String(providerRequest({ provider: "resend", key: "k" }, "Jo", "n@e.com", bare).init.body)), false);
+	assert.ok(JSON.parse(String(providerRequest({ provider: "brevo", key: "k" }, "Jo", "n@e.com", mail).init.body)).headers["List-Unsubscribe"]);
+});
+
 test("failures are sorted into slow down, bad address or other", () => {
 	assert.equal(classify(429, "").throttled, true);
 	assert.equal(classify(400, "Throttling: Maximum sending rate exceeded").throttled, true);
