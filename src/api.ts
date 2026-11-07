@@ -9,7 +9,7 @@ import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { getBackup, KEEP, listBackups, makeBackup, restoreBackup } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
-import { addWebhook, isProvider, parseProvider, providerSummary, sendOne, sesKeys } from "./providers.ts";
+import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
@@ -291,7 +291,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if (provider?.provider === "ses" && provider.cfToken) c.cfToken = provider.cfToken;
 			} else {
 				// Check the key works with a real email to the owner before saving it.
-				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${c.provider}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${c.provider}. Your newsletters will go out the same way.</p>`, headers: {} });
+				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.</p>`, headers: {} });
 				if (!r.ok) return bad(`The test email didn't go: ${r.error}`);
 			}
 			// Add our bounce and complaint webhook in their account for them. If we can't, the page shows the address to add.
