@@ -371,7 +371,8 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 		if (c.provider === "brevo") {
 			const h = { "api-key": c.key, accept: "application/json", "content-type": "application/json" };
 			const list = await call("https://api.brevo.com/v3/webhooks?type=transactional", { headers: h });
-			if (!list.ok) return failed(list);
+			// Brevo answers 404 "Webhook record does not exist" when the account has no webhooks yet.
+			if (!list.ok && list.status !== 404) return failed(list);
 			if ((list.data?.webhooks ?? []).some((w: any) => w?.url === hookUrl)) return { ok: true };
 			const r = await call("https://api.brevo.com/v3/webhooks", { method: "POST", headers: h, body: JSON.stringify({ url: hookUrl, description: "Newsletter Sender: bounces and spam complaints", events: ["hardBounce", "softBounce", "invalid", "spam"], type: "transactional" }) });
 			return r.ok ? { ok: true } : failed(r);
