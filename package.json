@@ -21,7 +21,7 @@
 		"wrangler": "^4.20.0"
 	},
 	"cloudflare": {
-		"label": "Newsletter Sender",
+		"label": "newsletter-sender",
 		"products": ["Workers", "D1", "Queues", "R2"],
 		"bindings": {
 			"SETUP_TOKEN": {
