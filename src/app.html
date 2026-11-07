@@ -1623,15 +1623,29 @@ async function settings(section) {
 		const s = await api("/api/backups");
 		const size = (n) => n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
 		const when = (b) => new Date(b.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-		const kind = (n) => n.includes("before-restore") ? "Just before a restore" : n.includes("by-hand") ? "Backed up manually" : "Nightly";
+		const kind = (n) => n.includes("before-restore") ? "Just before a restore" : n.includes("-uploaded") ? "Uploaded from a file" : n.includes("by-hand") ? "Backed up manually" : "Nightly";
 		main.innerHTML = `${head}<div class="card"><h2>Backups</h2>
 		<p class="muted">Every night at 02:00, a complete snapshot of your data (including lists, subscribers, campaigns, templates, automations, reports and settings) is saved directly to your Cloudflare storage. The last ${s.keep} daily backups are retained automatically. API keys and passwords are never included in backup files, making downloaded copies safe to store offline.</p>
 		${s.bucket ? "" : `<p class="hwarn">${icon("alert")}<span>Backups need the R2 bucket this app uses for pictures. See the README.</span></p>`}
 		${s.error ? `<p class="hwarn">${icon("alert")}<span>The last nightly backup didn't work: ${esc(s.error)}</span></p>` : ""}
-		<div class="row"><button class="btn" id="bkNow">${icon("save")}Back up now</button></div></div>
+		<div class="row"><button class="btn" id="bkNow">${icon("save")}Back up now</button><label class="btn ghost" style="margin:0">${icon("upload")}Restore from a file<input type="file" id="bkFile" accept=".gz,application/gzip" hidden></label></div></div>
 		<div class="card"><h2>Your backups</h2>${s.backups.length ? `<table class="data"><thead><tr><th>Date &amp; time</th><th>Type</th><th>Records</th><th>File size</th><th style="text-align:right">Actions</th></tr></thead><tbody>
 		${s.backups.map((b) => `<tr><td>${esc(when(b))}</td><td>${kind(b.name)}</td><td>${b.rows == null ? "" : num(b.rows)}</td><td>${size(b.size)}</td><td class="row" style="justify-content:flex-end;gap:8px"><a class="btn ghost small" href="/api/backups/download?name=${encodeURIComponent(b.name)}">${icon("download")}Download</a><button class="btn ghost small" data-restore="${esc(b.name)}" data-when="${esc(when(b))}">${icon("undo")}Restore</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">No backups yet. The first one is made tonight, or press Back up now.</p>`}</div>`;
 		$("#bkNow").onclick = (e) => run(e.currentTarget, async () => { await api("/api/backups", { body: {} }); toast("Backed up"); settings("backups"); });
+		$("#bkFile").onchange = (ev) => {
+			const f = ev.target.files[0];
+			ev.target.value = "";
+			if (!f) return;
+			const m = modal(`<h2>Put back the backup in ${esc(f.name)}?</h2><p>Everything goes back to how it was in that file. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
+				try {
+					const res = await fetch("/api/backups/upload", { method: "POST", headers: { "content-type": "application/gzip" }, body: f });
+					const r = await res.json().catch(() => ({}));
+					if (!res.ok) throw new Error(r.error || "Something went wrong. Please try again.");
+					m.remove(); toast(`Put back ${num(r.rows)} rows`); boot();
+				} catch (err) { m.querySelector("#re").textContent = err.message; }
+			});
+		};
 		main.querySelectorAll("[data-restore]").forEach((btn) => btn.onclick = () => {
 			const m = modal(`<h2>Put back the backup from ${esc(btn.dataset.when)}?</h2><p>Everything goes back to how it was then. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
