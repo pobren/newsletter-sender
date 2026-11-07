@@ -371,11 +371,14 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 		if (c.provider === "brevo") {
 			const h = { "api-key": c.key, accept: "application/json", "content-type": "application/json" };
 			const list = await call("https://api.brevo.com/v3/webhooks?type=transactional", { headers: h });
-			// Brevo answers 404 "Webhook record does not exist" when the account has no webhooks yet.
-			if (!list.ok && list.status !== 404) return failed(list);
+			// Brevo answers "document_not_found: Webhook record does not exist" (as a 400 or 404) when the account has
+			// no webhooks yet, which just means an empty list.
+			if (!list.ok && list.status !== 404 && list.data?.code !== "document_not_found") return failed(list);
 			if ((list.data?.webhooks ?? []).some((w: any) => w?.url === hookUrl)) return { ok: true };
 			const r = await call("https://api.brevo.com/v3/webhooks", { method: "POST", headers: h, body: JSON.stringify({ url: hookUrl, description: "Newsletter Sender: bounces and spam complaints", events: ["hardBounce", "softBounce", "invalid", "spam"], type: "transactional" }) });
-			return r.ok ? { ok: true } : failed(r);
+			if (r.ok) return { ok: true };
+			const f = failed(r);
+			return { error: f.error.replace("Brevo said:", "Brevo said, when adding the webhook:") };
 		}
 		if (c.provider === "resend") {
 			const h = { authorization: `Bearer ${c.key}`, "content-type": "application/json" };

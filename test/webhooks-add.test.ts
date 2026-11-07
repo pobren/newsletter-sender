@@ -65,6 +65,12 @@ test("Brevo: an account with no webhooks yet answers 404, and we still add ours"
 	assert.equal(calls[1].method, "POST");
 });
 
+test("Brevo: the same answer as a 400 still counts as no webhooks yet", async () => {
+	const { f, calls } = fake([[400, { code: "document_not_found", message: "Webhook record does not exist" }], [201, { id: 5 }]]);
+	assert.deepEqual(await addWebhook({ provider: "brevo", key: "k".repeat(20) }, HOOK, f), { ok: true });
+	assert.equal(calls[1].method, "POST");
+});
+
 test("Resend: a Sending access key can't, and we say so", async () => {
 	const { f } = fake([[401, { name: "restricted_api_key" }]]);
 	const r = await addWebhook({ provider: "resend", key: "k".repeat(20) }, HOOK, f);
