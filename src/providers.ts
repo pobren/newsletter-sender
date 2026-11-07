@@ -104,6 +104,10 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 		if (m.replyTo) form.set("h:Reply-To", m.replyTo);
 		for (const [k, v] of Object.entries(headers)) form.set(`h:${k}`, v);
 		for (const [k, v] of Object.entries(m.tags ?? {})) form.set(`v:${k}`, v);
+		// We track opens and clicks ourselves, so ask Mailgun not to wrap our links or add its own pixel.
+		form.set("o:tracking", "no");
+		form.set("o:tracking-clicks", "no");
+		form.set("o:tracking-opens", "no");
 		const host = c.mailgunRegion === "eu" ? "api.eu.mailgun.net" : "api.mailgun.net";
 		return {
 			url: `https://${host}/v3/${encodeURIComponent(c.mailgunDomain ?? fromEmail.split("@")[1])}/messages`,
@@ -111,6 +115,7 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 		};
 	}
 	if (c.provider === "brevo") {
+		// Brevo's send API has no switch for its own open and click tracking, so it wraps our links too.
 		return {
 			url: "https://api.brevo.com/v3/smtp/email",
 			init: {
@@ -135,7 +140,7 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 		init: {
 			method: "POST",
 			headers: { "x-postmark-server-token": c.key, "content-type": "application/json", accept: "application/json" },
-			body: JSON.stringify({ From: from, To: m.to, Subject: m.subject, TextBody: m.text, HtmlBody: m.html, ...(m.replyTo ? { ReplyTo: m.replyTo } : {}), Headers: Object.entries(headers).map(([Name, Value]) => ({ Name, Value })), Metadata: m.tags ?? {}, MessageStream: "broadcast" }),
+			body: JSON.stringify({ From: from, To: m.to, Subject: m.subject, TextBody: m.text, HtmlBody: m.html, ...(m.replyTo ? { ReplyTo: m.replyTo } : {}), Headers: Object.entries(headers).map(([Name, Value]) => ({ Name, Value })), Metadata: m.tags ?? {}, MessageStream: "broadcast", TrackOpens: false, TrackLinks: "None" }),
 		},
 	};
 }

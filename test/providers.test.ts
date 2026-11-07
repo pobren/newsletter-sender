@@ -34,6 +34,16 @@ test("Brevo and Resend leave out headers when there are none (Brevo turns down a
 	assert.ok(JSON.parse(String(providerRequest({ provider: "brevo", key: "k" }, "Jo", "n@e.com", mail).init.body)).headers["List-Unsubscribe"]);
 });
 
+test("Postmark and Mailgun are asked not to add their own open and click tracking", () => {
+	const pm = JSON.parse(String(providerRequest({ provider: "postmark", key: "k" }, "Jo", "n@e.com", mail).init.body));
+	assert.equal(pm.TrackOpens, false);
+	assert.equal(pm.TrackLinks, "None");
+	const mg = new URLSearchParams(String(providerRequest({ provider: "mailgun", key: "k", mailgunDomain: "mg.e.com" }, "Jo", "n@e.com", mail).init.body));
+	assert.equal(mg.get("o:tracking"), "no");
+	assert.equal(mg.get("o:tracking-clicks"), "no");
+	assert.equal(mg.get("o:tracking-opens"), "no");
+});
+
 test("failures are sorted into slow down, bad address or other", () => {
 	assert.equal(classify(429, "").throttled, true);
 	assert.equal(classify(400, "Throttling: Maximum sending rate exceeded").throttled, true);
