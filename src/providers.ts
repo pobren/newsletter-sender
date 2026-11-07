@@ -344,7 +344,7 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 			if (!list.ok) return failed(list);
 			const have = (list.data?.Webhooks ?? []).find((w: any) => w?.Url === hookUrl);
 			const r = have
-				? await call(`https://api.postmarkapp.com/webhooks/${encodeURIComponent(have.ID)}`, { method: "PUT", headers: h, body: JSON.stringify({ Triggers: triggers }) })
+				? await call(`https://api.postmarkapp.com/webhooks/${encodeURIComponent(have.ID)}`, { method: "PUT", headers: h, body: JSON.stringify({ Url: hookUrl, Triggers: triggers }) })
 				: await call("https://api.postmarkapp.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ Url: hookUrl, MessageStream: "broadcast", Triggers: triggers }) });
 			return r.ok ? { ok: true } : failed(r);
 		}

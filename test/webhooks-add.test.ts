@@ -34,6 +34,7 @@ test("Postmark: brings ours up to date when it's already there", async () => {
 	assert.deepEqual(await addWebhook({ provider: "postmark", key: "k".repeat(20) }, HOOK, f), { ok: true });
 	assert.equal(calls[2].method, "PUT");
 	assert.match(calls[2].url, /\/webhooks\/7$/);
+	assert.equal(JSON.parse(calls[2].body).Url, HOOK);
 	assert.equal(JSON.parse(calls[2].body).Triggers.SubscriptionChange.Enabled, true);
 });
 
