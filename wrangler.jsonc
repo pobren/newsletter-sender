@@ -8,6 +8,9 @@
 	"d1_databases": [{ "binding": "DB" }],
 	// Runs the Worker near the database when that's quicker, since each page asks the database a few things.
 	"placement": { "mode": "smart" },
+	// Up to 5 minutes of CPU a run (Cloudflare's default is 30 seconds), so a big backup or restore can finish. You only
+	// pay for what's used.
+	"limits": { "cpu_ms": 300000 },
 	// The send queue: one batch of 200 emails per worker (a slow SES account takes about four minutes a batch, inside
 	// the queue's 15 minute limit), up to 20 workers at once. Keep max_concurrency the same as CONCURRENCY
 	// in src/sending.ts.

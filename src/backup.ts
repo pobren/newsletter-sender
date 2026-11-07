@@ -11,6 +11,72 @@ export const KEEP = 30;
 /** Meta rows that stay out of backups: secrets, and short lived sign up rate limits. */
 const PRIVATE = /^(seal_key|session_key|links_token:|rl:|loadtest|backup_)/;
 const PAGE = 2000;
+/** Big backups are stored in parts of this size (R2 wants every part but the last to be the same size, 5 MB or more). */
+export const PART = 8 * 1024 * 1024;
+const GZ = { contentType: "application/gzip" };
+/** Where a backup's row count is kept when it was stored in parts (R2 only takes metadata at the start). */
+const rowsKey = (name: string) => `backup_rows:${name}`;
+
+/**
+ * Stores a gzipped backup as it's made: in one go while it's small, in 8 MB parts once it outgrows that, so even a
+ * backup of millions of rows never has to fit in the Worker's memory.
+ */
+class Store {
+	private buf: Uint8Array[] = [];
+	private len = 0;
+	private upload?: R2MultipartUpload;
+	private parts: R2UploadedPart[] = [];
+	size = 0;
+	private bucket: R2Bucket;
+	private key: string;
+	constructor(bucket: R2Bucket, key: string) {
+		this.bucket = bucket;
+		this.key = key;
+	}
+	async add(chunk: Uint8Array) {
+		this.buf.push(chunk);
+		this.len += chunk.length;
+		this.size += chunk.length;
+		while (this.len >= PART) await this.part(this.take(PART));
+	}
+	private take(n: number): Uint8Array {
+		const out = new Uint8Array(n);
+		let at = 0;
+		while (at < n) {
+			const c = this.buf[0];
+			const need = n - at;
+			if (c.length <= need) {
+				out.set(c, at);
+				at += c.length;
+				this.buf.shift();
+			} else {
+				out.set(c.subarray(0, need), at);
+				this.buf[0] = c.subarray(need);
+				at += need;
+			}
+		}
+		this.len -= n;
+		return out;
+	}
+	private async part(bytes: Uint8Array) {
+		this.upload ??= await this.bucket.createMultipartUpload(this.key, { httpMetadata: GZ });
+		this.parts.push(await this.upload.uploadPart(this.parts.length + 1, bytes));
+	}
+	/** True when it went in parts, so the row count has to be kept elsewhere. */
+	async finish(rows: number): Promise<boolean> {
+		const rest = this.take(this.len);
+		if (!this.upload) {
+			await this.bucket.put(this.key, rest, { httpMetadata: GZ, customMetadata: { rows: String(rows) } });
+			return false;
+		}
+		if (rest.length) await this.part(rest);
+		await this.upload.complete(this.parts);
+		return true;
+	}
+	async abort() {
+		await this.upload?.abort().catch(() => {});
+	}
+}
 
 export interface BackupInfo { name: string; size: number; at: string; rows: number | null }
 
@@ -26,56 +92,63 @@ async function tableNames(db: D1Database): Promise<string[]> {
 export async function makeBackup(env: Env, now = new Date(), extra = ""): Promise<BackupInfo> {
 	if (!env.IMAGES) throw new Error("Backups need the R2 bucket. See the README.");
 	const db = env.DB;
+	const name = backupName(now, extra);
+	const store = new Store(env.IMAGES, PREFIX + name);
 	const gz = new CompressionStream("gzip");
 	const w = gz.writable.getWriter();
 	const enc = new TextEncoder();
-	const parts: Uint8Array[] = [];
 	const reading = (async () => {
 		const r = gz.readable.getReader();
 		for (;;) {
 			const { done, value } = await r.read();
 			if (done) break;
-			parts.push(value);
+			await store.add(value);
 		}
 	})();
 	let rows = 0;
-	await w.write(enc.encode(JSON.stringify({ newsletterSender: 1, schema: await getMeta(db, "schema"), at: now.toISOString() }) + "\n"));
-	for (const t of await tableNames(db)) {
-		let last = -Infinity;
-		for (;;) {
-			const { results } = await db.prepare(`SELECT rowid AS _rowid_, * FROM "${t}" WHERE rowid > ? ORDER BY rowid LIMIT ${PAGE}`).bind(last === -Infinity ? -9e15 : last).all<Record<string, unknown>>();
-			let buf = "";
-			for (const row of results) {
-				last = Number(row._rowid_);
-				delete row._rowid_;
-				if (t === "meta" && PRIVATE.test(String(row.key))) continue;
-				buf += JSON.stringify({ t, r: row }) + "\n";
-				rows++;
+	try {
+		await w.write(enc.encode(JSON.stringify({ newsletterSender: 1, schema: await getMeta(db, "schema"), at: now.toISOString() }) + "\n"));
+		for (const t of await tableNames(db)) {
+			let last = -Infinity;
+			for (;;) {
+				const { results } = await db.prepare(`SELECT rowid AS _rowid_, * FROM "${t}" WHERE rowid > ? ORDER BY rowid LIMIT ${PAGE}`).bind(last === -Infinity ? -9e15 : last).all<Record<string, unknown>>();
+				let buf = "";
+				for (const row of results) {
+					last = Number(row._rowid_);
+					delete row._rowid_;
+					if (t === "meta" && PRIVATE.test(String(row.key))) continue;
+					buf += JSON.stringify({ t, r: row }) + "\n";
+					rows++;
+				}
+				if (buf) await w.write(enc.encode(buf));
+				if (results.length < PAGE) break;
 			}
-			if (buf) await w.write(enc.encode(buf));
-			if (results.length < PAGE) break;
 		}
+		await w.close();
+		await reading;
+		await setMeta(db, rowsKey(name), (await store.finish(rows)) ? String(rows) : null);
+	} catch (e) {
+		await store.abort();
+		throw e;
 	}
-	await w.close();
-	await reading;
-	const size = parts.reduce((n, p) => n + p.length, 0);
-	const all = new Uint8Array(size);
-	let at = 0;
-	for (const p of parts) (all.set(p, at), (at += p.length));
-	const name = backupName(now, extra);
-	await env.IMAGES.put(PREFIX + name, all, { httpMetadata: { contentType: "application/gzip" }, customMetadata: { rows: String(rows) } });
-	for (const old of (await listBackups(env)).slice(KEEP)) await env.IMAGES.delete(PREFIX + old.name);
-	return { name, size, at: now.toISOString(), rows };
+	for (const old of (await listBackups(env)).slice(KEEP)) await removeBackup(env, old.name);
+	return { name, size: store.size, at: now.toISOString(), rows };
+}
+
+async function removeBackup(env: Env, name: string) {
+	await env.IMAGES!.delete(PREFIX + name);
+	await setMeta(env.DB, rowsKey(name), null);
 }
 
 /** Newest first. */
 export async function listBackups(env: Env): Promise<BackupInfo[]> {
 	if (!env.IMAGES) return [];
 	const out: BackupInfo[] = [];
+	const counts = new Map((await env.DB.prepare("SELECT key, value FROM meta WHERE key LIKE 'backup_rows:%'").all<{ key: string; value: string }>()).results.map((r) => [r.key, Number(r.value)]));
 	let cursor: string | undefined;
 	do {
 		const page = await env.IMAGES.list({ prefix: PREFIX, cursor, include: ["customMetadata"] } as R2ListOptions);
-		for (const o of page.objects) out.push({ name: o.key.slice(PREFIX.length), size: o.size, at: o.uploaded.toISOString(), rows: o.customMetadata?.rows ? Number(o.customMetadata.rows) : null });
+		for (const o of page.objects) out.push({ name: o.key.slice(PREFIX.length), size: o.size, at: o.uploaded.toISOString(), rows: o.customMetadata?.rows ? Number(o.customMetadata.rows) : counts.get(rowsKey(o.key.slice(PREFIX.length))) ?? null });
 		cursor = page.truncated ? page.cursor : undefined;
 	} while (cursor);
 	return out.sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -102,41 +175,61 @@ export async function backupIfDue(env: Env, now = new Date()): Promise<void> {
 }
 
 /**
- * Keeps a backup file the owner has uploaded (one they downloaded before, maybe from another install) in the backups
- * list, after checking it really is a Newsletter Sender backup. Then it can be put back like any other.
+ * Restore from a file. The page sends the file in 8 MB parts (so it can be any size), straight into the backups list
+ * as "Uploaded from a file". Then we check it really is a Newsletter Sender backup before it can be put back.
  */
-export async function saveUploadedBackup(env: Env, data: ArrayBuffer, now = new Date()): Promise<BackupInfo | { error: string }> {
+export async function startUpload(env: Env, now = new Date()): Promise<{ name: string; id: string } | { error: string }> {
 	if (!env.IMAGES) return { error: "Backups need the R2 bucket. See the README." };
-	const notOurs = { error: "That file isn't a Newsletter Sender backup. Please choose a file you downloaded from Backups (it ends .ndjson.gz)." };
+	const name = backupName(now, `-uploaded-${now.toISOString().slice(11, 19).replace(/:/g, "")}`);
+	const up = await env.IMAGES.createMultipartUpload(PREFIX + name, { httpMetadata: GZ });
+	return { name, id: up.uploadId };
+}
+
+export async function uploadPart(env: Env, name: string, id: string, n: number, bytes: ArrayBuffer): Promise<R2UploadedPart | { error: string }> {
+	if (!env.IMAGES || !okName(name) || !id || !(n >= 1 && n <= 10000)) return { error: "That upload isn't going any more. Please try again." };
+	return env.IMAGES.resumeMultipartUpload(PREFIX + name, id).uploadPart(n, bytes);
+}
+
+const NOT_OURS = "That file isn't a Newsletter Sender backup. Please choose a file you downloaded from Backups (it ends .ndjson.gz).";
+
+/** Reads a backup through to count its rows; an error if it isn't one of ours. */
+export async function checkBackup(body: ReadableStream<Uint8Array>): Promise<{ rows: number } | { error: string }> {
 	let rows = -1, rest = "";
+	const see = (l: string) => {
+		if (!l) return true;
+		if (rows === -1) {
+			if (JSON.parse(l)?.newsletterSender !== 1) return false;
+			rows = 0;
+		} else rows++;
+		return true;
+	};
 	try {
-		const reader = new Response(data).body!.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream()).getReader();
+		const reader = body.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream()).getReader();
 		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			const lines = (rest + value).split("\n");
 			rest = lines.pop() ?? "";
-			for (const l of lines) {
-				if (!l) continue;
-				if (rows === -1) {
-					if (JSON.parse(l)?.newsletterSender !== 1) return notOurs;
-					rows = 0;
-				} else rows++;
-			}
+			for (const l of lines) if (!see(l)) return { error: NOT_OURS };
 		}
-		if (rest) {
-			if (rows === -1) {
-				if (JSON.parse(rest)?.newsletterSender !== 1) return notOurs;
-				rows = 0;
-			} else rows++;
-		}
+		if (!see(rest)) return { error: NOT_OURS };
 	} catch {
-		return notOurs;
+		return { error: NOT_OURS };
 	}
-	if (rows === -1) return notOurs;
-	const name = backupName(now, `-uploaded-${now.toISOString().slice(11, 19).replace(/:/g, "")}`);
-	await env.IMAGES.put(PREFIX + name, data, { httpMetadata: { contentType: "application/gzip" }, customMetadata: { rows: String(rows) } });
-	return { name, size: data.byteLength, at: now.toISOString(), rows };
+	return rows === -1 ? { error: NOT_OURS } : { rows };
+}
+
+export async function finishUpload(env: Env, name: string, id: string, parts: R2UploadedPart[]): Promise<{ rows: number } | { error: string }> {
+	if (!env.IMAGES || !okName(name) || !id || !Array.isArray(parts) || !parts.length) return { error: "That upload isn't going any more. Please try again." };
+	await env.IMAGES.resumeMultipartUpload(PREFIX + name, id).complete(parts.map((p) => ({ partNumber: Number(p.partNumber), etag: String(p.etag) })));
+	const obj = await env.IMAGES.get(PREFIX + name);
+	const checked = obj ? await checkBackup(obj.body) : { error: NOT_OURS };
+	if ("error" in checked) {
+		await removeBackup(env, name);
+		return checked;
+	}
+	await setMeta(env.DB, rowsKey(name), String(checked.rows));
+	return checked;
 }
 
 /**

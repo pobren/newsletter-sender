@@ -1636,12 +1636,20 @@ async function settings(section) {
 			const f = ev.target.files[0];
 			ev.target.value = "";
 			if (!f) return;
-			const m = modal(`<h2>Put back the backup in ${esc(f.name)}?</h2><p>Everything goes back to how it was in that file. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			const m = modal(`<h2>Put back the backup in ${esc(f.name)}?</h2><p>Everything goes back to how it was in that file. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="muted" id="rp"></p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
 				try {
-					const res = await fetch("/api/backups/upload", { method: "POST", headers: { "content-type": "application/gzip" }, body: f });
-					const r = await res.json().catch(() => ({}));
-					if (!res.ok) throw new Error(r.error || "Something went wrong. Please try again.");
+					// In 8 MB parts, so a backup of any size goes up.
+					const PART = 8 * 1024 * 1024, st = await api("/api/backups/upload/start", { body: {} }), parts = [];
+					for (let n = 1, at = 0; at < f.size; n++, at += PART) {
+						m.querySelector("#rp").textContent = `Uploading ${Math.min(100, Math.round((at / f.size) * 100))}%`;
+						const res = await fetch(`/api/backups/upload/part?name=${encodeURIComponent(st.name)}&id=${encodeURIComponent(st.id)}&n=${n}`, { method: "PUT", body: f.slice(at, at + PART) });
+						const p = await res.json().catch(() => ({}));
+						if (!res.ok) throw new Error(p.error || "The upload stopped. Please try again.");
+						parts.push(p);
+					}
+					m.querySelector("#rp").textContent = "Putting it back. A big backup can take a few minutes, so please keep this page open.";
+					const r = await api("/api/backups/upload/finish", { body: { name: st.name, id: st.id, parts } });
 					m.remove(); toast(`Put back ${num(r.rows)} rows`); boot();
 				} catch (err) { m.querySelector("#re").textContent = err.message; }
 			});
