@@ -403,7 +403,7 @@ function route() {
 	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
-const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected" };
+const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };
 function statsHtml(s, total, tracking) {
 	const tr = tracking === true ? { opens: true, clicks: true } : tracking || {};
 	const done = s.sent + s.failed + s.skipped;
@@ -1677,14 +1677,53 @@ async function settings(section) {
 		<div class="card"><h2>Passkeys</h2><p class="muted">Sign in with Face ID, Touch ID, Windows Hello or your phone, instead of typing your password. Your password still works too.</p>
 		${acct.passkeys.length ? `<div class="scroll"><table class="data"><thead><tr><th>Passkey</th><th>Added</th><th>Last used</th><th class="c">Remove</th></tr></thead><tbody>${acct.passkeys.map((k) => `<tr><td><b>${esc(k.name)}</b>${k.here ? "" : `<br><span class="muted small">Works on ${esc(k.site)}</span>`}</td><td>${day(k.created_at)}</td><td>${day(k.last_used_at)}</td><td class="c"><button class="icon-btn" data-pkdel="${esc(k.id)}" title="Remove" aria-label="Remove">${icon("trash")}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No passkeys yet.</p>`}
 		${PK ? `<div class="row" style="margin-top:14px"><button class="btn" id="pkAdd">${icon("key")}Add a passkey</button></div>` : `<p class="hint">This browser can't make passkeys. Try Safari, Chrome, Edge or Firefox.</p>`}<p class="err" id="pke"></p></div>
+		<div class="card" id="updates"><h2>Updates</h2><p class="muted">Looking for a new version…</p></div>
 		<div class="card"><h2>Change password</h2><label for="pwOld">Current password</label><input id="pwOld" type="password" autocomplete="current-password"><label for="pwNew">New password</label><input id="pwNew" type="password" minlength="10" autocomplete="new-password"><p class="hint">At least 10 characters. Other devices will be signed out.</p><p class="err" id="pwe"></p><div class="row"><button class="btn" id="pwSave">${icon("save")}Change password</button></div></div>
 		${ADDON.licenceCard ? ADDON.licenceCard() : `<div class="card"><h2>Licence</h2><p>You are running the Free Edition, licensed for a single brand and in-house newsletters. If you plan to manage campaigns for clients or resell this as a white-labelled service, a commercial agency licence is required.</p><p>The Agency Edition unlocks unlimited client brands, dedicated client logins with custom send limits and an overarching agency dashboard.</p><a class="btn ghost" href="https://newslettersender.com/agency/" target="_blank" rel="noopener">${icon("users")}Explore the Agency Edition</a></div>`}`;
+		if (ME?.role === "owner") updatesCard(); else $("#updates")?.remove();
 		$("#gsback") && ($("#gsback").onclick = () => { store.set("ns.gs", null); location.hash = "campaigns"; });
 		$("#everywhere").onclick = (e) => run(e.currentTarget, async () => { await api("/api/signout-everywhere", { body: {} }); boot(); });
 		$("#pkAdd") && ($("#pkAdd").onclick = (e) => run(e.currentTarget, async () => { $("#pke").textContent = ""; try { await addPasskey(); toast("Passkey added"); settings("account"); } catch (err) { $("#pke").textContent = err.message; } }));
 		main.querySelectorAll("[data-pkdel]").forEach((b) => b.onclick = () => run(b, async () => { if (!confirm("Remove this passkey? You can still sign in with your password.")) return; await api(`/api/passkey/${b.dataset.pkdel}`, { method: "DELETE" }); toast("Passkey removed"); settings("account"); }));
 		$("#pwSave").onclick = (e) => run(e.currentTarget, async () => { $("#pwe").textContent = ""; try { await api("/api/account/password", { body: { current: $("#pwOld").value, password: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Password changed"); } catch (err) { $("#pwe").textContent = err.message; } });
 	}
+}
+
+// -- Updates (src/update.ts): one press installs the newest version into this Cloudflare account ----------------
+async function updatesCard(check = false) {
+	const box = $("#updates");
+	if (!box) return;
+	let u;
+	try { u = await api(`/api/update${check ? "?check" : ""}`); } catch (err) { box.innerHTML = `<h2>Updates</h2><p class="err">${esc(err.message)}</p>`; return; }
+	const when = (d) => new Date(d).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+	const undoable = u.last?.before && !u.last.undone && u.last.to === u.version;
+	box.innerHTML = `<h2>Updates</h2><p>You're on version <b>${esc(u.version)}</b>.</p>
+	${u.latest ? `<div class="info">${icon("gift")}<div><p><b>Version ${esc(u.latest.version)} is out.</b></p>${u.latest.notes.length ? `<ul style="margin:8px 0 0;padding-left:20px">${u.latest.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}<p style="margin-top:8px">Updating takes about ten seconds. Your subscribers, emails, settings and web addresses all stay as they are, and you can go back if anything looks wrong.</p></div></div>
+	<div class="row"><button class="btn" id="upGo">${icon("download")}Update to ${esc(u.latest.version)}</button><a class="btn ghost" href="${esc(u.releases)}" target="_blank" rel="noopener">${icon("list")}All releases</a></div>`
+	: `<p class="muted">You have the newest version.</p><div class="row"><button class="btn ghost" id="upCheck">${icon("refresh")}Check again</button><a class="btn ghost" href="${esc(u.releases)}" target="_blank" rel="noopener">${icon("list")}All releases</a></div>`}
+	${undoable ? `<p class="hint" style="margin-top:14px">Updated from ${esc(u.last.from)} on ${when(u.last.at)}.</p><div class="row"><button class="btn ghost small" id="upUndo">${icon("undo")}Go back to ${esc(u.last.from)}</button></div>` : ""}<p class="err" id="upe"></p>`;
+	$("#upCheck") && ($("#upCheck").onclick = (e) => run(e.currentTarget, () => updatesCard(true)));
+	$("#upGo") && ($("#upGo").onclick = (e) => run(e.currentTarget, async () => {
+		$("#upe").textContent = "";
+		try {
+			const r = await api("/api/update/install", { body: {} });
+			box.innerHTML = `<h2>Updates</h2><p><b>Updating to ${esc(r.version)}…</b></p><p class="muted">This page reloads when it's ready.</p>`;
+			await waitForVersion(r.version);
+		} catch (err) { $("#upe").textContent = err.message; }
+	}));
+	$("#upUndo") && ($("#upUndo").onclick = (e) => run(e.currentTarget, async () => {
+		if (!confirm(`Go back to version ${u.last.from}?`)) return;
+		$("#upe").textContent = "";
+		try { const r = await api("/api/update/undo", { body: {} }); await waitForVersion(r.version); } catch (err) { $("#upe").textContent = err.message; }
+	}));
+}
+// Cloudflare takes a few seconds to switch every location over, so wait until this one answers with the new version.
+async function waitForVersion(v) {
+	for (let i = 0; i < 30; i++) {
+		await new Promise((r) => setTimeout(r, 2000));
+		try { const u = await api("/api/update"); if (u.version === v) break; } catch {}
+	}
+	location.reload();
 }
 
 // -- Reports ---------------------------------------------------------------------------------------------

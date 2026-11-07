@@ -1,5 +1,6 @@
 // The dashboard's JSON. Everything here needs the owner signed in, apart from set-up and sign in.
 
+import { install, latest, newer, RELEASES, undo, VERSION } from "./update.ts";
 import { cleanReferrals, parseReferrals } from "./referrals.ts";
 import { checkPassword, clearCookie, clearFailures, currentAccount, hashPassword, noteFailure, passwordProblem, sessionCookie, setupCodeMatches, setupTokenOk, signOutEverywhere, tooManyTries } from "./auth.ts";
 import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
@@ -134,6 +135,30 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	// -- Who's signed in, and which brands they can open ----------------------------------------
 	if (path === "/api/brands" && method === "GET") {
 		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can, me: { name: me.name, email: me.email }, edition: addon.edition });
+	}
+
+	// -- Updates (update.ts): the owner installs a new version with one press, or goes back -----------------
+	if (path.startsWith("/api/update")) {
+		if (me.role !== "owner") return bad("Only the owner can update Newsletter Sender.", 403);
+		const status = async (fresh = false) => {
+			const rel = await latest(db, fresh);
+			return { version: VERSION, latest: rel && newer(rel.version, VERSION) ? rel : null, last: JSON.parse((await getMeta(db, "update_last")) ?? "null"), releases: RELEASES };
+		};
+		if (path === "/api/update" && method === "GET") return ok(await status(url.searchParams.has("check")));
+		if (path === "/api/update/install" && method === "POST") {
+			const rel = await latest(db, true);
+			if (!rel || !newer(rel.version, VERSION)) return bad("You're already on the newest version.");
+			const r = await install(db, url.hostname, rel);
+			if ("error" in r) return bad(r.error);
+			await logEvent(db, brand.id, "update", null, null, `Updated from ${VERSION} to ${rel.version}`).run();
+			return ok({ version: rel.version });
+		}
+		if (path === "/api/update/undo" && method === "POST") {
+			const r = await undo(db, url.hostname);
+			if ("error" in r) return bad(r.error);
+			await logEvent(db, brand.id, "update", null, null, `Went back to ${r.version}`).run();
+			return ok({ version: r.version });
+		}
 	}
 
 	// -- Your account: password and passkeys --------------------------------------------------------

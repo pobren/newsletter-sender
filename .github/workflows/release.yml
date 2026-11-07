@@ -1,0 +1,42 @@
+# Publishes a release whenever package.json gets a new version on main. Installs see it under Settings, Account and
+# update themselves with one press (src/update.ts). Notes come from CHANGELOG.md.
+name: Release
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Is this version new?
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then echo "new=no" >> "$GITHUB_OUTPUT"; else echo "new=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.v.outputs.new == 'yes'
+        run: npm ci
+      - if: steps.v.outputs.new == 'yes'
+        run: npm test
+      - name: Build
+        if: steps.v.outputs.new == 'yes'
+        run: npx wrangler deploy --dry-run --outdir dist && node scripts/release.mjs
+      - name: Publish
+        if: steps.v.outputs.new == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ steps.v.outputs.version }}
+          files=$(node -p "require('./dist/release.json').files.map(f => 'dist/' + f.name).join(' ')")
+          gh release create "v$v" $files dist/release.json --title "Newsletter Sender $v" --notes-file dist/notes.md --latest
