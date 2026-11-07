@@ -30,7 +30,7 @@ Newsletter Sender runs in your own Cloudflare account. Your subscribers, your em
 
 ## What you need
 
-- A Cloudflare account. The free plan works for smaller lists. For lists in the tens of thousands, Cloudflare's Workers Paid plan gives the database and queue more room.
+- A Cloudflare account on the Workers Paid plan ($5 a month). The free plan limits each run to a few milliseconds of work and 50 outside requests, which isn't enough to send a batch of emails.
 - A domain to send from, such as `news@yourdomain.com`.
 - An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo or Resend.
 
