@@ -119,13 +119,27 @@ export function buttonHtml(label: string, href: string, colour: string): string 
 export const isDocument = (html: string) => /<html[\s>]|<body[\s>]/i.test(html);
 
 /** Takes out anything that could run code: scripts, frames, forms, on... handlers and javascript: links. */
+/** A link or picture address as a browser reads it: entities decoded, spaces and control characters gone. */
+function plainUrl(v: string): string {
+	return v
+		.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16) || 32))
+		.replace(/&#(\d+);?/g, (_m, d) => String.fromCodePoint(Number(d) || 32))
+		.replace(/&colon;/gi, ":").replace(/&tab;|&newline;/gi, "")
+		.replace(/[\u0000-\u0020\u007f-\u00a0]+/g, "")
+		.toLowerCase();
+}
+
 export function sanitise(html: string): string {
 	return html
 		.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
 		.replace(/<\/?(script|iframe|frame|frameset|object|embed|applet|form|base)\b[^>]*>/gi, "")
 		.replace(/<meta\b[^>]*http-equiv[^>]*>/gi, "")
-		.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-		.replace(/\b(href|src|action|formaction|xlink:href)\s*=\s*(["']?)\s*(?:javascript|vbscript|data:text\/html)[^"'>\s]*\2/gi, '$1="#"');
+		// on…= handlers, however they're separated from the tag (a space, a slash or a quote).
+		.replace(/([\s/"'])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "$1")
+		.replace(/\b(href|src|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (m, attr: string, val: string) => {
+			const v = plainUrl(val.replace(/^["']|["']$/g, ""));
+			return /^(javascript|vbscript|data:text\/html|data:image\/svg)/.test(v) ? `${attr}="#"` : m;
+		});
 }
 
 /** Merge tags inside HTML: each reader's details go in escaped. */

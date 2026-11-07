@@ -25,7 +25,7 @@ import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
 
-const VERSION = "0.1.0";
+import { VERSION } from "./update.ts";
 
 const SECURITY = {
 	"x-content-type-options": "nosniff",
