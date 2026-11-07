@@ -1,6 +1,6 @@
 {
 	"name": "newsletter-sender",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"private": true,
 	"description": "Newsletters for solo writers, businesses and agencies, from your own Cloudflare account. Hosted on Cloudflare, sent with Amazon SES.",
 	"license": "SEE LICENSE IN LICENSE",
