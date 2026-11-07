@@ -500,9 +500,19 @@ export async function recordMailEvent(db: D1Database, b: BrandRow, e: MailEvent)
 	for (const address of e.addresses) {
 		const s = e.sub ? await db.prepare("SELECT id, email FROM subscribers WHERE id = ? AND brand_id = ?").bind(e.sub, b.id).first<{ id: string; email: string }>() : await db.prepare("SELECT id, email FROM subscribers WHERE email = ? AND brand_id = ?").bind(address, b.id).first<{ id: string; email: string }>();
 		if (!s) continue;
+		if (e.kind === "unsubscribe") {
+			const was = (await db.prepare("SELECT list_id FROM memberships WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(s.id).all<{ list_id: string }>()).results.map((r) => r.list_id);
+			if (!was.length) continue;
+			await db.batch([
+				db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id),
+				logEvent(db, b.id, "unsubscribed", s.id, e.campaign ?? null, e.detail),
+			]);
+			for (const id of was) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: id });
+			continue;
+		}
 		const stmts = [logEvent(db, b.id, e.kind === "complaint" ? "complained" : e.permanent ? "bounced" : "soft_bounce", s.id, e.campaign ?? null, e.detail)];
 		if (e.permanent) stmts.push(db.prepare("UPDATE subscribers SET suppressed = ?, suppressed_at = ? WHERE id = ? AND (suppressed IS NULL OR suppressed = 'bounced')").bind(e.kind === "complaint" ? "complained" : "bounced", iso(), s.id));
 		await db.batch(stmts);
 	}
-	if (e.campaign && (e.permanent || e.kind === "complaint")) await checkCampaign(db, e.campaign);
+	if (e.campaign && (e.permanent || e.kind === "complaint") && e.kind !== "unsubscribe") await checkCampaign(db, e.campaign);
 }
