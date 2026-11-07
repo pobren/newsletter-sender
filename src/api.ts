@@ -8,7 +8,7 @@ import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, mak
 import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
-import { finishUpload, getBackup, KEEP, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
+import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
@@ -363,7 +363,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (path === "/api/backups") {
 		if (method === "POST") {
 			try {
-				return ok(await makeBackup(env, new Date(), "-by-hand"));
+				const now = new Date();
+				return ok(await makeBackup(env, now, timed("by-hand", now)));
 			} catch (e) {
 				return bad((e as Error).message);
 			}

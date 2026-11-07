@@ -82,6 +82,8 @@ class Store {
 export interface BackupInfo { name: string; size: number; at: string; rows: number | null }
 
 export const backupName = (d: Date, extra = "") => `newsletter-sender-${d.toISOString().slice(0, 10)}${extra}.ndjson.gz`;
+/** Backups made by hand or before a restore carry the time too, so a second one the same day doesn't replace the first. */
+export const timed = (kind: string, d = new Date()) => `-${kind}-${d.toISOString().slice(11, 19).replace(/:/g, "")}`;
 const okName = (n: string) => /^newsletter-sender-\d{4}-\d{2}-\d{2}(-[a-z0-9-]{1,30})?\.ndjson\.gz$/.test(n);
 
 async function tableNames(db: D1Database): Promise<string[]> {
@@ -183,7 +185,7 @@ export async function backupIfDue(env: Env, now = new Date()): Promise<void> {
  */
 export async function startUpload(env: Env, now = new Date()): Promise<{ name: string; id: string } | { error: string }> {
 	if (!env.IMAGES) return { error: "Backups need the R2 bucket. See the README." };
-	const name = backupName(now, `-uploaded-${now.toISOString().slice(11, 19).replace(/:/g, "")}`);
+	const name = backupName(now, timed("uploaded", now));
 	const up = await env.IMAGES.createMultipartUpload(PREFIX + name, { httpMetadata: GZ });
 	return { name, id: up.uploadId };
 }
@@ -244,7 +246,8 @@ export async function restoreBackup(env: Env, name: string): Promise<{ rows: num
 	const obj = await getBackup(env, name);
 	if (!obj) return { error: "That backup has gone." };
 	if (await db.prepare("SELECT 1 FROM campaigns WHERE status = 'sending' LIMIT 1").first()) return { error: "A campaign is sending. Please pause it or let it finish first." };
-	const before = await makeBackup(env, new Date(), "-before-restore");
+	const now = new Date();
+	const before = await makeBackup(env, now, timed("before-restore", now));
 	const have = new Set(await tableNames(db));
 	const cols = new Map<string, Set<string>>();
 	const cleared = new Set<string>();
