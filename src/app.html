@@ -1318,7 +1318,7 @@ const SES_STACK = "https://newsletter-sender-public.s3.eu-west-1.amazonaws.com/n
 const stackUrl = (region) => `https://console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?templateURL=${encodeURIComponent(SES_STACK)}&stackName=newsletter-sender`;
 // Settings, Backups: a copy of each nightly backup in the owner's own Amazon S3, away from Cloudflare (src/s3.ts).
 function s3Card(s3) {
-	if (!s3) return `<div class="card"><h2>A copy away from Cloudflare</h2><p class="muted">If you send with Amazon SES, we copy each nightly backup to your own Amazon S3 as well. With another sending service, please download a backup now and then and keep it somewhere safe. If your Cloudflare account were ever closed, you could install Newsletter Sender again and use Restore from a file.</p></div>`;
+	if (!s3) return `<div class="card"><h2>A copy away from Cloudflare</h2><p class="muted">If you send with Amazon SES, we copy each nightly backup to your own Amazon S3 as well. With another sending service, please download a backup now and then and keep it somewhere safe. If your Cloudflare account were ever closed, you could install Newsletter Sender again and use Restore from file.</p></div>`;
 	const last = s3.last;
 	const when = last && new Date(last.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 	const status = !last ? `<p class="muted">The first copy goes after tonight's backup, or press Copy to Amazon S3 now.</p>`
@@ -1328,7 +1328,7 @@ function s3Card(s3) {
 			<code class="copy"><span class="grow">${esc(SES_STACK)}</span>${copyBtn(SES_STACK)}</code>
 			<ol class="steps" start="3"><li>Press <b>Next</b> until the end, tick the box and press <b>Submit</b>.</li><li>Come back here and press Copy to Amazon S3 now.</li></ol>`
 		: `<p class="hwarn">${icon("alert")}<span>The last copy didn't work: ${esc(last.error)}</span></p>`;
-	return `<div class="card"><h2>A copy away from Cloudflare</h2><p class="muted">Each nightly backup is also copied to your own Amazon S3, the same Amazon account you send with. Copies are kept for 31 days. If your Cloudflare account were ever closed, you could install Newsletter Sender again and use Restore from a file with one of them.</p>${status}<div class="row"><button class="btn ghost" id="s3Now">${icon("upload")}Copy to Amazon S3 now</button></div></div>`;
+	return `<div class="card"><h2>A copy away from Cloudflare</h2><p class="muted">Each nightly backup is also copied to your own Amazon S3, the same Amazon account you send with. Copies are kept for 31 days. If your Cloudflare account were ever closed, you could install Newsletter Sender again and use Restore from file with one of them.</p>${status}<div class="row"><button class="btn ghost" id="s3Now">${icon("upload")}Copy to Amazon S3 now</button></div></div>`;
 }
 const CF_TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22workers_routes%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%5D&name=Newsletter%20Sender";
 const helpHtml = (id) => `${HELP[id].guide ? `<a class="btn small" href="${HELP[id].guide}" target="_blank" rel="noopener" style="margin:10px 0 4px">${icon("ext")}Step by step guide, with screen grabs</a>` : ""}<ol class="hint">${HELP[id].steps.map((x) => `<li>${x}</li>`).join("")}</ol><div class="helplinks">${HELP[id].links.map(([t, u]) => `<a class="btn ghost small" href="${u}" target="_blank" rel="noopener">${icon("ext")}${t}</a>`).join("")}</div>`;
@@ -1344,7 +1344,7 @@ async function sending(head = "") {
 		<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Under Account Resources choose your account and under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
 		<div class="helplinks"><a class="btn ghost small" href="${CF_TOKEN_URL}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
 		<div class="row"><input id="cft" class="grow" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token" style="width:auto"><button class="btn small" id="cfSave">${icon("save")}Save</button></div><p class="err" id="cfe"></p></details>`}
-	<div class="row"><a class="btn" href="#ses/3">${icon("wand")}Open setup wizard</a><button class="btn ghost" id="sesSetup">${icon("cog")}Configure Amazon SES automatically</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check verification status</button></div><div id="sesOut">${s.ses ? (s.sending.cloudflareDns ? `<details class="embed"><summary>${icon("list")}View DNS records for Amazon SES</summary>${recs(s.ses.records)}</details>` : `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(s.ses.records)}`) : ""}</div>`
+	<div class="row"><a class="btn" href="#ses/3">${icon("wand")}Open the setup wizard</a><button class="btn ghost" id="sesSetup">${icon("cog")}Configure Amazon SES automatically</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check verification status</button></div><div id="sesOut">${s.ses ? (s.sending.cloudflareDns ? `<details class="embed"><summary>${icon("list")}View DNS records for Amazon SES</summary>${recs(s.ses.records)}</details>` : `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(s.ses.records)}`) : ""}</div>`
 	: s.sending.bounces ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")} <span><b>Bounces and spam complaints:</b> we added our webhook in ${esc(s.sending.name)} for you, so anyone who bounces or complains is never emailed again.</span></p><details class="embed"><summary>${icon("list")}The webhook address</summary><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code></details>`
 	: `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>We couldn't add our webhook in ${esc(s.sending.name)} for you. Add this address there as a webhook, for bounces and spam complaints, so we stop emailing them:</p><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code><div class="row" style="margin-top:10px"><button class="btn ghost small" id="hookAgain">${icon("refresh")}Add it for me</button></div><p class="err" id="hookErr"></p>`}</div>` : ""}
 	<div class="card"><h2>${s.sending ? "Change sending provider" : "Choose a sending provider"}</h2><div class="tiles">${PROVIDERS.map(([id, n, t]) => `<button class="tile ${id === pick ? "on" : ""}" data-p="${id}">${logo(id)}<span><b>${n}</b><span>${t}</span></span></button>`).join("")}</div><div id="pf"></div></div>
@@ -1355,14 +1355,14 @@ async function sending(head = "") {
 		const ses = pick === "ses";
 		if (ses && !manual) {
 			$("#pf").innerHTML = `<p>How would you like to set up Amazon SES?</p><div class="options">
-			<a class="option" href="#ses/1"><span class="lic">${SES_LOGO(30)}</span><span><b>Use the set up wizard</b><small>Recommended. Five short steps, one at a time, and we do most of it for you.</small></span></a>
+			<a class="option" href="#ses/1"><span class="lic">${SES_LOGO(30)}</span><span><b>Use the setup wizard</b><small>Recommended. Five short steps, one at a time, and we do most of it for you.</small></span></a>
 			<button class="option" id="manual"><span class="lic">${icon("cog")}</span><span><b>Set it up myself</b><small>Make the AWS user and keys yourself, then paste them in.</small></span></button></div>`;
 			$("#manual").onclick = () => { manual = true; form(); };
 			return;
 		}
 		$("#pf").innerHTML = helpHtml(ses ? "ses_manual" : pick) + (ses ? `<label for="region">Region <span class="hint">(eu-west-1 is Ireland, eu-west-2 is London)</span></label><select id="region">${REGIONS.map(([r, n]) => `<option value="${r}">${n} (${r})</option>`).join("")}</select>
 		<label>Access key ID</label><input id="kid" name="aws-access-key-id" placeholder="AKIA..." autocomplete="off" data-lpignore="true"><label>Secret access key</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">`
-		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails a second <span class="hint">(your plan's limit${pick === "resend" ? "; Resend allows 2 unless you've asked for more" : ""})</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
+		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails per second <span class="hint">(your plan's limit${pick === "resend" ? "; Resend allows 2 unless you've asked for more" : ""})</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
 		if (ses && s.sending?.region) $("#region").value = s.sending.region;
 		$("#psave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/sending", { body: { provider: pick, key: $("#key").value, accessKeyId: $("#kid")?.value, region: $("#region")?.value, mailgunDomain: $("#mgd")?.value, mailgunRegion: $("#mgr")?.value, rate: $("#rate")?.value } }); toast(pick === "ses" ? "Saved" : r.hook ? "Saved. Please add the bounce webhook yourself (below)" : "Saved, and the bounce webhook is added"); route(); } catch (err) { $("#pe").textContent = err.message; } });
 	};
@@ -1428,7 +1428,7 @@ async function sesWizard(stepArg) {
 		<label for="kid">Access key ID <span class="hint">(AccessKeyId)</span></label><input id="kid" placeholder="AKIA..." autocomplete="off" data-lpignore="true">
 		<label for="key">Secret access key <span class="hint">(SecretAccessKey)</span></label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">
 		<p class="hint"><a href="https://newslettersender.com/help/amazon-ses/" target="_blank" rel="noopener">Step by step guide, with screen grabs</a></p>`,
-		`<button class="btn" id="wnext">${icon("check")}Check the keys and go on</button>`);
+		`<button class="btn" id="wnext">${icon("check")}Check the keys and continue</button>`);
 		// Paste the whole Outputs table into either box and both keys land in the right place.
 		const pick = (e) => {
 			const t = (e.clipboardData || window.clipboardData)?.getData("text") || "";
@@ -1458,7 +1458,7 @@ async function sesWizard(stepArg) {
 				<li><b>Copy the token</b> and paste it here.</li></ol>
 			<label for="cft">Cloudflare token</label><input id="cft" type="password" autocomplete="off" data-lpignore="true">
 			<p class="hint"><a href="#ses/4" id="wself">I'd rather add the records myself</a></p>`;
-			next.hidden = false; next.innerHTML = `${icon("check")}Check the token and go on`;
+			next.hidden = false; next.innerHTML = `${icon("check")}Check the token and continue`;
 		};
 		const showOther = (host) => {
 			box.innerHTML = `<div class="found"><span class="lic">${icon("list")}</span><div><b>${esc(domain)}'s DNS is ${host ? `with ${esc(host)}` : "not on Cloudflare"}</b><small>No problem. On the next step we show you each record to add${host ? ` in ${esc(host)}` : ""}, with copy buttons.</small></div></div>`;
@@ -1642,7 +1642,7 @@ async function settings(section) {
 		<p class="muted">Every night at 02:00, a complete snapshot of your data (including lists, subscribers, campaigns, templates, automations, reports and settings) is saved directly to your Cloudflare storage. The last ${s.keep} daily backups are retained automatically. API keys and passwords are never included in backup files, making downloaded copies safe to store offline.</p>
 		${s.bucket ? "" : `<p class="hwarn">${icon("alert")}<span>Backups need the R2 bucket this app uses for pictures. See the README.</span></p>`}
 		${s.error ? `<p class="hwarn">${icon("alert")}<span>The last nightly backup didn't work: ${esc(s.error)}</span></p>` : ""}
-		<div class="row"><button class="btn" id="bkNow">${icon("save")}Back up now</button><label class="btn ghost" style="margin:0">${icon("upload")}Restore from a file<input type="file" id="bkFile" accept=".gz,application/gzip" hidden></label></div></div>
+		<div class="row"><button class="btn" id="bkNow">${icon("save")}Back up now</button><label class="btn ghost" style="margin:0">${icon("upload")}Restore from file<input type="file" id="bkFile" accept=".gz,application/gzip" hidden></label></div></div>
 		${s3Card(s.s3)}
 		<div class="card"><h2>Your backups</h2>${s.backups.length ? `<table class="data"><thead><tr><th>Date &amp; time</th><th>Type</th><th>Records</th><th>File size</th><th style="text-align:right">Actions</th></tr></thead><tbody>
 		${s.backups.map((b) => `<tr><td>${esc(when(b))}</td><td>${kind(b.name)}</td><td>${b.rows == null ? "" : num(b.rows)}</td><td>${size(b.size)}</td><td class="row" style="justify-content:flex-end;gap:8px"><a class="btn ghost small" href="/api/backups/download?name=${encodeURIComponent(b.name)}">${icon("download")}Download</a><button class="btn ghost small" data-restore="${esc(b.name)}" data-when="${esc(when(b))}">${icon("undo")}Restore</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">No backups yet. The first one is made tonight, or press Back up now.</p>`}</div>`;
@@ -1653,7 +1653,7 @@ async function settings(section) {
 			const f = ev.target.files[0];
 			ev.target.value = "";
 			if (!f) return;
-			const m = modal(`<h2>Put back the backup in ${esc(f.name)}?</h2><p>Everything goes back to how it was in that file. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="muted" id="rp"></p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			const m = modal(`<h2>Restore the backup in ${esc(f.name)}?</h2><p>Everything goes back to how it was in that file. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="muted" id="rp"></p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, restore from file</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
 				try {
 					// In 8 MB parts, so a backup of any size goes up.
@@ -1672,7 +1672,7 @@ async function settings(section) {
 			});
 		};
 		main.querySelectorAll("[data-restore]").forEach((btn) => btn.onclick = () => {
-			const m = modal(`<h2>Put back the backup from ${esc(btn.dataset.when)}?</h2><p>Everything goes back to how it was then. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, put it back</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			const m = modal(`<h2>Restore the backup from ${esc(btn.dataset.when)}?</h2><p>Everything goes back to how it was then. Anything added or changed since is replaced. We make a backup of how things are now first, so you can undo this.</p><p class="err" id="re"></p><div class="row"><button class="btn danger" id="rgo">${icon("undo")}Yes, restore this backup</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			m.querySelector("#rgo").onclick = (e) => run(e.currentTarget, async () => {
 				try { const r = await api("/api/backups/restore", { body: { name: btn.dataset.restore, confirm: true } }); m.remove(); toast(`Put back ${num(r.rows)} rows`); boot(); }
 				catch (err) { m.querySelector("#re").textContent = err.message; }
