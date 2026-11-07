@@ -1324,7 +1324,7 @@ function s3Card(s3) {
 	const status = !last ? `<p class="muted">The first copy goes after tonight's backup, or press Copy to Amazon S3 now.</p>`
 		: !last.error ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span>Copied to <b>${esc(last.bucket)}</b> on ${esc(when)}.</span></p>`
 		: last.error === "setup" ? `<p class="hwarn">${icon("alert")}<span>Your Amazon setup needs one more step, to make the bucket for your backups.</span></p>
-			<ol class="steps"><li>Open <a href="https://console.aws.amazon.com/cloudformation/home?region=${esc(s3.region)}#/stacks" target="_blank" rel="noopener">CloudFormation in AWS</a> and choose the <b>newsletter-sender</b> stack.</li><li>Press <b>Update</b>, then <b>Replace existing template</b>, and paste this Amazon S3 URL:</li></ol>
+			<ol class="steps"><li>Open <a href="https://console.aws.amazon.com/cloudformation/home?region=${esc(s3.region)}#/stacks" target="_blank" rel="noopener">CloudFormation in AWS</a> and choose the <b>newsletter-sender</b> stack.</li><li>Press <b>Update stack</b>, then <b>Make a direct update</b>. Choose <b>Replace existing template</b>, and paste this Amazon S3 URL:</li></ol>
 			<code class="copy"><span class="grow">${esc(SES_STACK)}</span>${copyBtn(SES_STACK)}</code>
 			<ol class="steps" start="3"><li>Press <b>Next</b> until the end, tick the box and press <b>Submit</b>.</li><li>Come back here and press Copy to Amazon S3 now.</li></ol>`
 		: `<p class="hwarn">${icon("alert")}<span>The last copy didn't work: ${esc(last.error)}</span></p>`;
