@@ -7,7 +7,7 @@ import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
 import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, makeKey, MAX_HOOKS, MAX_KEYS } from "./v1.ts";
 import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
-import { getBackup, KEEP, listBackups, makeBackup, restoreBackup, saveUploadedBackup } from "./backup.ts";
+import { finishUpload, getBackup, KEEP, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
@@ -375,16 +375,24 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		if (!obj) return bad("That backup has gone.", 404);
 		return new Response(obj.body, { headers: { "content-type": "application/gzip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store" } });
 	}
-	// Restore from a file: the owner uploads a backup they downloaded. We keep it in the list, then put it back.
-	if (path === "/api/backups/upload" && method === "POST") {
-		const data = await request.arrayBuffer();
-		if (!data.byteLength) return bad("Please choose a backup file.");
-		if (data.byteLength > 95e6) return bad("That file is too big to upload here (the limit is 95 MB).");
-		const saved = await saveUploadedBackup(env, data);
-		if ("error" in saved) return bad(saved.error);
+	// Restore from a file: the page sends the file in 8 MB parts (start, part, part..., finish), then we check it and
+	// put it back like any other backup.
+	if (path === "/api/backups/upload/start" && method === "POST") {
+		const r = await startUpload(env);
+		return "error" in r ? bad(r.error) : ok(r);
+	}
+	if (path === "/api/backups/upload/part" && method === "PUT") {
+		const r = await uploadPart(env, url.searchParams.get("name") ?? "", url.searchParams.get("id") ?? "", Number(url.searchParams.get("n")), await request.arrayBuffer());
+		return "error" in r ? bad(r.error) : ok({ partNumber: r.partNumber, etag: r.etag });
+	}
+	if (path === "/api/backups/upload/finish" && method === "POST") {
+		const b = await body(request);
+		const name = String(b.name ?? "");
+		const checked = await finishUpload(env, name, String(b.id ?? ""), b.parts as R2UploadedPart[]);
+		if ("error" in checked) return bad(checked.error);
 		try {
-			const r = await restoreBackup(env, saved.name);
-			return "error" in r ? bad(r.error) : ok({ ...r, name: saved.name });
+			const r = await restoreBackup(env, name);
+			return "error" in r ? bad(r.error) : ok({ ...r, name });
 		} catch (e) {
 			return bad(`The restore stopped part way: ${(e as Error).message}. Your backup from just before is in the list, so you can put that back.`);
 		}

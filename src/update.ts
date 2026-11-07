@@ -121,6 +121,7 @@ export async function install(db: D1Database, host: string, release: Release, fe
 		compatibility_flags: release.compatibility_flags ?? [],
 		keep_bindings: KEEP,
 		placement: { mode: "smart" },
+		limits: { cpu_ms: 300000 },
 		observability: { enabled: true },
 		annotations: { "workers/message": `Newsletter Sender ${release.version}`, "workers/tag": `v${release.version}` },
 	})], { type: "application/json" }));
