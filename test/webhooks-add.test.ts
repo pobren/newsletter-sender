@@ -15,21 +15,26 @@ function fake(answers: [number, unknown][]) {
 	return { f, calls };
 }
 
-test("Postmark: adds a broadcast webhook for bounces and complaints", async () => {
-	const { f, calls } = fake([[200, { Webhooks: [] }], [200, { ID: 1 }]]);
+test("Postmark: asks to use our unsubscribe link, then adds a broadcast webhook for bounces, complaints and unsubscribes", async () => {
+	const { f, calls } = fake([[422, { Message: "not approved" }], [200, { Webhooks: [] }], [200, { ID: 1 }]]);
 	const r = await addWebhook({ provider: "postmark", key: "k".repeat(20) }, HOOK, f);
 	assert.deepEqual(r, { ok: true });
-	const b = JSON.parse(calls[1].body);
+	assert.equal(calls[0].method, "PATCH");
+	assert.equal(JSON.parse(calls[0].body).SubscriptionManagementConfiguration.UnsubscribeHandlingType, "Custom");
+	const b = JSON.parse(calls[2].body);
 	assert.equal(b.Url, HOOK);
 	assert.equal(b.MessageStream, "broadcast");
 	assert.equal(b.Triggers.Bounce.Enabled, true);
 	assert.equal(b.Triggers.SpamComplaint.Enabled, true);
+	assert.equal(b.Triggers.SubscriptionChange.Enabled, true);
 });
 
-test("Postmark: does nothing when ours is already there", async () => {
-	const { f, calls } = fake([[200, { Webhooks: [{ Url: HOOK }] }]]);
+test("Postmark: brings ours up to date when it's already there", async () => {
+	const { f, calls } = fake([[200, {}], [200, { Webhooks: [{ ID: 7, Url: HOOK }] }], [200, {}]]);
 	assert.deepEqual(await addWebhook({ provider: "postmark", key: "k".repeat(20) }, HOOK, f), { ok: true });
-	assert.equal(calls.length, 1);
+	assert.equal(calls[2].method, "PUT");
+	assert.match(calls[2].url, /\/webhooks\/7$/);
+	assert.equal(JSON.parse(calls[2].body).Triggers.SubscriptionChange.Enabled, true);
 });
 
 test("Mailgun: keeps the owner's own webhook addresses and adds ours", async () => {

@@ -238,7 +238,8 @@ export async function unseal(secret: string, sealed: string | null): Promise<Pro
 // -- Bounces and complaints coming back ------------------------------------------------
 
 export interface MailEvent {
-	kind: "bounce" | "complaint";
+	/** An unsubscribe comes from a service's own unsubscribe link (Postmark adds one until it lets us use ours). */
+	kind: "bounce" | "complaint" | "unsubscribe";
 	/** A hard bounce or a complaint: never email this address again. A soft bounce only counts. */
 	permanent: boolean;
 	addresses: string[];
@@ -274,6 +275,8 @@ export function parseProviderEvent(provider: ProviderId, body: any): MailEvent |
 			return { kind: "bounce", permanent: hard, addresses: addrs([body.Email]), detail: String(body.Type ?? "Bounce"), sub: tag(body.Metadata?.ns_sub), campaign: tag(body.Metadata?.ns_campaign) };
 		}
 		if (body?.RecordType === "SpamComplaint") return { kind: "complaint", permanent: true, addresses: addrs([body.Email]), detail: "Marked as spam", sub: tag(body.Metadata?.ns_sub), campaign: tag(body.Metadata?.ns_campaign) };
+		// Someone pressed Postmark's own unsubscribe link. Bounces and complaints arrive on their own as well.
+		if (body?.RecordType === "SubscriptionChange" && body.SuppressSending === true && body.SuppressionReason === "ManualSuppression") return { kind: "unsubscribe", permanent: false, addresses: addrs([body.Recipient]), detail: "Postmark unsubscribe link", sub: tag(body.Metadata?.ns_sub), campaign: tag(body.Metadata?.ns_campaign) };
 		return null;
 	}
 	if (provider === "mailgun") {
@@ -333,10 +336,16 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 	try {
 		if (c.provider === "postmark") {
 			const h = { "x-postmark-server-token": c.key, accept: "application/json", "content-type": "application/json" };
+			// Use our own unsubscribe link and header instead of Postmark's. Postmark only allows this once it has
+			// approved the account; until then its link stays, and SubscriptionChange below tells us who used it.
+			await call("https://api.postmarkapp.com/message-streams/broadcast", { method: "PATCH", headers: h, body: JSON.stringify({ SubscriptionManagementConfiguration: { UnsubscribeHandlingType: "Custom" } }) }).catch(() => null);
+			const triggers = { Bounce: { Enabled: true, IncludeContent: false }, SpamComplaint: { Enabled: true, IncludeContent: false }, SubscriptionChange: { Enabled: true } };
 			const list = await call("https://api.postmarkapp.com/webhooks?MessageStream=broadcast", { headers: h });
 			if (!list.ok) return failed(list);
-			if ((list.data?.Webhooks ?? []).some((w: any) => w?.Url === hookUrl)) return { ok: true };
-			const r = await call("https://api.postmarkapp.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ Url: hookUrl, MessageStream: "broadcast", Triggers: { Bounce: { Enabled: true, IncludeContent: false }, SpamComplaint: { Enabled: true, IncludeContent: false } } }) });
+			const have = (list.data?.Webhooks ?? []).find((w: any) => w?.Url === hookUrl);
+			const r = have
+				? await call(`https://api.postmarkapp.com/webhooks/${encodeURIComponent(have.ID)}`, { method: "PUT", headers: h, body: JSON.stringify({ Triggers: triggers }) })
+				: await call("https://api.postmarkapp.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ Url: hookUrl, MessageStream: "broadcast", Triggers: triggers }) });
 			return r.ok ? { ok: true } : failed(r);
 		}
 		if (c.provider === "mailgun") {

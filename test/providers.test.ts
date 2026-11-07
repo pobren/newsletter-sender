@@ -53,6 +53,8 @@ test("SES bounces and complaints are read", () => {
 test("other providers' webhooks are read", () => {
 	assert.equal(parseProviderEvent("postmark", { RecordType: "Bounce", Type: "HardBounce", Email: "a@b.com" })?.permanent, true);
 	assert.equal(parseProviderEvent("postmark", { RecordType: "Bounce", Type: "SoftBounce", Email: "a@b.com" })?.permanent, false);
+	assert.equal(parseProviderEvent("postmark", { RecordType: "SubscriptionChange", Recipient: "a@b.com", SuppressSending: true, SuppressionReason: "ManualSuppression" })?.kind, "unsubscribe");
+	assert.equal(parseProviderEvent("postmark", { RecordType: "SubscriptionChange", Recipient: "a@b.com", SuppressSending: true, SuppressionReason: "HardBounce" }), null);
 	assert.equal(parseProviderEvent("mailgun", { "event-data": { event: "complained", recipient: "a@b.com" } })?.kind, "complaint");
 	assert.equal(parseProviderEvent("brevo", { event: "hard_bounce", email: "a@b.com" })?.permanent, true);
 	assert.equal(parseProviderEvent("resend", { type: "email.bounced", data: { to: ["a@b.com"], bounce: { type: "Permanent" } } })?.addresses[0], "a@b.com");
