@@ -49,7 +49,7 @@ Wrangler, Cloudflare's own tool, asks you to sign in to Cloudflare in your brows
 
 Then open `https://<your Newsletter Sender address>/setup?code=<your code>` to make your account. Only someone with the code can. The same link resets your password if you ever forget it.
 
-Updating later keeps everything you've set up: pull the new version and run `npm run deploy` again.
+Updating keeps everything you've set up. Go to Settings, Account: when a new version is out you'll see what's new and an Update button, and Go back puts the old version straight back if you need it. You can also pull the new version and run `npm run deploy` again.
 
 To try it on your computer first: copy `.dev.vars.example` to `.dev.vars`, choose a code, then `npm run dev`.
 
