@@ -1623,7 +1623,7 @@ async function settings(section) {
 		const s = await api("/api/backups");
 		const size = (n) => n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
 		const when = (b) => new Date(b.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-		const kind = (n) => n.includes("before-restore") ? "Just before a restore" : n.includes("by-hand") ? "Made by hand" : "Nightly";
+		const kind = (n) => n.includes("before-restore") ? "Just before a restore" : n.includes("by-hand") ? "Backed up manually" : "Nightly";
 		main.innerHTML = `${head}<div class="card"><h2>Backups</h2>
 		<p class="muted">Every night at 02:00, a complete snapshot of your data (including lists, subscribers, campaigns, templates, automations, reports and settings) is saved directly to your Cloudflare storage. The last ${s.keep} daily backups are retained automatically. API keys and passwords are never included in backup files, making downloaded copies safe to store offline.</p>
 		${s.bucket ? "" : `<p class="hwarn">${icon("alert")}<span>Backups need the R2 bucket this app uses for pictures. See the README.</span></p>`}
