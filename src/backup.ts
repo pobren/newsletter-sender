@@ -5,6 +5,7 @@
 // if the install itself is new.
 
 import { getMeta, iso, setMeta, type Env } from "./db.ts";
+import { copyNightly } from "./s3.ts";
 
 const PREFIX = "backups/";
 export const KEEP = 30;
@@ -166,8 +167,10 @@ export async function backupIfDue(env: Env, now = new Date()): Promise<void> {
 	if ((await getMeta(env.DB, "backup_day")) === day) return;
 	await setMeta(env.DB, "backup_day", day);
 	try {
-		await makeBackup(env, now);
+		const made = await makeBackup(env, now);
 		await setMeta(env.DB, "backup_error", null);
+		// A copy away from Cloudflare, in the owner's own Amazon S3, when they send with Amazon SES.
+		await copyNightly(env, made.name).catch((e) => console.error("s3 copy", e));
 	} catch (e) {
 		await setMeta(env.DB, "backup_error", `${iso()} ${(e as Error).message}`.slice(0, 300));
 		throw e;

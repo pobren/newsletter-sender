@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Newsletter Sender: makes an AWS user that can send through Amazon SES and report bounces through Amazon SNS,
-  with an access key for Newsletter Sender. Copy the two keys from the Outputs tab into Newsletter Sender.
-  Delete this stack to remove the user and its key.
+  with an access key for Newsletter Sender, and a private S3 bucket for a copy of each nightly backup (kept 31 days;
+  the key can only add copies, never read or delete them). Copy the two keys from the Outputs tab into Newsletter
+  Sender. Delete this stack to remove the user and its key; the backups bucket stays until you empty and delete it.
 
 Resources:
   SenderUser:
@@ -20,6 +21,45 @@ Resources:
     Properties:
       UserName: !Ref SenderUser
 
+  # A copy of each nightly backup, away from Cloudflare. Private, encrypted, and each copy goes after 31 days.
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub newsletter-sender-backups-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: keep-31-days
+            Status: Enabled
+            ExpirationInDays: 31
+      Tags:
+        - Key: made-by
+          Value: newsletter-sender
+
+  # The key can add backup copies and nothing else.
+  BackupPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: newsletter-sender-backups
+      Users:
+        - !Ref SenderUser
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "${BackupBucket.Arn}/*"
+
 Outputs:
   AccessKeyId:
     Description: Paste this into Newsletter Sender as the Access key ID
@@ -30,3 +70,6 @@ Outputs:
   Region:
     Description: Choose this region in Newsletter Sender
     Value: !Ref AWS::Region
+  BackupBucket:
+    Description: Each nightly backup is copied here
+    Value: !Ref BackupBucket

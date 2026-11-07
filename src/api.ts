@@ -7,8 +7,9 @@ import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
 import { cleanHookUrl, deliver, DOCS, EVENTS, listHooks, listKeys, makeHook, makeKey, MAX_HOOKS, MAX_KEYS } from "./v1.ts";
 import { addon } from "./addon.ts";
 import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
+import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
-import { accountById, firstBrand, getMeta, iso, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
 import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
@@ -367,7 +368,16 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				return bad((e as Error).message);
 			}
 		}
-		return ok({ backups: await listBackups(env), keep: KEEP, error: await getMeta(db, "backup_error"), bucket: Boolean(env.IMAGES) });
+		const keys = await s3Keys(env);
+		return ok({ backups: await listBackups(env), keep: KEEP, error: await getMeta(db, "backup_error"), bucket: Boolean(env.IMAGES), s3: keys ? { region: keys.region, last: await s3Status(env) } : null });
+	}
+	// Copy the newest backup to the owner's Amazon S3 now (it happens each night by itself too).
+	if (path === "/api/backups/s3" && method === "POST") {
+		const newest = (await listBackups(env))[0];
+		if (!newest) return bad("There's no backup to copy yet. Press Back up now first.");
+		const r = await copyToS3(env, newest.name, await s3Keys(env));
+		await setMeta(db, "backup_s3", JSON.stringify(r));
+		return ok(r);
 	}
 	if (path === "/api/backups/download") {
 		const name = url.searchParams.get("name") ?? "";
