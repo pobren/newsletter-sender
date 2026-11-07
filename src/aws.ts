@@ -35,6 +35,8 @@ export interface SignInput {
 	service: string;
 	/** "YYYYMMDDTHHMMSSZ"; defaults to now. */
 	amzDate?: string;
+	/** S3 only: the body's SHA-256, or UNSIGNED-PAYLOAD for a body streamed from R2. Defaults to the hash of body. */
+	payloadHash?: string;
 }
 
 /** Returns the headers to send: the given ones plus host, x-amz-date and authorization. */
@@ -50,7 +52,7 @@ export async function signAws(input: SignInput, keys: AwsKeys): Promise<Record<s
 	const names = Object.keys(headers).sort();
 	const query = [...url.searchParams].map(([k, v]) => [awsEncode(k), awsEncode(v)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
 	const path = url.pathname.split("/").map((p) => awsEncode(decodeURIComponent(p))).join("/") || "/";
-	const canonical = [input.method, path, query.map(([k, v]) => `${k}=${v}`).join("&"), names.map((n) => `${n}:${headers[n]}\n`).join(""), names.join(";"), await sha256Hex(input.body)].join("\n");
+	const canonical = [input.method, path, query.map(([k, v]) => `${k}=${v}`).join("&"), names.map((n) => `${n}:${headers[n]}\n`).join(""), names.join(";"), input.payloadHash ?? (await sha256Hex(input.body))].join("\n");
 	const scope = `${day}/${keys.region}/${input.service}/aws4_request`;
 	const toSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonical)].join("\n");
 
