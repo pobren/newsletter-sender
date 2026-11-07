@@ -102,6 +102,44 @@ export async function backupIfDue(env: Env, now = new Date()): Promise<void> {
 }
 
 /**
+ * Keeps a backup file the owner has uploaded (one they downloaded before, maybe from another install) in the backups
+ * list, after checking it really is a Newsletter Sender backup. Then it can be put back like any other.
+ */
+export async function saveUploadedBackup(env: Env, data: ArrayBuffer, now = new Date()): Promise<BackupInfo | { error: string }> {
+	if (!env.IMAGES) return { error: "Backups need the R2 bucket. See the README." };
+	const notOurs = { error: "That file isn't a Newsletter Sender backup. Please choose a file you downloaded from Backups (it ends .ndjson.gz)." };
+	let rows = -1, rest = "";
+	try {
+		const reader = new Response(data).body!.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream()).getReader();
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const lines = (rest + value).split("\n");
+			rest = lines.pop() ?? "";
+			for (const l of lines) {
+				if (!l) continue;
+				if (rows === -1) {
+					if (JSON.parse(l)?.newsletterSender !== 1) return notOurs;
+					rows = 0;
+				} else rows++;
+			}
+		}
+		if (rest) {
+			if (rows === -1) {
+				if (JSON.parse(rest)?.newsletterSender !== 1) return notOurs;
+				rows = 0;
+			} else rows++;
+		}
+	} catch {
+		return notOurs;
+	}
+	if (rows === -1) return notOurs;
+	const name = backupName(now, `-uploaded-${now.toISOString().slice(11, 19).replace(/:/g, "")}`);
+	await env.IMAGES.put(PREFIX + name, data, { httpMetadata: { contentType: "application/gzip" }, customMetadata: { rows: String(rows) } });
+	return { name, size: data.byteLength, at: now.toISOString(), rows };
+}
+
+/**
  * Puts a backup back. A fresh backup of things as they are now is made first, so a restore can be undone. Tables in
  * the backup are emptied and refilled; secrets stay as they are. Refuses while a campaign is sending.
  */
