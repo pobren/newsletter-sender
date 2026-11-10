@@ -5,6 +5,7 @@ Each version's notes show in the app when it's available. Newest first.
 ## 0.3.0
 
 - The agency edition is now built in. Paste an agency licence key into Settings, Licence to switch on more brands, client logins with limits you set and every brand at a glance. Without a key, nothing changes.
+- With an agency licence key, the app checks once a day that the licence is still active, sending only the licence number and app version to newslettersender.com. If it can't get through, the licence keeps working for 7 days.
 
 ## 0.2.1
 

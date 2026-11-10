@@ -26,6 +26,7 @@ import { appPage } from "./ui.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
 
 import { VERSION } from "./update.ts";
+import { checkLicenceIfDue } from "./agency/licence.ts";
 
 const SECURITY = {
 	"x-content-type-options": "nosniff",
@@ -90,6 +91,8 @@ export default {
 			runDue(env).catch((e) => console.error("automations", e)),
 			backupIfDue(env).catch((e) => console.error("backup", e)),
 			dispatchHooks(env).catch((e) => console.error("webhooks", e)),
+			// The agency licence's daily check with newslettersender.com (agency/licence.ts): only the licence id and version.
+			checkLicenceIfDue(env.DB, VERSION).catch((e) => console.error("licence check", e)),
 			// Sign up rate limits only matter for ten minutes.
 			env.DB.prepare("DELETE FROM meta WHERE key LIKE 'rl:%' AND key < ?").bind(`rl:${Math.floor(Date.now() / 600_000) - 1}:`).run(),
 		]));

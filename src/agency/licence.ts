@@ -1,8 +1,12 @@
 // Agency edition licence keys.
 //
 // A key is "NSA-" + the licence as base64url JSON + "." + an Ed25519 signature of that text, made with the private
-// key only the licensor has (scripts/make-licence.mjs, run from the "Make a licence key" GitHub Action). The app
-// checks it with the public key below, offline: nothing is sent anywhere.
+// key only the licensor has. The app checks the signature with the public keys below.
+//
+// Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id
+// and the app version (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
+// agency features off. If newslettersender.com can't be reached, the licence keeps working for GRACE_DAYS after the
+// last good answer. Keys that site never sold answer "unknown", which counts as active.
 //
 // Without a valid key the agency edition works as the free edition (one brand, no client logins). Nothing is
 // deleted: the other brands and logins come back as soon as a valid key is added.
@@ -63,19 +67,85 @@ export async function checkLicence(key: unknown, today = new Date().toISOString(
 	return { ok: true, licence: { v: 1, id: String(l.id ?? ""), to: l.to, brands: Math.max(0, Math.floor(Number(l.brands) || 0)), until: l.until ?? null, at: String(l.at ?? "") } };
 }
 
+// ---- The daily check -------------------------------------------------------------------------------------------
+
+export const CHECK_URL = "https://newslettersender.com/api/licence/check";
+export const GRACE_DAYS = 7;
+const DAY = 86_400_000;
+const STATUS = "agency_licence_status";
+
+export interface LicenceStatus {
+	/** The last answer: "active", "cancelled" or "unknown" (a key newslettersender.com didn't sell). */
+	status: "active" | "cancelled" | "unknown";
+	message?: string;
+	/** When newslettersender.com last answered (or the key was saved). */
+	ok_at: string;
+	/** When to ask next. */
+	next_at: string;
+}
+
+export async function licenceStatus(db: D1Database): Promise<LicenceStatus | null> {
+	try {
+		return JSON.parse((await getMeta(db, STATUS)) ?? "null");
+	} catch {
+		return null;
+	}
+}
+
+/** Whether the daily check lets the licence work: not cancelled, and answered within GRACE_DAYS. */
+export function statusAllows(s: LicenceStatus | null, now = Date.now()): boolean {
+	if (!s) return true;
+	if (s.status === "cancelled") return false;
+	return now - Date.parse(s.ok_at) <= GRACE_DAYS * DAY;
+}
+
+/** Asks newslettersender.com about this licence. Null when it couldn't be reached. */
+export async function askLicence(id: string, version: string, fetcher: typeof fetch = fetch): Promise<Pick<LicenceStatus, "status" | "message"> | null> {
+	try {
+		const res = await fetcher(`${CHECK_URL}?id=${encodeURIComponent(id)}&v=${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(10_000), headers: { "user-agent": `NewsletterSender/${version}` } });
+		if (res.status >= 500) return null;
+		const d = (await res.json()) as { status?: string; message?: string };
+		if (d.status === "cancelled") return { status: "cancelled", message: typeof d.message === "string" ? d.message.slice(0, 300) : undefined };
+		return { status: d.status === "active" ? "active" : "unknown" };
+	} catch {
+		return null;
+	}
+}
+
+/** Called every minute by the cron: asks once a day (once an hour after a failed try). */
+export async function checkLicenceIfDue(db: D1Database, version: string, fetcher: typeof fetch = fetch, now = Date.now()): Promise<void> {
+	const key = await getMeta(db, "agency_licence");
+	if (!key) return;
+	const s = await licenceStatus(db);
+	if (s && Date.parse(s.next_at) > now) return;
+	const c = await checkLicence(key);
+	if (!c.ok) return;
+	const answer = await askLicence(c.licence.id, version, fetcher);
+	const at = new Date(now).toISOString();
+	const next: LicenceStatus = answer
+		? { ...answer, ok_at: at, next_at: new Date(now + DAY).toISOString() }
+		: { status: s?.status ?? "unknown", message: s?.message, ok_at: s?.ok_at ?? at, next_at: new Date(now + DAY / 24).toISOString() };
+	await setMeta(db, STATUS, JSON.stringify(next));
+	cache = null;
+}
+
 // The key is checked once per Worker, then remembered for a few minutes (it can change from Settings at any time).
 let cache: { key: string | null; at: number; licence: Licence | null } | null = null;
 
-/** This install's licence, or null when there's no valid one. */
+/** This install's licence, or null when there's no valid one (or it's been cancelled). */
 export async function currentLicence(db: D1Database): Promise<Licence | null> {
 	if (cache && Date.now() - cache.at < 300_000) return cache.licence;
 	const key = await getMeta(db, "agency_licence");
 	const c = key ? await checkLicence(key) : null;
-	cache = { key, at: Date.now(), licence: c?.ok ? c.licence : null };
+	const allowed = c?.ok ? statusAllows(await licenceStatus(db)) : false;
+	cache = { key, at: Date.now(), licence: c?.ok && allowed ? c.licence : null };
 	return cache.licence;
 }
 
-export async function saveLicence(db: D1Database, key: string | null): Promise<void> {
+/** Saves (or removes) the key. `answer` is newslettersender.com's answer when it was asked just now. */
+export async function saveLicence(db: D1Database, key: string | null, answer?: Pick<LicenceStatus, "status" | "message"> | null): Promise<void> {
 	await setMeta(db, "agency_licence", key);
+	const now = Date.now();
+	await setMeta(db, STATUS, key ? JSON.stringify({ status: answer?.status ?? "unknown", message: answer?.message, ok_at: new Date(now).toISOString(), next_at: new Date(now + (answer ? DAY : DAY / 24)).toISOString() } satisfies LicenceStatus) : null);
 	cache = null;
 }

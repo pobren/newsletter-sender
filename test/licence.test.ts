@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { checkLicence } from "../src/agency/licence.ts";
+import { askLicence, CHECK_URL, checkLicence, GRACE_DAYS, statusAllows } from "../src/agency/licence.ts";
 
 // A key pair just for these tests, so the real signing key never has to be here.
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -38,4 +38,27 @@ test("a key with an end date stops after it", async () => {
 	const c = await checkLicence(key, "2027-01-01", pub);
 	assert.equal(c.ok, false);
 	assert.match(!c.ok ? c.error : "", /ended on 2026-12-31/);
+});
+
+test("the daily check: cancelled stops it, and newslettersender.com being away is fine for 7 days", () => {
+	const now = Date.parse("2026-11-20T12:00:00Z");
+	const day = 86_400_000;
+	const at = (n: number) => new Date(now - n * day).toISOString();
+	assert.equal(GRACE_DAYS, 7);
+	assert.equal(statusAllows(null, now), true); // no check yet
+	assert.equal(statusAllows({ status: "active", ok_at: at(1), next_at: at(0) }, now), true);
+	assert.equal(statusAllows({ status: "unknown", ok_at: at(6.9), next_at: at(0) }, now), true);
+	assert.equal(statusAllows({ status: "active", ok_at: at(7.1), next_at: at(0) }, now), false);
+	assert.equal(statusAllows({ status: "cancelled", ok_at: at(0), next_at: at(0) }, now), false);
+});
+
+test("the daily check sends only the licence id and the version", async () => {
+	let asked = "";
+	const answer = (body: object, status = 200) => (async (url: string) => { asked = url; return new Response(JSON.stringify(body), { status }); }) as unknown as typeof fetch;
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "active" })), { status: "active" });
+	assert.equal(asked, `${CHECK_URL}?id=f15b243b205c&v=0.3.0`);
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "cancelled", message: "Cancelled: fraud" })), { status: "cancelled", message: "Cancelled: fraud" });
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "unknown" })), { status: "unknown" });
+	assert.equal(await askLicence("f15b243b205c", "0.3.0", answer({}, 503)), null);
+	assert.equal(await askLicence("f15b243b205c", "0.3.0", (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
 });
