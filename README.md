@@ -93,7 +93,7 @@ Your sending keys are stored encrypted in your database. They're never shown aga
 Newsletter Sender is source available under the [Business Source License 1.1](LICENSE). In plain English:
 
 - **Free** for one person or organisation's own newsletters, with any number of subscribers. This free edition runs one brand.
-- **Agency edition:** more brands, logins for your clients with limits you set, and every brand at a glance. It's a separate add-on with a licence key: see [newslettersender.com/agency](https://newslettersender.com/agency/).
+- **Agency edition:** more brands, logins for your clients with limits you set, and every brand at a glance. It's built in: paste an agency licence key into Settings, Licence to switch it on. See [newslettersender.com/agency](https://newslettersender.com/agency/).
 - **Needs a commercial licence:** sending for clients or other people, or offering it as a hosted, managed or white label service. [Talk to us](https://paulobrien.dev/contact/) (choose "Let's work together").
 - Each version becomes Apache 2.0 four years after it's released.
 

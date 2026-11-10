@@ -2,6 +2,10 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.3.0
+
+- The agency edition is now built in. Paste an agency licence key into Settings, Licence to switch on more brands, client logins with limits you set and every brand at a glance. Without a key, nothing changes.
+
 ## 0.2.1
 
 - Restore from file: put back a backup you downloaded, even on a new Cloudflare account. Big backups go up in parts.

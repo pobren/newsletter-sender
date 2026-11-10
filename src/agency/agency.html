@@ -1,0 +1,142 @@
+<script>
+// The agency edition's part of the dashboard: the brand picker, all brands at a glance, client logins (Settings,
+// People), a client's invite link and the licence key (Settings, Licence). It runs before the app's own script and
+// uses the app's helpers (api, esc, icon, modal and so on) once the page is going. app.html says where each part fits.
+window.NS_ADDON = (() => {
+	// -- Brands: the picker at the top, and a client's invite link -------------------------------------------------
+	function brandPicker() {
+		const box = $("#brandPick");
+		if (!ME || !ME.licence || (ME.brands.length < 2 && ME.role !== "owner")) { box.innerHTML = ""; return; }
+		const all = manyBrands() && location.hash.startsWith("#brands");
+		box.innerHTML = `<label class="sr" for="brandSel">Brand</label><select id="brandSel" title="Which brand you're working on">${manyBrands() ? `<option value="all" ${all ? "selected" : ""}>All brands</option>` : ""}${ME.brands.map((b) => `<option value="${b.id}" ${b.id === ME.current && !all ? "selected" : ""}>${esc(b.name)}</option>`).join("")}${ME.role === "owner" ? `<option value="new">+ Add a brand</option>` : ""}</select>`;
+		$("#brandSel").onchange = async (e) => {
+			const v = e.target.value;
+			if (v === "all") { location.hash = "#brands"; return; }
+			if (v !== "new") { await api("/api/brands/switch", { body: { id: v } }); location.hash = "#campaigns"; location.reload(); return; }
+			e.target.value = location.hash.startsWith("#brands") ? "all" : ME.current;
+			addBrand();
+		};
+	}
+	const manyBrands = () => Boolean(ME && ME.licence && ME.role === "owner" && ME.brands.length > 1);
+	function addBrand() {
+		const m = modal(`<h2>Add a brand</h2><p>Each brand has its own lists, campaigns, templates, sending and settings. You can let a client sign in to just their brand under Settings, People.</p><label for="bn">Brand name</label><input id="bn" placeholder="Such as Acme Ltd"><p class="err" id="be"></p><div class="row"><button class="btn" id="bgo">${icon("plus")}Add brand</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+		$("#bgo", m).onclick = (ev) => run(ev.currentTarget, async () => { try { await api("/api/brands", { body: { name: $("#bn", m).value } }); location.hash = "#settings/company"; location.reload(); } catch (err) { $("#be", m).textContent = err.message; } });
+	}
+	/** Opens a brand, then one of its pages. */
+	async function openBrand(id, hash) {
+		if (id !== ME.current) await api("/api/brands/switch", { body: { id } });
+		location.hash = hash;
+		location.reload();
+	}
+	// -- All brands: every brand at a glance, the first page when there's more than one --------------------------------
+	async function allBrands() {
+		const o = await api("/api/brands/overview");
+		const HL = { good: ["All healthy", "check"], ok: ["Needs a look", "alert"], bad: ["Needs you now", "alert"] };
+		const mark = (b) => (b.logo ? `<img class="abmark" src="${esc(b.logo)}" alt="">` : `<span class="abmark" style="background:${esc(b.colour)};border:0">${esc((b.name || "?").trim().charAt(0).toUpperCase())}</span>`);
+		const svcName = (p) => (PROVIDERS.find((x) => x[0] === p) || [])[1];
+		const row = (b) => `<div class="abopts">
+			<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span></span></button></div>
+			<div class="abnum"><b>${num(b.subscribers)}</b><span class="muted">subscribers</span><br><span class="muted">${b.provider ? `Sends with ${esc(svcName(b.provider) || b.provider)}` : `<a href="#" data-open="${b.id}" data-to="#settings/sending">${icon("alert")} No sending service yet</a>`}</span></div>
+			<div class="abnum"><b>${num(b.sentMonth)}${b.limit ? ` <span class="muted" style="font-size:14px;font-weight:400">of ${num(b.limit)}</span>` : ""}</b><span class="muted">sent this month${b.limit ? " (client's limit)" : ""}</span>${b.limit ? `<div class="hmeter"><i style="width:${Math.min(100, (b.sentMonth / b.limit) * 100)}%"></i></div>` : ""}
+				${b.last ? `<span class="muted" style="display:block;margin-top:4px">Last: <a href="#" data-open="${b.id}" data-to="#email/${b.last.id}">${esc(b.last.name)}</a>, ${ago(b.last.at)}${b.opened != null ? `, ${pc2(b.opened, 1)} opened` : ""}</span>` : `<span class="muted" style="display:block;margin-top:4px">Nothing sent yet</span>`}</div>
+			<div class="abacts">
+				<button class="btn ghost small" data-open="${b.id}" data-to="#new" title="New campaign">${icon("pencil")}<span class="sr">New campaign</span></button>
+				<button class="btn ghost small" data-open="${b.id}" data-to="#campaigns" title="All campaigns">${icon("home")}<span class="sr">All campaigns</span></button>
+				<button class="btn ghost small" data-open="${b.id}" data-to="#lists" title="Lists">${icon("list")}<span class="sr">Lists</span></button>
+				<button class="btn ghost small" data-open="${b.id}" data-to="#reports" title="Reports">${icon("chart")}<span class="sr">Reports</span></button>
+				<button class="btn ghost small" data-open="${b.id}" data-to="#settings/company" title="Settings">${icon("cog")}<span class="sr">Settings</span></button>
+			</div></div>`;
+		const svc = (s) => {
+			const a = s.ses && !s.ses.error ? s.ses : null;
+			const region = (REGIONS.find((r) => r[0] === s.region) || [])[1] || s.region;
+			const bad = a && (!a.enabled || a.enforcement !== "HEALTHY");
+			const used = a ? Math.min(100, (a.sent24 / Math.max(1, a.max24)) * 100) : 0;
+			return `<div class="card svc"><div class="hhead">${logo("ses")}<h2 style="margin:0;font-size:18px" class="grow">Amazon SES</h2>${a ? `<span class="hpill h-${bad ? "bad" : a.production ? "good" : "ok"}" style="font-size:12px;padding:3px 9px">${icon(bad ? "alert" : "check")}${bad ? "Stopped" : a.production ? "Healthy" : "Sandbox"}</span>` : ""}</div>
+			${a ? `<dl><dt>Region</dt><dd>${esc(region || "")}</dd><dt>Daily limit</dt><dd>${num(a.max24)}</dd><dt>Left today</dt><dd>${num(Math.max(0, a.max24 - a.sent24))}</dd><dt>Sent today</dt><dd>${num(a.sent24)}</dd><dt>Speed</dt><dd>${num(a.rate)} a second</dd></dl><div class="hmeter h-${used > 90 ? "bad" : used > 70 ? "ok" : "good"}"><i style="width:${used}%"></i></div>`
+				: `<p class="err">We couldn't check Amazon SES just now${s.ses?.error ? `: ${esc(s.ses.error)}` : ""}.</p>`}
+			<p class="hint" style="margin:0">Used by ${s.brands.map(esc).join(", ")}.</p></div>`;
+		};
+		main.innerHTML = `<div class="row toolbar-row"><h1 class="grow" style="margin:0">All brands</h1><button class="btn" id="abAdd">${icon("plus")}Add a brand</button></div>
+		<div class="${o.services.length ? "ab" : ""}"><div class="card">${o.brands.map(row).join("")}</div>
+		${o.services.length ? `<div class="svc">${o.services.map(svc).join("")}</div>` : ""}</div>`;
+		$("#abAdd").onclick = addBrand;
+		main.querySelectorAll("[data-open]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); openBrand(el.dataset.open, el.dataset.to); }));
+	}
+	async function inviteScreen(token) {
+		$("#top").hidden = $("#side").hidden = true;
+		let inv;
+		try { inv = await api(`/api/invite?token=${token}`, { quiet: true }); } catch (err) { main.innerHTML = `<div class="center card"><h1>This link has run out</h1><p>${esc(err.message)}</p><a class="btn" href="/">${icon("back")}Go to sign in</a></div>`; return; }
+		main.innerHTML = `<form class="center card" id="f"><h1>Welcome${inv.brand ? ` to ${esc(inv.brand)}` : ""}</h1><p class="muted">Choose a password to sign in as <b>${esc(inv.email)}</b>.</p>
+		<label for="name">Your name</label><input id="name" autocomplete="name" value="${esc(inv.name || "")}">
+		<label for="pw">Password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password"><p class="hint">At least 10 characters.</p>
+		<p class="err" id="e"></p><button class="btn">${icon("check")}Save and sign in</button></form>`;
+		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/invite", { body: { token, name: $("#name").value, password: $("#pw").value } }); history.replaceState(null, "", "/#campaigns"); boot(); } catch (err) { $("#e").textContent = err.message; } };
+	}
+
+	// -- People: logins for clients (Settings, People) ---------------------------------------------------------
+	async function people(head) {
+		const s = await api("/api/people");
+		const PERMS = [["send", "Send and schedule campaigns, and run automations"], ["import", "Import subscribers"], ["export", "Download subscribers"], ["delete", "Delete subscribers and lists"], ["settings", "Change settings (sending, tracking, API)"]];
+		const summary = (c) => { const on = PERMS.filter(([k]) => c[k]).map(([, t]) => t.split(" (")[0].toLowerCase()); return `${on.length ? `Can ${on.join(", ")}` : "Can write and test campaigns only"}${c.month_limit ? `. Up to ${num(c.month_limit)} emails a month` : ""}.`; };
+		const form = (p = { can: s.start }) => `<label for="pn">Their name</label><input id="pn" value="${esc(p.name || "")}">
+			${p.id ? "" : `<label for="pe">Their email address</label><input id="pe" type="email">`}
+			<label for="pb">Their brand</label><select id="pb">${s.brands.map((b) => `<option value="${b.id}" ${b.id === (p.brand_id || ME?.current) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
+			<label>What they can do</label>${PERMS.map(([k, t]) => `<label class="check"><input type="checkbox" name="pc" value="${k}" ${p.can[k] ? "checked" : ""}> <span>${t}</span></label>`).join("")}
+			<label for="pl">Most emails they can send a month <span class="hint">(leave empty for no limit)</span></label><input id="pl" type="number" min="0" step="1" value="${p.can.month_limit || ""}" placeholder="No limit">`;
+		const read = (m) => ({ name: $("#pn", m).value, email: $("#pe", m)?.value, brand: $("#pb", m).value, can: { ...Object.fromEntries([...m.querySelectorAll("[name=pc]")].map((x) => [x.value, x.checked])), month_limit: Number($("#pl", m).value) || 0 } });
+		const showLink = (link, who) => modal(`<h2>Invite link for ${esc(who)}</h2><p>Send this to them yourself. It works once and runs out in 14 days. They choose their own password.</p><code class="row" style="display:flex;gap:8px;align-items:center;word-break:break-all"><span class="grow">${esc(link)}</span>${copyBtn(link)}</code><div class="row" style="margin-top:14px"><button class="btn" data-close>${icon("check")}Done</button></div>`);
+		main.innerHTML = `${head}<div class="card"><h2>People</h2><p class="muted">Let a client sign in to just their own brand, and choose what they can do there. You can always see and do everything.</p>
+		<table class="data"><thead><tr><th>Who</th><th>Brand</th><th>What they can do</th><th></th></tr></thead><tbody>${s.people.map((p) => `<tr><td><b>${esc(p.name || p.email)}</b><br><span class="muted">${esc(p.email)}</span></td><td>${p.role === "owner" ? "Every brand" : esc(p.brand || "")}</td><td>${p.role === "owner" ? "Everything (owner)" : `${summary(p.can)}${p.joined ? "" : `<br><span class="muted">${icon("clock")} Hasn't used their invite yet</span>`}`}</td>
+		<td>${p.role === "owner" ? "" : `<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn ghost small" data-edit="${p.id}">${icon("pencil")}Edit</button><button class="btn ghost small" data-link="${p.id}">${icon("link")}New invite link</button><button class="btn ghost small" data-del="${p.id}">${icon("trash")}Remove</button></div>`}</td></tr>`).join("")}</tbody></table>
+		<div class="row" style="margin-top:14px"><button class="btn" id="padd">${icon("plus")}Invite a client</button></div></div>`;
+		$("#padd").onclick = () => {
+			const m = modal(`<h2>Invite a client</h2>${form()}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("send")}Make an invite link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { const v = read(m); const r = await api("/api/people", { body: v }); m.remove(); await settings("people"); showLink(r.link, v.name || v.email); } catch (err) { $("#pe2", m).textContent = err.message; } });
+		};
+		main.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
+			const p = s.people.find((x) => x.id === b.dataset.edit);
+			const m = modal(`<h2>${esc(p.name || p.email)}</h2>${form(p)}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("save")}Save</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { await api(`/api/people/${p.id}`, { body: read(m) }); m.remove(); toast("Saved"); settings("people"); } catch (err) { $("#pe2", m).textContent = err.message; } });
+		});
+		main.querySelectorAll("[data-link]").forEach((b) => b.onclick = () => run(b, async () => { const p = s.people.find((x) => x.id === b.dataset.link); const r = await api(`/api/people/${p.id}/link`, { body: {} }); showLink(r.link, p.name || p.email); }));
+		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/people/${b.dataset.del}`, { method: "DELETE" }); toast("Removed. They can't sign in any more."); settings("people"); }));
+	}
+
+	// -- Licence (Settings, Licence) ------------------------------------------------------------------------------
+	async function licence(head) {
+		const s = await api("/api/licence");
+		const l = s.licence;
+		main.innerHTML = `${head}<div class="card"><h2>Licence</h2>
+		${l ? `<div class="info">${icon("check")}<p>Agency edition, licensed to <b>${esc(l.to)}</b>. ${l.brands ? `Up to ${num(l.brands)} brands (you have ${num(s.brands)}).` : "As many brands as you like."}${l.until ? ` Works until ${esc(l.until)}.` : ""}</p></div>`
+			: `<p>Add your licence key to switch on more brands, client logins and all brands at a glance. Until then this works as the free edition, with one brand. Nothing is lost: brands and logins made before come back when you add a key.</p><a class="btn ghost" href="https://newslettersender.com/agency/" target="_blank" rel="noopener">${icon("key")}Get an agency licence</a>`}
+		<label for="lk" style="margin-top:16px">${l ? "Change your licence key" : "Your licence key"}</label><textarea id="lk" rows="3" placeholder="NSA-..." spellcheck="false" autocomplete="off"></textarea>
+		<p class="err" id="le"></p><div class="row"><button class="btn" id="lsave">${icon("check")}Save licence key</button>${l ? `<button class="btn ghost" id="loff">${icon("trash")}Remove licence key</button>` : ""}</div></div>`;
+		$("#lsave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/licence", { body: { key: $("#lk").value } }); toast(`Licensed to ${r.to}`); location.hash = "#settings/licence"; location.reload(); } catch (err) { $("#le").textContent = err.message; } });
+		$("#loff") && ($("#loff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Remove the licence key? This goes back to the free edition (one brand) until you add one again. Nothing is deleted.")) return; await api("/api/licence", { body: { key: null } }); location.reload(); }));
+	}
+
+	return {
+		early(state) {
+			const invite = /^#invite\/([0-9a-f]{32})$/.exec(location.hash);
+			if (!invite) return false;
+			inviteScreen(invite[1]);
+			return true;
+		},
+		top: brandPicker,
+		home() {
+			if (!manyBrands()) return null;
+			history.replaceState(null, "", "#brands");
+			return "brands";
+		},
+		route: (v) => (v === "brands" && !manyBrands() ? "campaigns" : v),
+		views: { brands: allBrands },
+		tabs(SETTINGS) {
+			const owner = !ME || ME.role === "owner";
+			const extra = owner ? [...(ME?.licence ? [["people", "People", "users"]] : []), ["licence", "Licence", "check"]] : [];
+			return [...SETTINGS.slice(0, -1), ...extra, SETTINGS[SETTINGS.length - 1]].filter(([k]) => owner || k === "account" || (k !== "backups" && ME.can.settings));
+		},
+		settings: { people, licence },
+		licenceCard: () => (ME?.licence ? `<div class="card"><h2>Licence</h2><p>Agency edition, licensed to <b>${esc(ME.licence.to)}</b>. See Settings, Licence.</p></div>` : ""),
+	};
+})();
+</script>
