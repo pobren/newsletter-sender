@@ -4,7 +4,7 @@ License text copyright (c) 2020 MariaDB Corporation Ab, All Rights Reserved.
 Parameters
 
 Licensor:             Paul O'Brien
-Licensed Work:        Newsletter Sender 0.2.1. The Licensed Work is (c) 2026 Paul O'Brien.
+Licensed Work:        Newsletter Sender (every version). The Licensed Work is (c) 2026 Paul O'Brien.
 Additional Use Grant: You may make production use of the Licensed Work, free of
                       charge, for one person or organisation's own newsletters,
                       with any number of subscribers.
@@ -13,13 +13,14 @@ Additional Use Grant: You may make production use of the Licensed Work, free of
                       third parties, or send their newsletters with it; or
                       (b) offer it to others as a hosted, managed or white-label
                       service.
-                      For a commercial licence, use https://paulobrien.dev/contact/
-                      (topic "Work together").
+                      For a commercial licence, use
+                      https://newslettersender.com/contact/?topic=agency
 Change Date:          Four years from the date each version is first released.
 Change License:       Apache License, Version 2.0
 
 For information about alternative licensing arrangements for the Licensed Work,
-please contact the Licensor at https://paulobrien.dev/contact/.
+please contact the Licensor at
+https://newslettersender.com/contact/?topic=agency
 
 Notice
 
