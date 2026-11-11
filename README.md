@@ -94,7 +94,7 @@ Newsletter Sender is source available under the [Business Source License 1.1](LI
 
 - **Free** for one person or organisation's own newsletters, with any number of subscribers. This free edition runs one brand.
 - **Agency edition:** more brands, logins for your clients with limits you set, and every brand at a glance. It's built in: paste an agency licence key into Settings, Licence to switch it on. Once a day the app checks the licence is still active with newslettersender.com, sending only the licence number and app version. See [newslettersender.com/agency](https://newslettersender.com/agency/).
-- **Needs a commercial licence:** sending for clients or other people, or offering it as a hosted, managed or white label service. [Talk to us](https://paulobrien.dev/contact/) (choose "Let's work together").
+- **Needs a commercial licence:** sending for clients or other people, or offering it as a hosted, managed or white label service. [Get an Agency licence](https://newslettersender.com/contact/?topic=agency).
 - Each version becomes Apache 2.0 four years after it's released.
 
 The free edition has no licence key. We trust you. The [LICENSE](LICENSE) file is the legal text.
