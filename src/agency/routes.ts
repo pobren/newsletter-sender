@@ -45,7 +45,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		// Why a saved key isn't working: cancelled, or newslettersender.com not reached for GRACE_DAYS.
 		const saved = await getMeta(db, "agency_licence");
 		const s = saved && !l ? await licenceStatus(db) : null;
-		const problem = !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@paulobrien.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
+		const problem = !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
 		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until }, brands: count, problem });
 	}
 	if (path === "/api/licence" && method === "POST") {
@@ -57,7 +57,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const c = await checkLicence(key);
 		if (!c.ok) return bad(c.error);
 		const answer = await askLicence(c.licence.id, VERSION);
-		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@paulobrien.com if you think that's a mistake.");
+		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake.");
 		await saveLicence(db, String(key).replace(/\s+/g, ""), answer);
 		return ok({ to: c.licence.to });
 	}
