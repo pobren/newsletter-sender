@@ -1,10 +1,11 @@
-// The slot the agency edition plugs into.
+// The slot the agency features plug into.
 //
-// This free edition is one brand with one login. The agency edition (more brands, client logins with limits, and
-// every brand at a glance) is a separate add-on that replaces this file with its own. Everything it needs from the
-// app goes through the Addon interface below, so the two stay in step.
+// Without a licence key the app is one brand with one login. With an agency licence key (Settings, Licence) it also
+// has more brands, client logins with limits, and every brand at a glance (src/agency/). Everything those need from
+// the app goes through the Addon interface below.
 
 import type { AccountRow, BrandRow, CampaignRow, Env } from "./db.ts";
+import { agency } from "./agency/index.ts";
 
 /** What a client may do. The owner may do everything. */
 export interface Can { send: boolean; import: boolean; export: boolean; delete: boolean; settings: boolean; month_limit: number }
@@ -46,4 +47,6 @@ const FREE: Addon = {
 	script: "",
 };
 
-export const addon: Addon = FREE;
+// The agency features are built in and stay off until a licence key is pasted into Settings, Licence
+// (src/agency/licence.ts). Without a key this is exactly the free edition: one brand, no client logins.
+export const addon: Addon = agency(FREE);
