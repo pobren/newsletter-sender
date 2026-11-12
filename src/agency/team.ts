@@ -47,7 +47,7 @@ export function notAllowed(a: Pick<AccountRow, "role">, can: Can, path: string, 
 	if (a.role !== "client") return null;
 	const write = method !== "GET" && method !== "HEAD";
 	if (/^\/api\/(backups|people|licence)(\/|$)/.test(path) || (path === "/api/brands" && write)) return "Only the owner can do that.";
-	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|sending\/warmup|links)$/.test(path) && write)))
+	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|sending\/warmup|blogfeed|blogfeed\/draft|links)$/.test(path) && write)))
 		return "Changing settings is switched off for your login. Please ask the owner.";
 	if (!can.send && ((/^\/api\/campaigns\/[0-9a-f]{16}\/(send|schedule|resume)$/.test(path) && write) || (/^\/api\/automations(\/|$)/.test(path) && write)))
 		return "Sending is switched off for your login. You can still write and test campaigns: the owner sends them.";

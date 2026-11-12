@@ -22,6 +22,7 @@ import { ensureSchema, type Env, type SendBatch } from "./db.ts";
 import { handlePublic } from "./public.ts";
 import { consume, resume, startDue } from "./sending.ts";
 import { carryOnTomorrow } from "./warmup.ts";
+import { checkFeedsDue } from "./blogfeed.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
@@ -94,6 +95,8 @@ export default {
 			dispatchHooks(env).catch((e) => console.error("webhooks", e)),
 			// Domain warm up: campaigns paused at the day's number carry on the next day.
 			carryOnTomorrow(env, resume).catch((e) => console.error("warm up", e)),
+			// Blog posts to newsletter drafts: each blog's feed, once an hour.
+			checkFeedsDue(env.DB).catch((e) => console.error("blog feeds", e)),
 			// The agency licence's daily check with newslettersender.com (agency/licence.ts): only the licence id, the version and a short fingerprint of the key.
 			checkLicenceIfDue(env.DB, VERSION).catch((e) => console.error("licence check", e)),
 			// Sign up rate limits only matter for ten minutes.

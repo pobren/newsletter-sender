@@ -1616,8 +1616,36 @@ async function blocklist(type) {
 	};
 }
 
+// -- Settings, Blog posts: each new post becomes a draft campaign (src/blogfeed.ts) --------------------------------------
+async function blogSettings(head) {
+	const [{ feed: f }, ls] = await Promise.all([api("/api/blogfeed"), api("/api/lists")]);
+	const lists = Array.isArray(ls) ? ls : ls.lists;
+	const chosen = new Set(f?.lists ?? (lists.length === 1 ? [lists[0].id] : []));
+	const when = (t) => new Date(t).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+	main.innerHTML = `${head}<div class="card"><h2>${icon("rss")}Blog posts to newsletter drafts</h2>
+	<p class="muted">We check your blog once an hour. Each new post becomes a draft campaign, with the post's title, picture, a short summary and a Read the full post button. Nothing is sent by itself: you check the draft, change anything you like, then send or schedule it.</p>
+	${f?.on ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span>Checking <b>${esc(f.url)}</b>${f.checked_at ? `, last looked ${esc(when(f.checked_at))}` : ""}. ${f.made ? `${num(f.made)} ${f.made === 1 ? "draft" : "drafts"} so far.` : "New posts from now on become drafts."}</span></p>` : ""}
+	${f?.error ? `<p class="hwarn">${icon("alert")}<span>The last check didn't work: ${esc(f.error)}</span></p>` : ""}
+	<label for="bfu">Your blog's address <span class="hint">(or its RSS or Atom feed; we find the feed from the address)</span></label><input id="bfu" value="${esc(f?.url || "")}" placeholder="https://yourblog.com">
+	<label>New drafts go to</label><div>${lists.map((l) => `<label class="check"><input type="checkbox" name="bfl" value="${esc(l.id)}" ${chosen.has(l.id) ? "checked" : ""}> ${esc(l.name)}</label>`).join("")}</div>
+	<p class="err" id="bfe"></p><div id="bfLatest"></div>
+	<div class="row"><button class="btn" id="bfSave">${icon("save")}${f?.on ? "Save" : "Start checking my blog"}</button>${f ? `<button class="btn ghost" id="bfDraft">${icon("plus")}Make a draft from the newest post now</button>${f.on ? `<button class="btn ghost" id="bfOff">${icon("pause")}Stop checking</button>` : ""}<button class="btn danger" id="bfDel">${icon("trash")}Remove</button>` : ""}</div></div>`;
+	const pick = () => $$("[name=bfl]:checked").map((x) => x.value);
+	$("#bfSave").onclick = (e) => run(e.currentTarget, async () => {
+		try {
+			const r = await api("/api/blogfeed", { body: { url: $("#bfu").value, lists: pick() } });
+			toast("Saved. New posts become drafts from now on.");
+			await blogSettings(head);
+			if (r.latest?.length) $("#bfLatest").innerHTML = `<p class="hint">The newest posts we found: ${r.latest.map((p) => `<b>${esc(p.title)}</b>`).join(", ")}. These are already out, so they won't become drafts. Press Make a draft from the newest post now to see one.</p>`;
+		} catch (err) { $("#bfe").textContent = err.message; }
+	});
+	$("#bfDraft") && ($("#bfDraft").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/blogfeed/draft", { body: {} }); toast("Draft made"); location.hash = `email/${r.id}`; } catch (err) { $("#bfe").textContent = err.message; } }));
+	$("#bfOff") && ($("#bfOff").onclick = (e) => run(e.currentTarget, async () => { await api("/api/blogfeed", { body: { on: false, lists: pick() } }); blogSettings(head); }));
+	$("#bfDel") && ($("#bfDel").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop checking your blog and forget it? Drafts already made stay.")) { await api("/api/blogfeed", { method: "DELETE" }); blogSettings(head); } }));
+}
+
 // -- Settings: everything else lives here ----------------------------------------------------------------------
-const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
+const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["blog", "Blog posts", "rss"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
 const settingsTabs = () => {
 	if (ADDON.tabs) return ADDON.tabs(SETTINGS);
 	return SETTINGS;
@@ -1650,6 +1678,7 @@ async function settings(section) {
 		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form>`;
 		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); toast("Saved"); }); };
 	}
+	if (sec === "blog") return blogSettings(head);
 	if (sec === "tracking") {
 		main.innerHTML = `${head}<form class="card" id="tf"><h2>Tracking</h2>
 		<p class="muted">Disabled by default to protect subscriber privacy and maximise delivery. Bounces and spam complaints are always recorded automatically: flagged addresses are updated in <a href="#reports">Reports</a> and permanently excluded from future sends.</p>

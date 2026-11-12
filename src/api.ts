@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { getFeed, makeDraft, readFeed, saveFeed } from "./blogfeed.ts";
 import { FIRSTS, getWarmup, saveWarmup, today, warmupStatus } from "./warmup.ts";
 import { addWebhook, isProvider, parseProvider, PROVIDERS, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
@@ -330,6 +331,47 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// Blog posts to newsletter drafts (Settings, Blog posts).
+	if (path === "/api/blogfeed") {
+		const f = await getFeed(db, brand.id);
+		if (method === "DELETE") {
+			await saveFeed(db, brand.id, null);
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			const own = new Set((await db.prepare("SELECT id FROM lists WHERE brand_id = ?").bind(brand.id).all<{ id: string }>()).results.map((r) => r.id));
+			const lists = (Array.isArray(b.lists) ? b.lists : f?.lists ?? []).filter((x: unknown) => typeof x === "string" && own.has(x)).slice(0, 50);
+			if (b.on === false && f) {
+				await saveFeed(db, brand.id, { ...f, on: false, lists });
+				return ok({ feed: { ...f, on: false, lists, seen: undefined } });
+			}
+			let url = String(b.url ?? f?.url ?? "").trim();
+			if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+			try {
+				const u = new URL(url);
+				if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw new Error();
+			} catch {
+				return bad("Please enter your blog's address, or its feed, such as https://yourblog.com/feed.");
+			}
+			const r = await readFeed(url);
+			if ("error" in r) return bad(r.error);
+			const same = f && f.url === r.feedUrl;
+			const next = { url: r.feedUrl, on: true, lists, seen: same ? f.seen : r.posts.map((p) => p.id).slice(0, 100), checked_at: iso(), error: null, made: f?.made ?? 0 };
+			await saveFeed(db, brand.id, next);
+			return ok({ feed: { ...next, seen: undefined }, latest: r.posts.slice(0, 3) });
+		}
+		return ok({ feed: f ? { ...f, seen: undefined } : null });
+	}
+	// A draft from the newest post now, to see what they look like.
+	if (path === "/api/blogfeed/draft" && method === "POST") {
+		const f = await getFeed(db, brand.id);
+		if (!f) return bad("Please add your blog first.");
+		const r = await readFeed(f.url);
+		if ("error" in r) return bad(r.error);
+		if (!r.posts[0]?.link) return bad("Your blog's feed has no posts yet.");
+		return ok({ id: await makeDraft(db, brand, f, r.posts[0]) });
 	}
 	// Try adding the bounce webhook again (Settings, Sending), say after the owner swapped to a Full access key.
 	if (path === "/api/sending/webhook" && method === "POST") {
