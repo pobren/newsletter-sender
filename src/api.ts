@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { cleanGoodbye, DEFAULT_TEXT, getGoodbye, saveGoodbye } from "./goodbye.ts";
 import { getFeed, makeDraft, readFeed, saveFeed } from "./blogfeed.ts";
 import { FIRSTS, getWarmup, saveWarmup, today, warmupStatus } from "./warmup.ts";
 import { addWebhook, isProvider, parseProvider, PROVIDERS, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
@@ -331,6 +332,11 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// The goodbye email with a one click way back (Settings, Lists).
+	if (path === "/api/goodbye") {
+		if (method === "POST") await saveGoodbye(db, brand.id, cleanGoodbye(await body(request)));
+		return ok({ ...(await getGoodbye(db, brand.id)), defaultText: DEFAULT_TEXT });
 	}
 	// Blog posts to newsletter drafts (Settings, Blog posts).
 	if (path === "/api/blogfeed") {
