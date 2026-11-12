@@ -84,6 +84,12 @@ Confirmation and welcome emails go through Cloudflare's own email service, so th
 
 Sign in, set-up and sign up forms can use [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/). In Cloudflare, add a Turnstile widget for your Newsletter Sender address (Managed), then add two secrets to the Worker: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. It switches on once both are there.
 
+## Writing helper (optional)
+
+Off unless you switch it on under **Settings › Writing helper**. In the campaign editor it suggests subject lines, tidies up, shortens or warms up the text you pick, and turns rough notes into a first draft. It never changes your email unless you press its buttons.
+
+It uses [Cloudflare's own AI](https://developers.cloudflare.com/workers-ai/) on your Cloudflare account, so your emails don't go to any other company and there's no key to set up. Cloudflare's free daily allowance covers about 80 uses a day; past that Cloudflare bills your account about £1 per 1,000 uses. There's a limit of 300 uses a day for each newsletter.
+
 ## How it works
 
 One Cloudflare Worker, a D1 database, a queue and an R2 bucket for pictures. When you press send, every reader gets a row, the rows go on the queue in batches of 50, and up to ten workers send them at their share of your sending rate. What's been sent is saved as it goes, so a worker that stops part way picks up where it left off. A check every minute starts scheduled emails.

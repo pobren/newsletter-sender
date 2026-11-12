@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { AiError, aiUse, DAILY_CAP, getAi, saveAi, TASKS, write } from "./aihelper.ts";
 import { cleanSegment, deleteSegment, forLists, getSegments, saveSegment } from "./segments.ts";
 import { cleanGoodbye, DEFAULT_TEXT, getGoodbye, saveGoodbye } from "./goodbye.ts";
 import { getFeed, makeDraft, readFeed, saveFeed } from "./blogfeed.ts";
@@ -333,6 +334,21 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// The writing helper (Settings, Writing helper; used in the campaign editor). Off unless switched on.
+	if (path === "/api/ai") {
+		if (method === "POST") await saveAi(db, brand.id, (await body(request))?.on === true);
+		return ok({ ...(await getAi(db, brand.id)), ready: Boolean(env.AI), used: await aiUse(db, brand.id), cap: DAILY_CAP });
+	}
+	if (path === "/api/ai/write" && method === "POST") {
+		const b = await body(request);
+		if (!(TASKS as readonly string[]).includes(b?.task)) return bad("Choose what the helper should do.");
+		try {
+			return ok({ result: await write(env, brand, b.task, typeof b.text === "string" ? b.text : "") });
+		} catch (e) {
+			if (e instanceof AiError) return bad(e.message);
+			throw e;
+		}
 	}
 	// Saved segments: named audience filters to pick when setting up a campaign.
 	if (path === "/api/segments") {

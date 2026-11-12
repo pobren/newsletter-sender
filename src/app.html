@@ -74,7 +74,7 @@ nav.side p{margin:20px 12px 6px;font-size:12px;font-weight:700;letter-spacing:.0
 nav.side a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:var(--text);text-decoration:none;font-weight:600;font-size:15px}
 nav.side a.on,nav.side a:hover{background:var(--pink);color:var(--cd)}
 .shell main{max-width:none;margin:0;min-width:0;min-height:70vh}.shell:has(>#side[hidden]) main{max-width:1200px;margin:0 auto}
-.toolbar-row{margin:18px 0 14px}input.search{width:260px;max-width:100%}
+.toolbar-row{margin:18px 0 14px}.aibox{margin-top:14px;padding:14px;border:1px dashed var(--line);border-radius:12px;background:var(--bg)}.aibox .chips{margin-top:6px}input.search{width:260px;max-width:100%}
 .card.flush{padding:0;overflow:hidden}.pad{padding:22px;margin:0}.small{font-size:13px}.scroll{overflow-x:auto}
 table.data th{background:var(--bg);padding:12px 14px;white-space:nowrap}table.data td{padding:12px 14px;vertical-align:middle}table.data tr:last-child td{border-bottom:0}table.data .c{text-align:center;width:1%}table.data tr:hover td{background:var(--soft)}table.data a{text-decoration:none}table.data a:hover{text-decoration:underline}
 .rate{display:inline-block;padding:1px 8px;border-radius:999px;font-size:13px;font-weight:700;margin-right:4px;background:#f1eef3;color:var(--text)}.rate.open{background:#dff5ea;color:var(--ok)}.rate.click{background:#e6efff;color:#1d4fa3}.rate.bad{background:#fde4ea;color:var(--bad)}
@@ -624,7 +624,10 @@ async function editor(id, kind) {
 	</div>
 	<div class="card"><div class="row"><h2 class="grow">The email</h2>
 		<div class="seg" role="tablist"><button type="button" data-mode="visual" class="on">${icon("pencil")}Visual editor</button><button type="button" data-mode="html">${icon("code")}HTML</button><button type="button" data-mode="preview">${icon("eye")}Preview</button></div>
-		<label class="btn ghost small" style="margin:0">${icon("upload")}Upload a design<input type="file" id="design" accept=".html,.htm,text/html" hidden></label>${isT ? "" : `<button type="button" class="btn ghost small" id="asT">${icon("save")}Save as template</button>`}</div>
+		<label class="btn ghost small" style="margin:0">${icon("upload")}Upload a design<input type="file" id="design" accept=".html,.htm,text/html" hidden></label>${isT ? "" : `<button type="button" class="btn ghost small" id="asT">${icon("save")}Save as template</button><button type="button" class="btn ghost small" id="aiBtn" hidden>${icon("wand")}Writing helper</button>`}</div>
+		${isT ? "" : `<div class="aibox" id="aiBox" hidden><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost small" id="aiSubj">${icon("text")}Suggest subject lines</button><select id="aiHow" aria-label="How to rewrite it" style="width:auto"><option value="tidy">Tidy it up</option><option value="shorter">Make it shorter</option><option value="friendlier">Make it friendlier</option></select><button type="button" class="btn ghost small" id="aiRe">${icon("wand")}Rewrite the text I've picked</button></div>
+		<label for="aiNotes">Or write a first draft from your notes</label><textarea id="aiNotes" rows="3" placeholder="Such as: new sourdough loaf from Saturday, Christmas orders open 1 Dec, shop closed 25 to 27 Dec"></textarea>
+		<div class="row" style="margin-top:8px"><button type="button" class="btn ghost small" id="aiDraft">${icon("pencil")}Write a first draft</button><span class="hint grow">Written by AI on your Cloudflare account. Read it through before you send.</span></div><div id="aiOut"></div></div>`}
 		<div class="toolbar" id="tb"><select id="fmt" title="Text style" aria-label="Text style"><option value="p">Text</option><option value="h1">Big heading</option><option value="h2">Heading</option><option value="h3">Small heading</option></select>${TOOLS.map((t) => (t === "|" ? `<span class="sep"></span>` : `<button type="button" class="icon-btn" data-cmd="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${icon(t[1])}</button>`)).join("")}</div>
 		<iframe class="wys" id="wys" title="Write your email here" sandbox="allow-same-origin"></iframe>
 		<textarea class="code" id="code" hidden spellcheck="false" aria-label="The email's HTML"></textarea>
@@ -645,6 +648,41 @@ async function editor(id, kind) {
 		return docMode ? `<!doctype html>\n${d.documentElement.outerHTML}` : d.body.innerHTML;
 	};
 	const current = () => (mode === "html" ? code.value : mode === "visual" ? readVisual() : html);
+	// The writing helper, when it's switched on: subject lines, rewriting what's picked, and a first draft from notes.
+	if (!isT) api("/api/ai").then((a) => {
+		if (!a.on || signal.aborted) return;
+		$("#aiBtn").hidden = false;
+		$("#aiBtn").onclick = () => { $("#aiBox").hidden = !$("#aiBox").hidden; };
+		const ask = async (task, text) => (await api("/api/ai/write", { body: { task, text } })).result;
+		const picked = () => { const d = frameDoc(); const s = d && d.getSelection(); return mode === "visual" && s && s.rangeCount && !s.isCollapsed ? s.toString() : ""; };
+		const para = (ps) => ps.map((p) => `<p>${esc(p)}</p>`).join("");
+		$("#aiSubj").onclick = (e) => run(e.currentTarget, async () => {
+			const r = await ask("subjects", current());
+			$("#aiOut").innerHTML = `<p class="hint">Press one to use it as the subject line.</p><div class="chips">${r.map((s) => `<button type="button" class="chip" data-subj="${esc(s)}">${icon("text")}${esc(s)}</button>`).join("")}</div>`;
+		});
+		$("#aiOut").addEventListener("click", (e) => { const b = e.target.closest("[data-subj]"); if (!b) return; $("#subject").value = b.dataset.subj; changed(); toast("Subject line changed"); });
+		$("#aiRe").onclick = (e) => run(e.currentTarget, async () => {
+			if (mode !== "visual") throw new Error("Switch to the visual editor, then pick some text.");
+			const text = picked();
+			if (!text.trim()) throw new Error("Pick some of the email's text first, by dragging over it.");
+			const d = frameDoc(), range = d.getSelection().getRangeAt(0).cloneRange();
+			const r = await ask($("#aiHow").value, text);
+			wys.contentWindow.focus();
+			const s = d.getSelection(); s.removeAllRanges(); s.addRange(range);
+			if (r.length === 1 && !/\n/.test(text.trim())) d.execCommand("insertText", false, r[0]);
+			else d.execCommand("insertHTML", false, para(r));
+			$("#aiOut").innerHTML = `<p class="okmsg">${icon("check")} Done. Press undo in the toolbar if you liked it better before.</p>`;
+		});
+		$("#aiDraft").onclick = (e) => run(e.currentTarget, async () => {
+			if (mode !== "visual") throw new Error("Switch to the visual editor first.");
+			const r = await ask("draft", $("#aiNotes").value);
+			const d = frameDoc();
+			const empty = !d.body.textContent.trim();
+			if (empty) d.body.innerHTML = para(r); else d.body.insertAdjacentHTML("beforeend", para(r));
+			changed();
+			$("#aiOut").innerHTML = `<p class="okmsg">${icon("check")} ${empty ? "Your first draft is in the email." : "The draft is at the end of the email."} Read it through and make it yours.</p>`;
+		});
+	}).catch(() => {});
 	const loadVisual = (h) => {
 		html = h;
 		docMode = isDoc(h);
@@ -1677,8 +1715,22 @@ async function blogSettings(head) {
 	$("#bfDel") && ($("#bfDel").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop checking your blog and forget it? Drafts already made stay.")) { await api("/api/blogfeed", { method: "DELETE" }); blogSettings(head); } }));
 }
 
+// -- Settings, Writing helper: optional AI help in the campaign editor, off unless switched on -------------------
+async function aiSettings(head) {
+	const a = await api("/api/ai");
+	main.innerHTML = `${head}<div class="card"><h2>${icon("wand")}Writing helper</h2>
+	<p class="muted">An optional helper in the campaign editor. It suggests subject lines, tidies up or shortens a bit of your email you pick, and turns rough notes into a first draft. It's off unless you switch it on, and it never sends anything or changes your email unless you press its buttons.</p>
+	<div class="info">${icon("cloud")}<p>It uses Cloudflare's own AI on your Cloudflare account, so your emails don't go to any other company and there's no key to set up. Cloudflare gives every account a free allowance each day, which covers about 80 uses. Past that, Cloudflare bills your account about £1 per 1,000 uses. There's a limit of ${num(a.cap)} uses a day.</p></div>
+	<label class="check" style="margin-top:14px"><input type="checkbox" id="aiOn" ${a.on ? "checked" : ""}> Show the writing helper in the campaign editor</label>
+	${a.on && !a.ready ? `<p class="hwarn">${icon("alert")}<span>It's switched on, but Newsletter Sender isn't connected to Cloudflare's AI yet. Update to the latest version and it connects by itself.</span></p>` : ""}
+	${a.used.month ? `<p class="hint">Used ${num(a.used.month)} ${a.used.month === 1 ? "time" : "times"} this month, ${num(a.used.today)} today.</p>` : ""}
+	<p class="hint">It's written by AI, so read what it suggests before you use it. It can get things wrong.</p>
+	<div class="row" style="margin-top:14px"><button class="btn" id="aiSave">${icon("save")}Save changes</button></div></div>`;
+	$("#aiSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/ai", { body: { on: $("#aiOn").checked } }); toast($("#aiOn").checked ? "The writing helper is on. Find it above the email in the campaign editor." : "The writing helper is off."); aiSettings(head); });
+}
+
 // -- Settings: everything else lives here ----------------------------------------------------------------------
-const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["blog", "Blog posts", "rss"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
+const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["blog", "Blog posts", "rss"], ["ai", "Writing helper", "wand"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
 const settingsTabs = () => {
 	if (ADDON.tabs) return ADDON.tabs(SETTINGS);
 	return SETTINGS;
@@ -1716,6 +1768,7 @@ async function settings(section) {
 		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); await api("/api/goodbye", { body: { on: $("#gbOn").checked, text: $("#gbt").value } }); toast("Saved"); }); };
 	}
 	if (sec === "blog") return blogSettings(head);
+	if (sec === "ai") return aiSettings(head);
 	if (sec === "tracking") {
 		main.innerHTML = `${head}<form class="card" id="tf"><h2>Tracking</h2>
 		<p class="muted">Disabled by default to protect subscriber privacy and maximise delivery. Bounces and spam complaints are always recorded automatically: flagged addresses are updated in <a href="#reports">Reports</a> and permanently excluded from future sends.</p>

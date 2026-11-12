@@ -23,6 +23,9 @@
 	// Cloudflare's email service, for sign up confirmations only (newsletters go through Amazon SES or your own
 	// service). Needs your sending domain set up under Email Sending in the Cloudflare dashboard. See the README.
 	"send_email": [{ "name": "EMAIL" }],
+	// Cloudflare's AI, for the optional writing helper. Nothing uses it until you switch the helper on in Settings, and
+	// then it's billed to your Cloudflare account past Cloudflare's free daily allowance (about £1 per 1,000 uses).
+	"ai": { "binding": "AI" },
 	// Starts scheduled campaigns.
 	"triggers": { "crons": ["* * * * *"] },
 	"observability": { "enabled": true }
