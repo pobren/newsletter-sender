@@ -12,6 +12,17 @@ import { loadProvider } from "../settings.ts";
 import { askLicence, checkLicence, currentLicence, GRACE_DAYS, licenceStatus, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
+import { cleanLook, currentLook, savedLook, saveLook, type Look } from "./look.ts";
+import { oneOff } from "../public.ts";
+import type { BrandRow } from "../db.ts";
+
+/** Emails a client their invite link, from the agency (white label) when there is one. False when it couldn't go. */
+export async function emailInvite(env: Env, look: Look | null, brand: BrandRow, to: string, name: string | null, link: string): Promise<boolean> {
+	const logo = look?.logo?.startsWith("/") ? new URL(look.logo, link).href : look?.logo ?? null;
+	const from: BrandRow = look ? { ...brand, name: look.name, from_name: look.name, from_email: look.from_email || brand.from_email, colour: look.colour, logo, footer: null, reply_to: look.support?.startsWith("mailto:") ? look.support.slice(7) : brand.reply_to } : brand;
+	const who = look?.name || brand.name;
+	return oneOff(env, from, to, `Your login for ${brand.name}`, [`Hello${name ? ` ${name}` : ""},`, `${who} has made you a login to see and work on ${brand.name}'s newsletters.`, `Press the button to choose your password. The link works once and runs out in ${INVITE_DAYS} days.`], { label: "Choose my password", href: link }).catch(() => false);
+}
 
 const INVITE_DAYS = 14;
 
@@ -60,6 +71,21 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake.");
 		await saveLicence(db, String(key).replace(/\s+/g, ""), answer);
 		return ok({ to: c.licence.to });
+	}
+
+	// -- White label (the owner only: team.ts) -------------------------------------------------------------------
+	if (path === "/api/look" && method === "GET") return ok({ look: await savedLook(db), on: Boolean(await currentLook(db)) });
+	if (path === "/api/look" && method === "POST") {
+		if (!(await currentLicence(db))) return bad("White label needs the agency licence. Add your key under Settings, Licence.", 403);
+		const b = await body(request);
+		if (b.off === true) {
+			await saveLook(db, null);
+			return ok();
+		}
+		const look = cleanLook(b);
+		if ("error" in look) return bad(look.error);
+		await saveLook(db, look);
+		return ok({ look });
 	}
 
 	const licence = await currentLicence(db);
@@ -147,7 +173,10 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const token = newId(16);
 		await db.prepare("INSERT INTO accounts (id, email, name, password, role, brand_id, limits, reset_token, reset_until, created_at) VALUES (?, ?, ?, NULL, 'client', ?, ?, ?, ?, ?)")
 			.bind(newId(8), email, str(b.name, 80) || null, b.brand, JSON.stringify(cleanCan(b.can)), token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), iso()).run();
-		return ok({ link: `${url.origin}/#invite/${token}` });
+		const link = `${url.origin}/#invite/${token}`;
+		const toBrand = brands.find((x) => x.id === b.brand)!;
+		const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, email, str(b.name, 80) || null, link) : false;
+		return ok({ link, emailed });
 	}
 	const pp = /^\/api\/people\/([0-9a-f]{16})(\/link)?$/.exec(path);
 	if (pp) {
@@ -156,7 +185,11 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		if (pp[2] && method === "POST") {
 			const token = newId(16);
 			await db.prepare("UPDATE accounts SET reset_token = ?, reset_until = ? WHERE id = ?").bind(token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), p.id).run();
-			return ok({ link: `${url.origin}/#invite/${token}` });
+			const link = `${url.origin}/#invite/${token}`;
+			const b = await body(request).catch(() => ({}) as Record<string, any>);
+			const toBrand = brands.find((x) => x.id === p.brand_id) ?? brand;
+			const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, p.email, p.name, link) : false;
+			return ok({ link, emailed });
 		}
 		if (!pp[2] && method === "POST") {
 			const b = await body(request);

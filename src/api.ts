@@ -178,7 +178,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	}
 	if (path === "/api/passkey/add-options" && method === "POST") {
 		const have = (await db.prepare("SELECT id FROM passkeys WHERE account_id = ? AND rp_id = ?").bind(me.id, url.hostname).all<{ id: string }>()).results;
-		return ok({ challenge: await newChallenge(db, "add", me.id), rpId: url.hostname, rpName: brand.app_name || "Newsletter Sender", user: { id: b64url(new TextEncoder().encode(me.id)), name: me.email, displayName: me.name || me.email }, exclude: have.map((k) => k.id), algs: ALGS });
+		return ok({ challenge: await newChallenge(db, "add", me.id), rpId: url.hostname, rpName: brand.app_name || (await addon.look(db))?.name || "Newsletter Sender", user: { id: b64url(new TextEncoder().encode(me.id)), name: me.email, displayName: me.name || me.email }, exclude: have.map((k) => k.id), algs: ALGS });
 	}
 	if (path === "/api/passkey/add" && method === "POST") {
 		const b = await body(request);
@@ -292,7 +292,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if (provider?.provider === "ses" && provider.cfToken) c.cfToken = provider.cfToken;
 			} else {
 				// Check the key works with a real email to the owner before saving it.
-				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.</p>`, headers: {} });
+				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Your sending service is connected", text: `This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.</p>`, headers: {} });
 				if (!r.ok) return bad(`The test email didn't go: ${r.error}`);
 			}
 			// Add our bounce and complaint webhook in their account for them. If we can't, the page shows the address to add.
@@ -495,7 +495,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return ok();
 		}
 		if (dh[2] === "/test" && method === "POST") {
-			const status = await deliver(db, h, "test", { message: "This is a test from Newsletter Sender." });
+			const status = await deliver(db, h, "test", { message: "This is a test webhook." });
 			return ok({ status, ok: status >= 200 && status < 300 });
 		}
 	}
@@ -520,7 +520,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (path === "/api/sending/test" && method === "POST") {
 		const b = await body(request);
 		const to = cleanEmail(b.to) ?? me.email;
-		const sent = await oneOff(env, brand, to, `A test from ${brand.name}`, ["This is a one off test email from Newsletter Sender.", "Sign up confirmations look like this."]);
+		const sent = await oneOff(env, brand, to, `A test from ${brand.name}`, ["This is a one off test email.", "Sign up confirmations look like this."]);
 		return sent ? ok() : bad("The test didn't go. Check the sending set-up.");
 	}
 

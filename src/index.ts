@@ -23,6 +23,7 @@ import { handlePublic } from "./public.ts";
 import { consume, startDue } from "./sending.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
+import { addon } from "./addon.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
 
 import { VERSION } from "./update.ts";
@@ -72,7 +73,7 @@ export default {
 		}
 		if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
 		if (["/", "/setup", "/signin"].includes(path)) {
-			return withHeaders(new Response(appPage(VERSION), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }), { "x-frame-options": "DENY" });
+			return withHeaders(new Response(appPage(VERSION, await addon.look(env.DB)), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }), { "x-frame-options": "DENY" });
 		}
 		if (path === "/.well-known/newsletter-sender") return new Response(await installId(env.DB), { headers: { "content-type": "text/plain", "cache-control": "no-store", "access-control-allow-origin": "*" } });
 		if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /archive\nAllow: /s/\n", { headers: { "content-type": "text/plain" } });

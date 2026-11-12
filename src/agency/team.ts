@@ -46,7 +46,7 @@ export function pickBrand(request: Request, brands: BrandRow[]): BrandRow {
 export function notAllowed(a: Pick<AccountRow, "role">, can: Can, path: string, method: string): string | null {
 	if (a.role !== "client") return null;
 	const write = method !== "GET" && method !== "HEAD";
-	if (/^\/api\/(backups|people|licence)(\/|$)/.test(path) || (path === "/api/brands" && write)) return "Only the owner can do that.";
+	if (/^\/api\/(backups|people|licence|look)(\/|$)/.test(path) || (path === "/api/brands" && write)) return "Only the owner can do that.";
 	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|links)$/.test(path) && write)))
 		return "Changing settings is switched off for your login. Please ask the owner.";
 	if (!can.send && ((/^\/api\/campaigns\/[0-9a-f]{16}\/(send|schedule|resume)$/.test(path) && write) || (/^\/api\/automations(\/|$)/.test(path) && write)))

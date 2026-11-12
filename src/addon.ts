@@ -6,6 +6,7 @@
 
 import type { AccountRow, BrandRow, CampaignRow, Env } from "./db.ts";
 import { agency } from "./agency/index.ts";
+import type { Look } from "./agency/look.ts";
 
 /** What a client may do. The owner may do everything. */
 export interface Can { send: boolean; import: boolean; export: boolean; delete: boolean; settings: boolean; month_limit: number }
@@ -30,6 +31,8 @@ export interface Addon {
 	api(ctx: AddonContext): Promise<Response | null>;
 	/** Why this campaign can't be sent, scheduled or resumed now (such as a client's monthly limit), or null. */
 	beforeSend(db: D1Database, me: AccountRow, brand: BrandRow, c: CampaignRow, action: string): Promise<string | null>;
+	/** The agency's white label look (Settings, White label), or null for Newsletter Sender's own. */
+	look(db: D1Database): Promise<Look | null>;
 	/** Extra script for the dashboard. It runs before the app's own and fills in window.NS_ADDON (see app.html). */
 	script: string;
 }
@@ -44,6 +47,7 @@ const FREE: Addon = {
 	refuse: () => null,
 	api: async () => null,
 	beforeSend: async () => null,
+	look: async () => null,
 	script: "",
 };
 

@@ -7,7 +7,7 @@
 <title>Newsletter Sender</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='9' fill='%23a3195b'/%3E%3Cpath d='M8 18 L27 9 L22 27 L17 20 Z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
-:root{--c:#a3195b;--cd:#7d1246;--pink:#fbe6f0;--soft:#fff5fa;--ink:#1d1424;--text:#4a3b52;--muted:#6b5a73;--line:#efe2e9;--bg:#fbf7f9;--ok:#0f7a4a;--warn:#a35a00;--bad:#a1122e}
+:root{--c:#a3195b;--cd:#7d1246;--pink:#fbe6f0;--soft:#fff5fa;--ink:#1d1424;--text:#4a3b52;--muted:#6b5a73;--line:#efe2e9;--bg:#fbf7f9;--edge:#e6cfdb;--ok:#0f7a4a;--warn:#a35a00;--bad:#a1122e}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 a{color:var(--c)}h1,h2,h3{margin:0;line-height:1.2}h1{font-size:28px;font-weight:800}h2{font-size:21px;font-weight:700}h3{font-size:17px}
 .ico{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -16,14 +16,14 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 .mark{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--ink);text-decoration:none}.mark svg{width:32px;height:32px}
 main{max-width:1200px;margin:0 auto;padding:28px 20px 80px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:8px 16px;border-radius:10px;border:0;background:var(--c);color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer;text-decoration:none;white-space:nowrap}
-.btn:hover{background:var(--cd)}.btn.ghost{background:#fff;color:var(--ink);border:2px solid #e6cfdb}.btn.ghost:hover{border-color:var(--c)}.btn.danger{background:#fff;color:var(--bad);border:2px solid #f0c9d2}.btn.small{min-height:34px;padding:4px 10px;font-size:14px}
+.btn:hover{background:var(--cd)}.btn.ghost{background:#fff;color:var(--ink);border:2px solid var(--edge)}.btn.ghost:hover{border-color:var(--c)}.btn.danger{background:#fff;color:var(--bad);border:2px solid #f0c9d2}.btn.small{min-height:34px;padding:4px 10px;font-size:14px}
 .btn[disabled]{opacity:.55;cursor:default}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grow{flex:1}.right{margin-left:auto}
 .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:18px 0}
 .stat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}.stat p{margin:0;font-size:13px;color:var(--muted);font-weight:600}.stat b{display:block;font-size:28px;font-weight:800;margin-top:2px}
 label{display:block;font-weight:600;margin:14px 0 6px;font-size:15px}.hint{font-size:13px;color:var(--muted);font-weight:400;margin:4px 0 0}
-input,select,textarea{width:100%;min-height:44px;padding:9px 12px;border:2px solid #e6cfdb;border-radius:10px;font:inherit;background:#fff;color:var(--ink)}textarea{min-height:120px;resize:vertical}
+input,select,textarea{width:100%;min-height:44px;padding:9px 12px;border:2px solid var(--edge);border-radius:10px;font:inherit;background:#fff;color:var(--ink)}textarea{min-height:120px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:3px solid var(--pink);border-color:var(--c)}input[type=checkbox]{width:20px;height:20px;min-height:0;accent-color:var(--c)}
 .check{display:flex;gap:10px;align-items:flex-start;font-weight:500;margin:12px 0}.check input{margin-top:2px;flex:none}
 table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:13px;color:var(--muted)}tr.click{cursor:pointer}tr.click:hover td{background:var(--soft)}
@@ -163,6 +163,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 @media(max-width:760px){.rcards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.rbar{grid-template-columns:1fr 56px;row-gap:4px}.rbar>span{grid-column:1/-1}.rbar .rtrack{grid-column:1}.rbar small{display:none}}
 #main h1{margin-top:0}.printonly{display:none}@media print{@page{margin:14mm}html,body{background:#fff!important}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}#top,#side,footer,.appver,#main iframe,.toast,#main .btn,#main .icon-btn,#main .hint a{display:none!important}.shell{display:block!important}main{padding:0!important;max-width:none!important}.card,.stat,.htile{break-inside:avoid;box-shadow:none!important}.printonly{display:block;color:#6b5a73;font-size:13px;margin:0 0 8px}}
+.lookhead{display:flex;align-items:center;gap:12px;margin:0 0 18px;font-size:18px}.lookhead img{max-height:44px;max-width:180px;object-fit:contain}
 </style>
 </head>
 <body>
@@ -255,6 +256,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 </div>
 <script>/* Signed in last time: show the header and menu straight away, so the page doesn't jump when it loads. */try{if(localStorage.getItem("ns.in")){document.getElementById("top").hidden=false;document.getElementById("side").hidden=false;}}catch(e){}</script>
 <p class="muted appver" style="text-align:center;font-size:13px">Newsletter Sender {{VERSION}} · <a href="https://newslettersender.com/">newslettersender.com</a></p>
+{{LOOK}}
 {{ADDON}}
 <script>
 "use strict";
@@ -268,7 +270,10 @@ const when = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "numeric", m
 const STATUS = { draft: "Draft", scheduled: "Scheduled", sending: "Sending", paused: "Paused", sent: "Sent", cancelled: "Stopped", active: "Subscribed", pending: "Unconfirmed", blocked: "Blocked", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam" };
 const pill = (s) => `<span class="pill ${esc(s)}">${esc(STATUS[s] || s)}</span>`;
 let timer = null;
-const showName = (b) => { const n = (b && b.app_name) || "Newsletter Sender"; $("#appName").textContent = n; document.title = n; };
+// With the agency's white label (window.NS_LOOK), the owner sees the agency's name and a client sees their brand's.
+const showName = (b) => { const L = window.NS_LOOK; const n = (b && b.app_name) || (L && (ME?.role === "client" ? b?.name : L.name)) || "Newsletter Sender"; $("#appName").textContent = n; document.title = n; };
+/** The agency's logo and name above the sign in and invite forms, when white labelled. */
+const lookHead = () => { const L = window.NS_LOOK; return L ? `<div class="lookhead">${L.logo ? `<img src="${esc(L.logo)}" alt="${esc(L.name)}">` : `<b>${esc(L.name)}</b>`}</div>` : ""; };
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
 const fold = (mini) => { document.body.classList.toggle("slim", mini); const b = $("#fold"); const t = mini ? "Make the menu bigger" : "Make the menu smaller"; b.title = t; b.setAttribute("aria-label", t); };
 fold(store.get("ns.menu") === "mini");
@@ -375,7 +380,7 @@ const ADDON = window.NS_ADDON || {};
 function signinScreen(state) {
 	$("#top").hidden = $("#side").hidden = true;
 	store.set("ns.in", null);
-	main.innerHTML = `<form class="center card" id="f"><h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><div class="row"><button class="btn">${icon("out")}Sign in</button>${PK ? `<button type="button" class="btn ghost" id="pkIn">${icon("key")}Sign in with a passkey</button>` : ""}</div><p class="hint" style="margin-top:14px">Forgotten your password? Open your set-up link again to choose a new one.</p></form>`;
+	main.innerHTML = `<form class="center card" id="f">${lookHead()}<h1>Sign in</h1><label for="email">Email address</label><input id="email" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password">${robot(state)}<p class="err" id="e"></p><div class="row"><button class="btn">${icon("out")}Sign in</button>${PK ? `<button type="button" class="btn ghost" id="pkIn">${icon("key")}Sign in with a passkey</button>` : ""}</div><p class="hint" style="margin-top:14px">${window.NS_LOOK ? `Forgotten your password? ${window.NS_LOOK.support ? `<a href="${esc(window.NS_LOOK.support)}">Ask ${esc(window.NS_LOOK.name)}</a>` : `Ask ${esc(window.NS_LOOK.name)}`} for a new link.` : "Forgotten your password? Open your set-up link again to choose a new one."}</p></form>`;
 	loadTurnstile(state);
 	$("#pkIn") && ($("#pkIn").onclick = (e) => run(e.currentTarget, async () => { $("#e").textContent = ""; try { await passkeySignIn(); boot(); } catch (err) { $("#e").textContent = err.message; } }));
 	$("#f").onsubmit = async (e) => { e.preventDefault(); try { const r = await api("/api/signin", { body: { email: $("#email").value, password: $("#pw").value, ts: $("[name=ts]")?.value } }); PK && r.passkeyHere === false && !store.get("ns.nopk") ? passkeyOffer(() => { store.set("ns.nopk", "1"); boot(); }) : boot(); } catch (err) { $("#e").textContent = err.message; window.turnstile?.reset(); } };
@@ -400,7 +405,7 @@ function route() {
 	const busy = $("#busy"); const slow = setTimeout(() => (busy.hidden = false), 250);
 	const done = () => { clearTimeout(slow); busy.hidden = true; };
 	const views = { campaigns, new: newCampaign, email: () => editor(id), templates: () => (id === "new" ? newTemplate() : templates()), template: () => editor(id, "template"), lists, list: () => listView(id, extra), blocklist: () => blocklist(id), automations, automation: () => automation(id), reports, settings: () => settings(id), ses: () => sesWizard(id), ...(ADDON.views || {}) };
-	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
+	(views[v] || campaigns)().then(() => { done(); ADDON.after?.(); }, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
 const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };

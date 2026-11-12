@@ -4,6 +4,7 @@
 import type { Addon } from "../addon.ts";
 import { audienceCount, parseAudience } from "../sending.ts";
 import { currentLicence } from "./licence.ts";
+import { currentLook } from "./look.ts";
 import { agencyRoutes, openRoutes } from "./routes.ts";
 import { brandsFor, canOf, monthUsed, notAllowed, pickBrand } from "./team.ts";
 import script from "./agency.html";
@@ -25,6 +26,7 @@ export function agency(free: Addon): Addon {
 			const more = action === "resume" ? Math.max(0, (c.total ?? 0) - used) : await audienceCount(db, brand.id, parseAudience(c.audience));
 			return used + more > can.month_limit ? `That would go over your limit of ${can.month_limit.toLocaleString("en-GB")} emails this month (${used.toLocaleString("en-GB")} sent so far). Please ask the owner.` : null;
 		},
+		look: currentLook,
 		script,
 	};
 }

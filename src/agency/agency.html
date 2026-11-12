@@ -66,7 +66,7 @@ window.NS_ADDON = (() => {
 		$("#top").hidden = $("#side").hidden = true;
 		let inv;
 		try { inv = await api(`/api/invite?token=${token}`, { quiet: true }); } catch (err) { main.innerHTML = `<div class="center card"><h1>This link has run out</h1><p>${esc(err.message)}</p><a class="btn" href="/">${icon("back")}Go to sign in</a></div>`; return; }
-		main.innerHTML = `<form class="center card" id="f"><h1>Welcome${inv.brand ? ` to ${esc(inv.brand)}` : ""}</h1><p class="muted">Choose a password to sign in as <b>${esc(inv.email)}</b>.</p>
+		main.innerHTML = `<form class="center card" id="f">${lookHead()}<h1>Welcome${inv.brand ? ` to ${esc(inv.brand)}` : ""}</h1><p class="muted">Choose a password to sign in as <b>${esc(inv.email)}</b>.</p>
 		<label for="name">Your name</label><input id="name" autocomplete="name" value="${esc(inv.name || "")}">
 		<label for="pw">Password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password"><p class="hint">At least 10 characters.</p>
 		<p class="err" id="e"></p><button class="btn">${icon("check")}Save and sign in</button></form>`;
@@ -82,24 +82,63 @@ window.NS_ADDON = (() => {
 			${p.id ? "" : `<label for="pe">Their email address</label><input id="pe" type="email">`}
 			<label for="pb">Their brand</label><select id="pb">${s.brands.map((b) => `<option value="${b.id}" ${b.id === (p.brand_id || ME?.current) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
 			<label>What they can do</label>${PERMS.map(([k, t]) => `<label class="check"><input type="checkbox" name="pc" value="${k}" ${p.can[k] ? "checked" : ""}> <span>${t}</span></label>`).join("")}
-			<label for="pl">Most emails they can send a month <span class="hint">(leave empty for no limit)</span></label><input id="pl" type="number" min="0" step="1" value="${p.can.month_limit || ""}" placeholder="No limit">`;
-		const read = (m) => ({ name: $("#pn", m).value, email: $("#pe", m)?.value, brand: $("#pb", m).value, can: { ...Object.fromEntries([...m.querySelectorAll("[name=pc]")].map((x) => [x.value, x.checked])), month_limit: Number($("#pl", m).value) || 0 } });
-		const showLink = (link, who) => modal(`<h2>Invite link for ${esc(who)}</h2><p>Send this to them yourself. It works once and runs out in 14 days. They choose their own password.</p><code class="row" style="display:flex;gap:8px;align-items:center;word-break:break-all"><span class="grow">${esc(link)}</span>${copyBtn(link)}</code><div class="row" style="margin-top:14px"><button class="btn" data-close>${icon("check")}Done</button></div>`);
+			<label for="pl">Most emails they can send a month <span class="hint">(leave empty for no limit)</span></label><input id="pl" type="number" min="0" step="1" value="${p.can.month_limit || ""}" placeholder="No limit">${p.id ? "" : sendBox(true)}`;
+		const read = (m) => ({ send: Boolean($("#psend", m)?.checked), name: $("#pn", m).value, email: $("#pe", m)?.value, brand: $("#pb", m).value, can: { ...Object.fromEntries([...m.querySelectorAll("[name=pc]")].map((x) => [x.value, x.checked])), month_limit: Number($("#pl", m).value) || 0 } });
+		const L = window.NS_LOOK;
+		const sendBox = (on) => `<label class="check"><input type="checkbox" id="psend" ${on ? "checked" : ""}> <span>Email the invite to them${L?.from_email ? ` from ${esc(L.from_email)}` : ""}</span></label>`;
+		const showLink = (link, who, emailed, tried) => modal(`<h2>Invite link for ${esc(who)}</h2>${emailed ? `<div class="info">${icon("check")}<p>We've emailed it to them.</p></div><p>You can also send them this link yourself.` : `${tried ? `<p class="err">We couldn't email it just now, so please send them this link yourself.</p><p>` : "<p>Send this to them yourself. "}`} It works once and runs out in 14 days. They choose their own password.</p><code class="row" style="display:flex;gap:8px;align-items:center;word-break:break-all"><span class="grow">${esc(link)}</span>${copyBtn(link)}</code><div class="row" style="margin-top:14px"><button class="btn" data-close>${icon("check")}Done</button></div>`);
 		main.innerHTML = `${head}<div class="card"><h2>People</h2><p class="muted">Let a client sign in to just their own brand, and choose what they can do there. You can always see and do everything.</p>
 		<table class="data"><thead><tr><th>Who</th><th>Brand</th><th>What they can do</th><th></th></tr></thead><tbody>${s.people.map((p) => `<tr><td><b>${esc(p.name || p.email)}</b><br><span class="muted">${esc(p.email)}</span></td><td>${p.role === "owner" ? "Every brand" : esc(p.brand || "")}</td><td>${p.role === "owner" ? "Everything (owner)" : `${summary(p.can)}${p.joined ? "" : `<br><span class="muted">${icon("clock")} Hasn't used their invite yet</span>`}`}</td>
 		<td>${p.role === "owner" ? "" : `<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn ghost small" data-edit="${p.id}">${icon("pencil")}Edit</button><button class="btn ghost small" data-link="${p.id}">${icon("link")}New invite link</button><button class="btn ghost small" data-del="${p.id}">${icon("trash")}Remove</button></div>`}</td></tr>`).join("")}</tbody></table>
 		<div class="row" style="margin-top:14px"><button class="btn" id="padd">${icon("plus")}Invite a client</button></div></div>`;
 		$("#padd").onclick = () => {
 			const m = modal(`<h2>Invite a client</h2>${form()}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("send")}Make an invite link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
-			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { const v = read(m); const r = await api("/api/people", { body: v }); m.remove(); await settings("people"); showLink(r.link, v.name || v.email); } catch (err) { $("#pe2", m).textContent = err.message; } });
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { const v = read(m); const r = await api("/api/people", { body: v }); m.remove(); await settings("people"); showLink(r.link, v.name || v.email, r.emailed, v.send); } catch (err) { $("#pe2", m).textContent = err.message; } });
 		};
 		main.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
 			const p = s.people.find((x) => x.id === b.dataset.edit);
 			const m = modal(`<h2>${esc(p.name || p.email)}</h2>${form(p)}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("save")}Save</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { await api(`/api/people/${p.id}`, { body: read(m) }); m.remove(); toast("Saved"); settings("people"); } catch (err) { $("#pe2", m).textContent = err.message; } });
 		});
-		main.querySelectorAll("[data-link]").forEach((b) => b.onclick = () => run(b, async () => { const p = s.people.find((x) => x.id === b.dataset.link); const r = await api(`/api/people/${p.id}/link`, { body: {} }); showLink(r.link, p.name || p.email); }));
+		main.querySelectorAll("[data-link]").forEach((b) => b.onclick = () => {
+			const p = s.people.find((x) => x.id === b.dataset.link);
+			const m = modal(`<h2>New invite link for ${esc(p.name || p.email)}</h2><p>Their old link stops working. They choose a new password with this one.</p>${sendBox(true)}<div class="row"><button class="btn" id="pgo">${icon("link")}Make a new link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
+			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { const send = $("#psend", m).checked; const r = await api(`/api/people/${p.id}/link`, { body: { send } }); m.remove(); showLink(r.link, p.name || p.email, r.emailed, send); });
+		});
 		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/people/${b.dataset.del}`, { method: "DELETE" }); toast("Removed. They can't sign in any more."); settings("people"); }));
+	}
+
+	// -- White label (Settings, White label) ------------------------------------------------------------------------
+	async function whiteLabel(head) {
+		const s = await api("/api/look");
+		const l = s.look || { name: "", colour: "#a3195b", logo: "", support: "", from_email: "" };
+		const sup = (l.support || "").replace(/^mailto:/, "");
+		main.innerHTML = `${head}<div class="card"><h2>White label</h2><p class="muted">Your agency's own name, logo and colour for clients. They see it on the sign in page, in the browser tab, at the top of the app and in emails we send them, and never see the words Newsletter Sender. You keep updates, the licence and our guides.</p>
+		${ME?.licence ? "" : `<p class="err">White label needs the agency licence. Add your key under Settings, Licence.</p>`}
+		<label for="wn">Your agency's name</label><input id="wn" value="${esc(l.name)}" placeholder="Such as Bright Agency">
+		<div class="row"><div><label for="wc">Main colour</label><input id="wc" type="color" value="${esc(l.colour)}" style="width:90px;padding:4px"></div>
+		<div class="grow"><label for="wl">Logo <span class="hint">(upload one, or a web address starting https://)</span></label><div class="row"><input id="wl" class="grow" style="width:auto" value="${esc(l.logo || "")}" placeholder="https://..."><label class="btn ghost" style="margin:0">${icon("upload")}Upload<input id="wu" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label></div></div></div>
+		<p class="hint">Very light colours are made a little darker so white text on buttons stays easy to read. The logo is also used as the browser tab icon.</p>
+		<label for="ws">Help for clients <span class="hint">(an email address or web address; shown in place of our help links)</span></label><input id="ws" value="${esc(sup)}" placeholder="help@youragency.co.uk">
+		<label for="wf">Emails to clients come from <span class="hint">(invites; your domain must be set up in Cloudflare, Email Sending)</span></label><input id="wf" type="email" value="${esc(l.from_email || "")}" placeholder="hello@youragency.co.uk">
+		<div class="lookprev" id="wprev"></div>
+		<p class="err" id="we"></p><div class="row"><button class="btn" id="wsave">${icon("save")}Save white label</button>${s.look ? `<button class="btn ghost" id="woff">${icon("trash")}Go back to Newsletter Sender's look</button>` : ""}</div>
+		<p class="hint" style="margin-top:14px">To see what clients see, open this address in a private window.</p></div>`;
+		const prev = () => { const n = $("#wn").value || "Your agency", c = $("#wc").value, lg = $("#wl").value.trim(); $("#wprev").innerHTML = `<p class="hint">How the sign in page starts:</p><div class="lookhead" style="border:1px solid var(--line);border-radius:12px;padding:14px">${/^(https:\/\/|\/img\/)/.test(lg) ? `<img src="${esc(lg)}" alt="${esc(n)}">` : `<b>${esc(n)}</b>`}<span class="grow"></span><span class="btn small" style="background:${esc(c)}">${icon("out")}Sign in</span></div>`; };
+		["wn", "wc", "wl"].forEach((id) => $("#" + id).addEventListener("input", prev)); prev();
+		$("#wu").onchange = (ev) => run(null, async () => { const fd = new FormData(); fd.append("file", ev.target.files[0]); const r = await api("/api/images", { body: fd }); const u = new URL(r.url, location.href); $("#wl").value = u.origin === location.origin ? u.pathname : r.url; prev(); });
+		$("#wsave").onclick = (e) => run(e.currentTarget, async () => { $("#we").textContent = ""; try { await api("/api/look", { body: { name: $("#wn").value, colour: $("#wc").value, logo: $("#wl").value, support: $("#ws").value, from_email: $("#wf").value } }); toast("Saved"); location.reload(); } catch (err) { $("#we").textContent = err.message; } });
+		$("#woff") && ($("#woff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Go back to Newsletter Sender's own look for everyone?")) return; await api("/api/look", { body: { off: true } }); location.reload(); }));
+	}
+
+	// -- For clients with white label: our name and help links become the agency's -----------------------------
+	function after() {
+		const L = window.NS_LOOK;
+		if (!L || !ME || ME.role !== "client") return;
+		main.querySelectorAll('a[href^="https://newslettersender.com"]').forEach((a) => { if (L.support) { a.href = L.support; a.textContent = a.textContent.replace(/guide|help.*$/i, "Ask for help") || "Ask for help"; } else a.replaceWith(document.createTextNode(a.textContent)); });
+		const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+		for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.includes("Newsletter Sender")) n.nodeValue = n.nodeValue.replaceAll("Newsletter Sender", L.name);
+		main.querySelectorAll("input[placeholder*='Newsletter Sender']").forEach((i) => (i.placeholder = i.placeholder.replaceAll("Newsletter Sender", L.name)));
 	}
 
 	// -- Licence (Settings, Licence) ------------------------------------------------------------------------------
@@ -132,10 +171,11 @@ window.NS_ADDON = (() => {
 		views: { brands: allBrands },
 		tabs(SETTINGS) {
 			const owner = !ME || ME.role === "owner";
-			const extra = owner ? [...(ME?.licence ? [["people", "People", "users"]] : []), ["licence", "Licence", "check"]] : [];
+			const extra = owner ? [...(ME?.licence ? [["people", "People", "users"], ["look", "White label", "pencil"]] : []), ["licence", "Licence", "check"]] : [];
 			return [...SETTINGS.slice(0, -1), ...extra, SETTINGS[SETTINGS.length - 1]].filter(([k]) => owner || k === "account" || (k !== "backups" && ME.can.settings));
 		},
-		settings: { people, licence },
+		settings: { people, licence, look: whiteLabel },
+		after,
 		licenceCard: () => (ME?.licence ? `<div class="card"><h2>Licence</h2><p>Agency edition, licensed to <b>${esc(ME.licence.to)}</b>. See Settings, Licence.</p></div>` : ""),
 	};
 })();
