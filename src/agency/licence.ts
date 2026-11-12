@@ -3,8 +3,8 @@
 // A key is "NSA-" + the licence as base64url JSON + "." + an Ed25519 signature of that text, made with the private
 // key only the licensor has. The app checks the signature with the public keys below.
 //
-// Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id
-//, the app version and a short fingerprint of the key, never the key itself (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
+// Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id,
+// the app version and a short fingerprint of the key, never the key itself (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
 // agency features off. If newslettersender.com can't be reached, the licence keeps working for GRACE_DAYS after the
 // last good answer. Keys that site never sold answer "unknown", which counts as active.
 //
