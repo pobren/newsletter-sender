@@ -1,12 +1,13 @@
 // Sending services. Newsletters go out through Amazon SES (the main way, at the account's full speed) or the owner's
-// own Postmark, Mailgun, Brevo, Resend, SendGrid or SparkPost. Cloudflare's own email service only sends sign up confirmations and other
+// own Postmark, Mailgun, Brevo, Resend, SendGrid, SparkPost or any SMTP server. Cloudflare's own email service only sends sign up confirmations and other
 // one off emails (Cloudflare describes it as for transactional email), never newsletters.
 //
 // The owner's keys are kept encrypted in the database (seal / unseal), and never shown again once saved.
 
 import { ses, type AwsKeys } from "./aws.ts";
+import { smtpSend, type Connect } from "./smtp.ts";
 
-export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend" | "sendgrid" | "sparkpost";
+export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend" | "sendgrid" | "sparkpost" | "smtp";
 
 export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: string }[] = [
 	{ id: "ses", name: "Amazon SES", keyLabel: "Secret access key", help: "In AWS: IAM, Users, your sending user, Security credentials, Create access key." },
@@ -16,6 +17,7 @@ export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: 
 	{ id: "resend", name: "Resend", keyLabel: "API key", help: "In Resend: API Keys, Create API key (Full access, so we can add the bounce webhook)." },
 	{ id: "sendgrid", name: "SendGrid", keyLabel: "API key", help: "In SendGrid: Settings, API Keys, Create API Key (Full Access, so we can add the bounce webhook)." },
 	{ id: "sparkpost", name: "SparkPost", keyLabel: "API key", help: "In SparkPost: Configuration, API Keys, New API Key (Transmissions: Read/Write and Event Webhooks: Read/Write)." },
+	{ id: "smtp", name: "Your own SMTP server", keyLabel: "Password", help: "Your email host's SMTP server name, port, user name and password." },
 ];
 export const isProvider = (x: unknown): x is ProviderId => PROVIDERS.some((p) => p.id === x);
 export const providerName = (id: ProviderId) => PROVIDERS.find((p) => p.id === id)!.name;
@@ -38,6 +40,11 @@ export interface ProviderConfig {
 	sendgridRegion?: "us" | "eu";
 	/** SparkPost only: an EU account sends through api.eu.sparkpost.com. */
 	sparkpostRegion?: "us" | "eu";
+	/** SMTP only: the server, port, how it's encrypted and the user name. The password is the key. */
+	smtpHost?: string;
+	smtpPort?: number;
+	smtpSecurity?: "tls" | "starttls";
+	smtpUser?: string;
 	/** Postmark, Mailgun, Brevo or Resend: we added our bounce and complaint webhook there ourselves. */
 	hookAdded?: boolean;
 }
@@ -47,6 +54,7 @@ export const sesKeys = (c: ProviderConfig): AwsKeys => ({ accessKeyId: c.accessK
 /** A tidy provider set-up from the form, or what's wrong with it. */
 export function parseProvider(input: Record<string, unknown>, fromEmail: string): ProviderConfig | { error: string } {
 	if (!isProvider(input.provider)) return { error: "Please choose how to send." };
+	if (input.provider === "smtp") return parseSmtp(input);
 	const key = typeof input.key === "string" ? input.key.trim() : "";
 	if (key.length < 10 || key.length > 300 || /\s/.test(key)) return { error: "Please paste the whole key, with no spaces." };
 	const out: ProviderConfig = { provider: input.provider, key };
@@ -69,10 +77,25 @@ export function parseProvider(input: Record<string, unknown>, fromEmail: string)
 	return out;
 }
 
+/** An SMTP server set-up from the form. Passwords can be short and have spaces (Gmail app passwords do). */
+function parseSmtp(input: Record<string, unknown>): ProviderConfig | { error: string } {
+	const host = String(input.smtpHost ?? "").trim().toLowerCase();
+	if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(host)) return { error: "Please enter the SMTP server's name, such as smtp.yourhost.com." };
+	const port = Number(input.smtpPort) || 587;
+	if (port === 25) return { error: "Cloudflare doesn't allow port 25. Please use 587 or 465 (most hosts offer both)." };
+	if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: "Please enter the SMTP port, such as 587 or 465." };
+	const user = String(input.smtpUser ?? "").trim();
+	if (user.length > 200 || /[\r\n]/.test(user)) return { error: "Please check the user name." };
+	const key = typeof input.key === "string" ? input.key : "";
+	if ((user && !key) || key.length > 300 || /[\r\n]/.test(key)) return { error: "Please enter the password for this user name." };
+	const smtpSecurity = input.smtpSecurity === "tls" || input.smtpSecurity === "starttls" ? input.smtpSecurity : port === 465 ? "tls" : "starttls";
+	return { provider: "smtp", key, smtpHost: host, smtpPort: port, smtpSecurity, smtpUser: user };
+}
+
 /** What the owner sees about their sending set-up: never the key itself. */
 export function providerSummary(c: ProviderConfig | null) {
 	if (!c) return null;
-	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? (c.sendgridRegion === "eu" || c.sparkpostRegion === "eu" ? "EU" : null), mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
+	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? (c.sendgridRegion === "eu" || c.sparkpostRegion === "eu" ? "EU" : null), mailgunDomain: c.mailgunDomain ?? null, smtp: c.provider === "smtp" ? { host: c.smtpHost, port: c.smtpPort, user: c.smtpUser } : null, keyEnd: c.provider === "smtp" ? "" : c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
 }
 
 export interface OutEmail {
@@ -210,13 +233,14 @@ export function sesBody(c: ProviderConfig, fromName: string, fromEmail: string, 
 }
 
 /** Sends one email and says how it went. Never throws. */
-export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: string, m: OutEmail, fetcher: typeof fetch = fetch): Promise<Sent> {
+export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: string, m: OutEmail, fetcher: typeof fetch = fetch, connector?: Connect): Promise<Sent> {
 	try {
 		if (c.provider === "ses") {
 			const a = await ses(sesKeys(c), "POST", "/outbound-emails", sesBody(c, fromName, fromEmail, m), fetcher);
 			if (a.ok) return { ok: true, id: a.data?.MessageId };
 			return classify(a.status, a.text);
 		}
+		if (c.provider === "smtp") return smtpSend({ host: c.smtpHost ?? "", port: c.smtpPort ?? 587, security: c.smtpSecurity ?? "starttls", user: c.smtpUser ?? "", password: c.key }, fromName, fromEmail, m, connector ?? (await import("cloudflare:sockets")).connect as unknown as Connect);
 		const { url, init } = providerRequest(c, fromName, fromEmail, m);
 		const res = await fetcher(url, init);
 		const text = await res.text();
@@ -508,6 +532,7 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 			const r = await call(base, { method: "POST", headers: h, body: JSON.stringify({ name: "Newsletter Sender", target: hookUrl, events: ["bounce", "out_of_band", "spam_complaint"] }) });
 			return r.ok ? { ok: true } : failed(r);
 		}
+		if (c.provider === "smtp") return { error: "An SMTP server sends bounces back to your from address as emails, so there's no webhook to add." };
 		return { error: "Amazon SES reports bounces its own way." };
 	} catch (e) {
 		return { error: `Couldn't reach ${name}: ${(e as Error).message}` };

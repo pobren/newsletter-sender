@@ -301,7 +301,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			}
 			// Add our bounce and complaint webhook in their account for them. If we can't, the page shows the address to add.
 			let hook: { ok: true } | { error: string } | null = null;
-			if (c.provider !== "ses") {
+			if (c.provider !== "ses" && c.provider !== "smtp") {
 				hook = await addWebhook(c, `${base}/hooks/${c.provider}/${brand.hook_key}`);
 				c.hookAdded = "ok" in hook;
 			}
@@ -321,7 +321,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	// Try adding the bounce webhook again (Settings, Sending), say after the owner swapped to a Full access key.
 	if (path === "/api/sending/webhook" && method === "POST") {
 		const p = await loadProvider(db, brand);
-		if (!p || p.provider === "ses") return bad("Please save your sending service first.");
+		if (!p || p.provider === "ses" || p.provider === "smtp") return bad("Please save your sending service first.");
 		const r = await addWebhook(p, `${await origin(db, request)}/hooks/${p.provider}/${brand.hook_key}`);
 		if ("error" in r) return bad(r.error);
 		await saveProvider(db, brand.id, { ...p, hookAdded: true }, brand.rate);
