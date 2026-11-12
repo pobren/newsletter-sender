@@ -12,6 +12,7 @@ import { loadProvider } from "../settings.ts";
 import { askLicence, checkLicence, currentLicence, GRACE_DAYS, licenceStatus, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
+import { addressRoutes, appBase } from "./address.ts";
 import { cleanLook, currentLook, savedLook, saveLook, type Look } from "./look.ts";
 import { oneOff } from "../public.ts";
 import type { BrandRow } from "../db.ts";
@@ -87,6 +88,8 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		await saveLook(db, look);
 		return ok({ look });
 	}
+	const address = await addressRoutes(x);
+	if (address) return address;
 
 	const licence = await currentLicence(db);
 	// Who's signed in, which brands they can open, and the licence (for the brand picker and Settings).
@@ -173,7 +176,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const token = newId(16);
 		await db.prepare("INSERT INTO accounts (id, email, name, password, role, brand_id, limits, reset_token, reset_until, created_at) VALUES (?, ?, ?, NULL, 'client', ?, ?, ?, ?, ?)")
 			.bind(newId(8), email, str(b.name, 80) || null, b.brand, JSON.stringify(cleanCan(b.can)), token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), iso()).run();
-		const link = `${url.origin}/#invite/${token}`;
+		const link = `${await appBase(db, url)}/#invite/${token}`;
 		const toBrand = brands.find((x) => x.id === b.brand)!;
 		const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, email, str(b.name, 80) || null, link) : false;
 		return ok({ link, emailed });
@@ -185,7 +188,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		if (pp[2] && method === "POST") {
 			const token = newId(16);
 			await db.prepare("UPDATE accounts SET reset_token = ?, reset_until = ? WHERE id = ?").bind(token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), p.id).run();
-			const link = `${url.origin}/#invite/${token}`;
+			const link = `${await appBase(db, url)}/#invite/${token}`;
 			const b = await body(request).catch(() => ({}) as Record<string, any>);
 			const toBrand = brands.find((x) => x.id === p.brand_id) ?? brand;
 			const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, p.email, p.name, link) : false;

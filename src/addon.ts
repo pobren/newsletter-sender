@@ -31,6 +31,8 @@ export interface Addon {
 	api(ctx: AddonContext): Promise<Response | null>;
 	/** Why this campaign can't be sent, scheduled or resumed now (such as a client's monthly limit), or null. */
 	beforeSend(db: D1Database, me: AccountRow, brand: BrandRow, c: CampaignRow, action: string): Promise<string | null>;
+	/** Why this login can't work at this address (a client away from the agency's own address), or null. */
+	here(db: D1Database, me: Pick<AccountRow, "role">, host: string): Promise<string | null>;
 	/** The agency's white label look (Settings, White label), or null for Newsletter Sender's own. */
 	look(db: D1Database): Promise<Look | null>;
 	/** Extra script for the dashboard. It runs before the app's own and fills in window.NS_ADDON (see app.html). */
@@ -48,6 +50,7 @@ const FREE: Addon = {
 	api: async () => null,
 	beforeSend: async () => null,
 	look: async () => null,
+	here: async () => null,
 	script: "",
 };
 

@@ -86,6 +86,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return bad("That email and password don't match.", 401);
 		}
 		await clearFailures(db, email);
+		const away = await addon.here(db, a, url.hostname);
+		if (away) return bad(away, 403);
 		const pk = await db.prepare("SELECT 1 FROM passkeys WHERE account_id = ? AND rp_id = ? LIMIT 1").bind(a.id, url.hostname).first();
 		return ok({ ok: true, passkeyHere: Boolean(pk) }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 	}
@@ -107,6 +109,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if ("error" in r) return fail(r.error);
 			const a = await accountById(db, pk.account_id);
 			if (!a) return fail("That passkey's account has gone.");
+			const away = await addon.here(db, a, url.hostname);
+			if (away) return fail(away);
 			await db.prepare("UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?").bind(r.count, iso(), pk.id).run();
 			return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 		} catch {
@@ -120,6 +124,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 
 	const me = await currentAccount(request, db);
 	if (!me) return bad("Please sign in.", 401);
+	const away = await addon.here(db, me, url.hostname);
+	if (away) return bad(away, 403);
 	// Only this app's own pages may change things.
 	if (method !== "GET" && request.headers.get("origin") && request.headers.get("origin") !== url.origin) return bad("Not allowed from another website.", 403);
 	const brands = await addon.brandsFor(db, me);

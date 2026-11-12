@@ -123,12 +123,62 @@ window.NS_ADDON = (() => {
 		<label for="wf">Emails to clients come from <span class="hint">(invites; your domain must be set up in Cloudflare, Email Sending)</span></label><input id="wf" type="email" value="${esc(l.from_email || "")}" placeholder="hello@youragency.co.uk">
 		<div class="lookprev" id="wprev"></div>
 		<p class="err" id="we"></p><div class="row"><button class="btn" id="wsave">${icon("save")}Save white label</button>${s.look ? `<button class="btn ghost" id="woff">${icon("trash")}Go back to Newsletter Sender's look</button>` : ""}</div>
-		<p class="hint" style="margin-top:14px">To see what clients see, open this address in a private window.</p></div>`;
+		<p class="hint" style="margin-top:14px">To see what clients see, open this address in a private window.</p></div>
+		<div class="card" id="waCard"><h2>Your app address</h2><p class="muted">Let clients sign in at your agency's own address, such as clients.youragency.co.uk. Cloudflare adds it to this app and makes the padlock certificate for you. Invite links then use it.</p><div id="waBody"><p class="hint">${icon("refresh")} Loading…</p></div></div>`;
 		const prev = () => { const n = $("#wn").value || "Your agency", c = $("#wc").value, lg = $("#wl").value.trim(); $("#wprev").innerHTML = `<p class="hint">How the sign in page starts:</p><div class="lookhead" style="border:1px solid var(--line);border-radius:12px;padding:14px">${/^(https:\/\/|\/img\/)/.test(lg) ? `<img src="${esc(lg)}" alt="${esc(n)}">` : `<b>${esc(n)}</b>`}<span class="grow"></span><span class="btn small" style="background:${esc(c)}">${icon("out")}Sign in</span></div>`; };
 		["wn", "wc", "wl"].forEach((id) => $("#" + id).addEventListener("input", prev)); prev();
 		$("#wu").onchange = (ev) => run(null, async () => { const fd = new FormData(); fd.append("file", ev.target.files[0]); const r = await api("/api/images", { body: fd }); const u = new URL(r.url, location.href); $("#wl").value = u.origin === location.origin ? u.pathname : r.url; prev(); });
 		$("#wsave").onclick = (e) => run(e.currentTarget, async () => { $("#we").textContent = ""; try { await api("/api/look", { body: { name: $("#wn").value, colour: $("#wc").value, logo: $("#wl").value, support: $("#ws").value, from_email: $("#wf").value } }); toast("Saved"); location.reload(); } catch (err) { $("#we").textContent = err.message; } });
+		if (ME?.licence) addressCard(); else $("#waCard").remove();
 		$("#woff") && ($("#woff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Go back to Newsletter Sender's own look for everyone?")) return; await api("/api/look", { body: { off: true } }); location.reload(); }));
+	}
+
+	// -- Your app address (Settings, White label): clients sign in at the agency's own address ----------------------
+	async function addressCard(needToken = false) {
+		const box = $("#waBody");
+		if (!box) return;
+		const s = await api("/api/look/address");
+		const a = s.address;
+		if (a) {
+			const away = s.here !== a.host;
+			box.innerHTML = `<p class="hint" id="waState">${icon("refresh")} Checking ${esc(a.host)}…</p>
+			<label class="check"><input type="checkbox" id="waOnly" ${a.only_here ? "checked" : ""} ${away && !a.only_here ? "disabled" : ""}> <span>Clients can only sign in at https://${esc(a.host)}/<br><span class="hint">${away && !a.only_here ? `Open <a href="https://${esc(a.host)}/#settings/look">https://${esc(a.host)}/</a> and switch this on from there, so you know it works first.` : "You can still sign in at any address. Clients signing in elsewhere are sent here."}</span></span></label>
+			<div class="info">${icon("key")}<p>Passkeys belong to the address they were made on. Anyone who uses one adds it again once at ${esc(a.host)}, under Settings, Account.</p></div>
+			<div class="row" style="margin-top:12px">${away ? `<a class="btn" href="https://${esc(a.host)}/#settings/look">${icon("ext")}Open ${esc(a.host)}</a>` : ""}<button class="btn ghost" id="waCheck">${icon("refresh")}Check again</button><button class="btn ghost" id="waStop">${icon("x")}Stop using it</button></div>`;
+			let tries = 0, timer = null;
+			const check = async () => {
+				clearTimeout(timer);
+				if (!$("#waState")) return;
+				const r = await api("/api/look/address/check").catch((e) => ({ live: false, message: e.message }));
+				if (!r.live && r.want) {
+					const got = await fetch(`https://${r.host}/.well-known/newsletter-sender`, { cache: "no-store" }).then((x) => (x.ok ? x.text() : ""), () => "");
+					if (got.trim() === r.want) Object.assign(r, { live: true, message: `${r.host} is working.` });
+				}
+				if (!$("#waState")) return;
+				$("#waState").className = r.live ? "hint good" : "hint";
+				$("#waState").innerHTML = `${icon(r.live ? "check" : "refresh")} ${esc(r.message)}`;
+				if (!r.live && ++tries < 12) timer = setTimeout(check, 20000);
+			};
+			check();
+			$("#waCheck").onclick = () => { tries = 0; check(); };
+			$("#waOnly").onchange = (e) => run(null, async () => { try { await api("/api/look/address/only", { body: { on: e.target.checked } }); toast(e.target.checked ? "Clients now sign in here only" : "Clients can sign in at any address"); } catch (err) { e.target.checked = !e.target.checked; toast(err.message); } });
+			$("#waStop").onclick = (e) => run(e.currentTarget, async () => { if (!confirm(`Stop using ${a.host}? Invite links go back to this app's own address. The address stays in Cloudflare until you delete it there (Workers, Domains).`)) return; await api("/api/look/address", { method: "DELETE" }); toast("Stopped"); addressCard(); });
+			return;
+		}
+		const ask = needToken || !s.hasToken;
+		box.innerHTML = `<label for="wad">Your app address</label><input id="wad" value="${esc(s.suggest)}" autocomplete="off">
+		<p class="hint">A new subdomain of your agency's website, not used for anything else. Your domain must be in this Cloudflare account.</p>
+		${ask ? `<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Cloudflare opens with the right permissions filled in. Under Account Resources choose your account and under Zone Resources choose your agency's domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
+		<div class="helplinks"><a class="btn ghost small" href="${esc(s.tokenUrl)}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
+		<input id="wat" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token">` : ""}
+		<p class="err" id="wae"></p><div class="row"><button class="btn" id="waGo">${icon("wand")}Set it up for me</button></div>`;
+		$("#waGo").onclick = (e) => run(e.currentTarget, async () => {
+			$("#wae").textContent = "";
+			const res = await fetch("/api/look/address", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ domain: $("#wad").value, token: $("#wat")?.value || undefined }) });
+			const r = await res.json().catch(() => ({}));
+			if (!res.ok) { if (r.needToken && !$("#wat")) { const d = $("#wad").value; await addressCard(true); $("#wad").value = d; } $("#wae").textContent = r.error || "That didn't work. Please try again."; return; }
+			toast(r.already ? "Already set up" : "Added in Cloudflare"); addressCard();
+		});
 	}
 
 	// -- For clients with white label: our name and help links become the agency's -----------------------------

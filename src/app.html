@@ -345,7 +345,12 @@ async function boot() {
 	if (!state.signedIn) return signinScreen(state);
 	$("#top").hidden = $("#side").hidden = false;
 	store.set("ns.in", "1");
-	try { ME = await api("/api/brands"); } catch { ME = null; }
+	try { ME = await api("/api/brands"); } catch (e) {
+		ME = null;
+		// A client on the wrong address, when the agency asks clients to use its own (agency/address.ts).
+		const at = /https:\/\/[a-z0-9.-]+\//.exec(e.message || "");
+		if (at) { $("#top").hidden = $("#side").hidden = true; main.innerHTML = `<div class="center card">${lookHead()}<h1>Please use your sign in address</h1><p>${esc(e.message)}</p><a class="btn" href="${esc(at[0])}">${icon("out")}Go to ${esc(at[0].slice(8, -1))}</a></div>`; return; }
+	}
 	ADDON.top?.();
 	api("/api/brand").then(showName).catch(() => {});
 	window.onhashchange = route;
