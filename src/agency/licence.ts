@@ -4,7 +4,7 @@
 // key only the licensor has. The app checks the signature with the public keys below.
 //
 // Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id
-// and the app version (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
+//, the app version and a short fingerprint of the key, never the key itself (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
 // agency features off. If newslettersender.com can't be reached, the licence keeps working for GRACE_DAYS after the
 // last good answer. Keys that site never sold answer "unknown", which counts as active.
 //
@@ -123,10 +123,22 @@ export function statusAllows(s: LicenceStatus | null, now = Date.now()): boolean
 	return now - Date.parse(s.ok_at) <= GRACE_DAYS * DAY;
 }
 
+/** The first 16 hex characters of SHA-256 of the key this copy holds. Proves to newslettersender.com that this copy
+ *  holds a key for the licence, so a renewed key only goes back to a copy that already had one. The key itself never leaves. */
+export async function keyPrint(key: string): Promise<string> {
+	const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key.replace(/\s+/g, "")));
+	return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+}
+
 /** Asks newslettersender.com about this licence. Null when it couldn't be reached. */
-export async function askLicence(id: string, version: string, fetcher: typeof fetch = fetch): Promise<(Pick<LicenceStatus, "status" | "message"> & { key?: string }) | null> {
+export async function askLicence(id: string, version: string, key: string, fetcher: typeof fetch = fetch): Promise<(Pick<LicenceStatus, "status" | "message"> & { key?: string }) | null> {
 	try {
-		const res = await fetcher(`${CHECK_URL}?id=${encodeURIComponent(id)}&v=${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(10_000), headers: { "user-agent": `NewsletterSender/${version}` } });
+		const res = await fetcher(CHECK_URL, {
+			method: "POST",
+			body: JSON.stringify({ id, v: version, k: await keyPrint(key) }),
+			signal: AbortSignal.timeout(10_000),
+			headers: { "content-type": "application/json", "user-agent": `NewsletterSender/${version}` },
+		});
 		if (res.status >= 500) return null;
 		const d = (await res.json()) as { status?: string; message?: string; key?: string };
 		if (d.status === "cancelled") return { status: "cancelled", message: typeof d.message === "string" ? d.message.slice(0, 300) : undefined };
@@ -144,7 +156,7 @@ export async function checkLicenceIfDue(db: D1Database, version: string, fetcher
 	if (s && Date.parse(s.next_at) > now) return;
 	const c = await checkLicence(key);
 	if (!c.ok) return;
-	const answer = await askLicence(c.licence.id, version, fetcher);
+	const answer = await askLicence(c.licence.id, version, key, fetcher);
 	if (answer?.key) await renewedKey(db, c.licence, answer.key);
 	const at = new Date(now).toISOString();
 	const next: LicenceStatus = answer

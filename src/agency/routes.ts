@@ -48,7 +48,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		let c = saved && !l ? await checkLicence(saved) : null;
 		// Not covered: ask newslettersender.com now, in case they've just renewed (the answer carries the new key).
 		if (c?.ok && !covers(c.licence)) {
-			const a = await askLicence(c.licence.id, VERSION);
+			const a = await askLicence(c.licence.id, VERSION, saved!);
 			if (a?.key && (await renewedKey(db, c.licence, a.key))) {
 				l = await currentLicence(db);
 				c = null;
@@ -66,7 +66,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		}
 		const c = await checkLicence(key);
 		if (!c.ok) return bad(c.error);
-		const answer = await askLicence(c.licence.id, VERSION);
+		const answer = await askLicence(c.licence.id, VERSION, String(key));
 		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake.");
 		await saveLicence(db, String(key).replace(/\s+/g, ""), answer);
 		return ok({ to: c.licence.to, covered: covers(c.licence) });

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { askLicence, CHECK_URL, checkLicence, covers, GRACE_DAYS, notCovered, renewedKey, renewUrl, statusAllows } from "../src/agency/licence.ts";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { askLicence, CHECK_URL, checkLicence, covers, GRACE_DAYS, keyPrint, notCovered, renewedKey, renewUrl, statusAllows } from "../src/agency/licence.ts";
 
 // A key pair just for these tests, so the real signing key never has to be here.
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -52,15 +52,23 @@ test("the daily check: cancelled stops it, and newslettersender.com being away i
 	assert.equal(statusAllows({ status: "cancelled", ok_at: at(0), next_at: at(0) }, now), false);
 });
 
-test("the daily check sends only the licence id and the version", async () => {
+test("the daily check sends only the licence id, the version and a short fingerprint of the key", async () => {
 	let asked = "";
-	const answer = (body: object, status = 200) => (async (url: string) => { asked = url; return new Response(JSON.stringify(body), { status }); }) as unknown as typeof fetch;
-	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "active" })), { status: "active" });
-	assert.equal(asked, `${CHECK_URL}?id=f15b243b205c&v=0.3.0`);
-	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "cancelled", message: "Cancelled: fraud" })), { status: "cancelled", message: "Cancelled: fraud" });
-	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", answer({ status: "unknown" })), { status: "unknown" });
-	assert.equal(await askLicence("f15b243b205c", "0.3.0", answer({}, 503)), null);
-	assert.equal(await askLicence("f15b243b205c", "0.3.0", (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
+	let sent: RequestInit | undefined;
+	const answer = (body: object, status = 200) => (async (url: string, init?: RequestInit) => { asked = url; sent = init; return new Response(JSON.stringify(body), { status }); }) as unknown as typeof fetch;
+	const key = "NSA-abc.def";
+	const k = createHash("sha256").update(key).digest("hex").slice(0, 16);
+	assert.equal(await keyPrint(` ${key}\n`), k); // whitespace doesn't change it
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", key, answer({ status: "active" })), { status: "active" });
+	assert.equal(asked, CHECK_URL);
+	assert.equal(sent?.method, "POST");
+	assert.deepEqual(JSON.parse(String(sent?.body)), { id: "f15b243b205c", v: "0.3.0", k });
+	assert.ok(!String(sent?.body).includes(key)); // the key itself never leaves
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", key, answer({ status: "active", key: "NSA-new.sig" })), { status: "active", key: "NSA-new.sig" });
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", key, answer({ status: "cancelled", message: "Cancelled: fraud" })), { status: "cancelled", message: "Cancelled: fraud" });
+	assert.deepEqual(await askLicence("f15b243b205c", "0.3.0", key, answer({ status: "unknown" })), { status: "unknown" });
+	assert.equal(await askLicence("f15b243b205c", "0.3.0", key, answer({}, 503)), null);
+	assert.equal(await askLicence("f15b243b205c", "0.3.0", key, (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
 });
 
 test("updates: versions released up to the updates date are covered for good, later ones aren't", async () => {
