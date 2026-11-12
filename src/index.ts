@@ -1,5 +1,5 @@
 // Newsletter Sender: newsletters for solo writers, businesses and agencies, from your own Cloudflare account.
-// Hosted on Cloudflare, sent with Amazon SES (or Postmark, Mailgun, Brevo, Resend or SendGrid).
+// Hosted on Cloudflare, sent with Amazon SES (or Postmark, Mailgun, Brevo, Resend, SendGrid or SparkPost).
 //
 //   /                     the dashboard (set-up, sign in and the app are one page: ui.ts)
 //   /api/*                its JSON (api.ts)
