@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { FIRSTS, getWarmup, saveWarmup, today, warmupStatus } from "./warmup.ts";
 import { addWebhook, isProvider, parseProvider, PROVIDERS, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
@@ -317,6 +318,18 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			ses: setup ? { ...setup, records: sesRecords(setup.domain, setup.tokens, setup.region) } : null,
 			cloudflareEmail: Boolean(env.EMAIL),
 		});
+	}
+	// Domain warm up (Settings, Sending): a small number of emails a day at first, growing each day.
+	if (path === "/api/sending/warmup") {
+		if (method === "POST") {
+			const b = await body(request);
+			const w = await getWarmup(db, brand.id);
+			if (b.on === true) {
+				const first = FIRSTS.includes(Number(b.first)) ? Number(b.first) : 50;
+				await saveWarmup(db, brand.id, { on: true, start: w?.on ? w.start : today(), first, waiting: w?.waiting ?? [] });
+			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
+		}
+		return ok(await warmupStatus(db, brand.id));
 	}
 	// Try adding the bounce webhook again (Settings, Sending), say after the owner swapped to a Full access key.
 	if (path === "/api/sending/webhook" && method === "POST") {

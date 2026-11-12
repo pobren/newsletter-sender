@@ -1355,6 +1355,7 @@ async function sending(head = "") {
 	: s.sending.bounces ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")} <span><b>Bounces and spam complaints:</b> we added our webhook in ${esc(s.sending.name)} for you, so anyone who bounces or complains is never emailed again.</span></p><details class="embed"><summary>${icon("list")}The webhook address</summary><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code></details>`
 	: `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>We couldn't add our webhook in ${esc(s.sending.name)} for you. Add this address there as a webhook, for bounces and spam complaints, so we stop emailing them:</p><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code><div class="row" style="margin-top:10px"><button class="btn ghost small" id="hookAgain">${icon("refresh")}Add it for me</button></div><p class="err" id="hookErr"></p>`}</div>` : ""}
 	<div class="card"><h2>${s.sending ? "Change sending provider" : "Choose a sending provider"}</h2><div class="tiles">${PROVIDERS.map(([id, n, t]) => `<button class="tile ${id === pick ? "on" : ""}" data-p="${id}">${logo(id)}<span><b>${n}</b><span>${t}</span></span></button>`).join("")}</div><div id="pf"></div></div>
+	${s.sending ? `<div class="card" id="wuCard"></div>` : ""}
 	<div class="card"><h2>Sign up confirmations</h2>${s.cloudflareEmail ? `<p>${icon("check")} Cloudflare's email service sends sign up confirmations and welcome emails. It needs <b>${esc(s.fromEmail.split("@")[1])}</b> set up under Email Sending in your Cloudflare dashboard. Newsletters always go through the service above.</p>` : `<p>Sign up confirmations go through the service above.</p>`}
 	<div class="row"><input id="ct" type="email" placeholder="Send a test confirmation to…" class="grow" style="width:auto"><button class="btn ghost" id="ctest">${icon("test")}Send test</button></div></div>`;
 	const form = () => {
@@ -1388,6 +1389,25 @@ async function sending(head = "") {
 	}));
 	$("#hookAgain") && ($("#hookAgain").onclick = (e) => run(e.currentTarget, async () => { try { await api("/api/sending/webhook", { body: {} }); toast("Bounce webhook added"); route(); } catch (err) { $("#hookErr").textContent = err.message; } }));
 	$("#ctest").onclick = (e) => run(e.currentTarget, async () => { await api("/api/sending/test", { body: { to: $("#ct").value } }); toast("Test sent"); });
+	if ($("#wuCard")) warmupCard(await api("/api/sending/warmup"));
+}
+
+// Settings, Sending: domain warm up (src/warmup.ts).
+function warmupCard(w) {
+	const steps = (p) => `${p.slice(0, 6).map(num).join(", ")} and so on, reaching ${num(p[p.length - 1])} a day on day ${p.length}`;
+	$("#wuCard").innerHTML = `<h2>${icon("chart")}Warm up a new domain</h2>
+	<p class="muted">Inboxes like Gmail, Yahoo and Microsoft trust a new sending domain slowly. Warm up sends a small number of emails on the first day, and half as many again each day after. When a campaign reaches the day's number it pauses, and carries on by itself the next day.</p>
+	${w.on ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span><b>Day ${num(w.day)}:</b> ${num(w.used)} of ${num(w.limit)} emails sent today.${w.waiting ? ` ${w.waiting === 1 ? "One campaign carries" : `${num(w.waiting)} campaigns carry`} on tomorrow.` : ""} A new day starts at midnight UTC.</span></p>
+		<p class="hint">Your plan: ${steps(w.plan)}. Then warm up switches itself off.</p>
+		<div class="row"><button class="btn ghost" id="wuOff">${icon("x")}Stop warming up</button></div>`
+	: `${w.finished ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span>Your domain is warmed up, so there's no daily number any more.</span></p>` : ""}
+		<label for="wuFirst">Emails on the first day</label><select id="wuFirst">${[[50, "50: a brand new domain"], [200, "200: a domain that has sent a little"], [1000, "1,000: a domain with some history"]].map(([n, t]) => `<option value="${n}">${t}</option>`).join("")}</select>
+		<p class="hint" id="wuPlan"></p>
+		<div class="row"><button class="btn" id="wuOn">${icon("play")}Start warming up</button></div>`}<p class="err" id="wuErr"></p>`;
+	const show = () => { const first = Number($("#wuFirst").value); const p = []; for (let d = 0; ; d++) { const raw = first * 1.5 ** d; const m = 10 ** Math.max(0, Math.floor(Math.log10(raw)) - 1); const n = Math.round(raw / m) * m; if (n > 50000) break; p.push(n); } $("#wuPlan").textContent = `Your plan: ${steps(p)}.`; };
+	if ($("#wuFirst")) { $("#wuFirst").onchange = show; show(); }
+	$("#wuOn") && ($("#wuOn").onclick = (e) => run(e.currentTarget, async () => { warmupCard(await api("/api/sending/warmup", { body: { on: true, first: Number($("#wuFirst").value) } })); toast("Warm up started"); }));
+	$("#wuOff") && ($("#wuOff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Stop warming up? Campaigns waiting for tomorrow carry on within a minute, at full speed.")) return; warmupCard(await api("/api/sending/warmup", { body: { on: false } })); }));
 }
 
 // -- Amazon SES set up wizard: one clear step a page, in order ------------------------------------------------------
