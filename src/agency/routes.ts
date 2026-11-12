@@ -9,7 +9,7 @@ import { brandHealth } from "../health.ts";
 import { bad, body, freeSlug, ok, str } from "../kit.ts";
 import { sesKeys } from "../providers.ts";
 import { loadProvider } from "../settings.ts";
-import { askLicence, checkLicence, currentLicence, GRACE_DAYS, licenceStatus, saveLicence } from "./licence.ts";
+import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, RENEW_URL, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
 
@@ -43,10 +43,12 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const l = await currentLicence(db);
 		const count = (await db.prepare("SELECT COUNT(*) AS n FROM brands").first<{ n: number }>())?.n ?? 0;
 		// Why a saved key isn't working: cancelled, or newslettersender.com not reached for GRACE_DAYS.
+		// Or this version came out after the licence's updates ended.
 		const saved = await getMeta(db, "agency_licence");
+		const c = saved && !l ? await checkLicence(saved) : null;
 		const s = saved && !l ? await licenceStatus(db) : null;
-		const problem = !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
-		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until }, brands: count, problem });
+		const problem = c?.ok && !covers(c.licence) ? notCovered(c.licence) : !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
+		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until, updates: l.updates }, brands: count, problem, renew: RENEW_URL, today: new Date().toISOString().slice(0, 10) });
 	}
 	if (path === "/api/licence" && method === "POST") {
 		const key = (await body(request)).key;
@@ -59,13 +61,13 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const answer = await askLicence(c.licence.id, VERSION);
 		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake.");
 		await saveLicence(db, String(key).replace(/\s+/g, ""), answer);
-		return ok({ to: c.licence.to });
+		return ok({ to: c.licence.to, covered: covers(c.licence) });
 	}
 
 	const licence = await currentLicence(db);
 	// Who's signed in, which brands they can open, and the licence (for the brand picker and Settings).
 	if (path === "/api/brands" && method === "GET") {
-		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until } });
+		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until, updates: licence.updates } });
 	}
 	if (!licence) return null; // the free edition: none of the routes below
 

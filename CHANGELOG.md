@@ -2,6 +2,11 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.3.1
+
+- Agency licences include 12 months of updates and email support. Settings, Licence shows the date, and offers a Renew button from 30 days before it.
+- After that date, the agency features keep working for good on every version released before it. A newer version asks for a renewal before you install it, and nothing is ever deleted.
+
 ## 0.3.0
 
 - The agency edition is now built in. Paste an agency licence key into Settings, Licence to switch on more brands, client logins with limits you set and every brand at a glance. Without a key, nothing changes.

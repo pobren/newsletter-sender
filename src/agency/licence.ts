@@ -10,8 +10,17 @@
 //
 // Without a valid key the agency edition works as the free edition (one brand, no client logins). Nothing is
 // deleted: the other brands and logins come back as soon as a valid key is added.
+//
+// Updates (Paul, 11 Nov 2026): a licence includes 12 months of updates and email support. The key's `updates` date
+// says until when. Every version released on or before that date keeps the agency features for good; a version
+// released after it runs as the free edition until a renewed key is added (or Undo goes back). A key with no
+// `updates` date covers every version.
 
 import { getMeta, setMeta } from "../db.ts";
+import { RELEASED } from "../update.ts";
+
+/** Where an owner renews updates and email support. */
+export const RENEW_URL = "https://newslettersender.com/contact/?topic=agency";
 
 export const PUBLIC_KEY = "fTOc_d68Dwd-nW9JQnK-eeqJIqNgLOGsXcUe42AHv7A";
 /** Keys bought on newslettersender.com are signed with this one (its private half lives only in that Worker). */
@@ -26,8 +35,10 @@ export interface Licence {
 	to: string;
 	/** How many brands it allows; 0 for no limit. */
 	brands: number;
-	/** The last day it works (YYYY-MM-DD), or null for no end. */
+	/** The last day it works at all (YYYY-MM-DD), or null for no end. Bought keys have none. */
 	until: string | null;
+	/** Updates until (YYYY-MM-DD): versions released on or before this day are covered. Null for every version. */
+	updates: string | null;
 	/** When it was made (YYYY-MM-DD). */
 	at: string;
 }
@@ -64,8 +75,21 @@ export async function checkLicence(key: unknown, today = new Date().toISOString(
 	}
 	if (l?.v !== 1 || typeof l.to !== "string") return { ok: false, error: "That licence key is for a different version. Please update Newsletter Sender." };
 	if (l.until && l.until < today) return { ok: false, error: `That licence ended on ${l.until}.` };
-	return { ok: true, licence: { v: 1, id: String(l.id ?? ""), to: l.to, brands: Math.max(0, Math.floor(Number(l.brands) || 0)), until: l.until ?? null, at: String(l.at ?? "") } };
+	const updates = typeof (l as any).updates === "string" && /^\d{4}-\d{2}-\d{2}$/.test((l as any).updates) ? (l as any).updates : null;
+	return { ok: true, licence: { v: 1, id: String(l.id ?? ""), to: l.to, brands: Math.max(0, Math.floor(Number(l.brands) || 0)), until: l.until ?? null, updates, at: String(l.at ?? "") } };
 }
+
+/** Whether the licence's updates cover a version released on `released` (YYYY-MM-DD). */
+export function covers(l: Pick<Licence, "updates">, released: string = RELEASED): boolean {
+	return !l.updates || !released || released <= l.updates;
+}
+
+/** "12 Nov 2027" from "2027-11-12". */
+export const longDate = (d: string) => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** What to tell the owner when this version came out after their updates ended. */
+export const notCovered = (l: Pick<Licence, "updates">, released: string = RELEASED) =>
+	`Your licence covers versions released up to ${longDate(l.updates!)}, and this version came out on ${longDate(released)}. The agency features are off until you renew, or you can go back to the previous version under Settings, Updates. Nothing has been deleted.`;
 
 // ---- The daily check -------------------------------------------------------------------------------------------
 
@@ -137,7 +161,7 @@ export async function currentLicence(db: D1Database): Promise<Licence | null> {
 	if (cache && Date.now() - cache.at < 300_000) return cache.licence;
 	const key = await getMeta(db, "agency_licence");
 	const c = key ? await checkLicence(key) : null;
-	const allowed = c?.ok ? statusAllows(await licenceStatus(db)) : false;
+	const allowed = c?.ok ? covers(c.licence) && statusAllows(await licenceStatus(db)) : false;
 	cache = { key, at: Date.now(), licence: c?.ok && allowed ? c.licence : null };
 	return cache.licence;
 }
