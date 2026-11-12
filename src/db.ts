@@ -242,8 +242,11 @@ const MIGRATIONS = [
 	// Passkeys (src/passkeys.ts): the public key only, never anything secret.
 	"CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL, public_key TEXT NOT NULL, alg INTEGER NOT NULL, rp_id TEXT NOT NULL, sign_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, last_used_at TEXT)",
 	"CREATE INDEX IF NOT EXISTS passkeys_account ON passkeys (account_id)",
+	// Client sign off (src/agency/signoff.ts): each request and decision, with a fingerprint of the version it was about.
+	"CREATE TABLE IF NOT EXISTS signoffs (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, brand_id TEXT NOT NULL, kind TEXT NOT NULL, account_id TEXT NOT NULL, note TEXT, version TEXT NOT NULL, approvers TEXT, send_at TEXT, at TEXT NOT NULL)",
+	"CREATE INDEX IF NOT EXISTS signoffs_campaign ON signoffs (campaign_id, at)",
 ];
-const SCHEMA_VERSION = "18";
+const SCHEMA_VERSION = "19";
 
 let ready: Promise<void> | null = null;
 

@@ -13,6 +13,7 @@ import { askLicence, checkLicence, currentLicence, GRACE_DAYS, licenceStatus, sa
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
 import { addressRoutes, appBase } from "./address.ts";
+import { signoffRoutes } from "./signoff.ts";
 import { cleanLook, currentLook, savedLook, saveLook, type Look } from "./look.ts";
 import { oneOff } from "../public.ts";
 import type { BrandRow } from "../db.ts";
@@ -97,6 +98,8 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until } });
 	}
 	if (!licence) return null; // the free edition: none of the routes below
+	const signoff = await signoffRoutes(x);
+	if (signoff) return signoff;
 
 	// -- Brands -----------------------------------------------------------------------------------------
 	if (path === "/api/brands" && method === "POST") {
@@ -140,10 +143,11 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 			}
 			const limits = clients.filter((c) => c.brand_id === b.id).map((c) => canOf({ role: "client", limits: c.limits }).month_limit).filter((n) => n > 0);
 			const health = await brandHealth(db, b.id);
+			const waiting = (await db.prepare("SELECT COUNT(*) AS n FROM campaigns c WHERE c.brand_id = ? AND c.status = 'draft' AND (SELECT kind FROM signoffs s WHERE s.campaign_id = c.id ORDER BY s.at DESC, s.rowid DESC LIMIT 1) = 'asked'").bind(b.id).first<{ n: number }>())?.n ?? 0;
 			return {
 				id: b.id, name: b.name, logo: b.logo, colour: b.colour, provider: p?.provider ?? null, account,
 				subscribers: (subs.results[0] as any)?.n ?? 0, sentMonth: (sent.results[0] as any)?.n ?? 0, limit: limits.length ? Math.min(...limits) : 0,
-				sending: ((live.results[0] as any)?.n ?? 0) > 0, last: lc && { id: lc.id, name: lc.name || lc.subject, status: lc.status, at: lc.finished_at || lc.started_at }, opened,
+				sending: ((live.results[0] as any)?.n ?? 0) > 0, waiting, last: lc && { id: lc.id, name: lc.name || lc.subject, status: lc.status, at: lc.finished_at || lc.started_at }, opened,
 				health: health.bounceLevel === "bad" || health.complaintLevel === "bad" ? "bad" : health.bounceLevel === "ok" || health.complaintLevel === "ok" || health.paused.length ? "ok" : "good",
 			};
 		}));

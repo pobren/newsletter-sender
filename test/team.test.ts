@@ -11,7 +11,7 @@ test("the owner can do everything", () => {
 
 test("a client only does what they're allowed", () => {
 	const can = canOf(client);
-	assert.deepEqual(can, { send: false, import: true, export: false, delete: false, settings: false, month_limit: 500 });
+	assert.deepEqual(can, { send: false, import: true, export: false, delete: false, settings: false, month_limit: 500, review: false });
 	assert.match(notAllowed(client, can, "/api/backups", "GET")!, /owner/);
 	assert.match(notAllowed(client, can, "/api/people", "GET")!, /owner/);
 	assert.match(notAllowed(client, can, "/api/brands", "POST")!, /owner/);
@@ -27,5 +27,5 @@ test("a client only does what they're allowed", () => {
 });
 
 test("permissions are cleaned", () => {
-	assert.deepEqual(cleanCan({ send: "yes", month_limit: -5, settings: true }), { send: false, import: false, export: false, delete: false, settings: true, month_limit: 0 });
+	assert.deepEqual(cleanCan({ send: "yes", month_limit: -5, settings: true }), { send: false, import: false, export: false, delete: false, settings: true, month_limit: 0, review: false });
 });

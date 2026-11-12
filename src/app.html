@@ -105,7 +105,9 @@ nav.subtabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px
 @media(max-width:560px){.wsteps li span{display:none}}
 .wcard{padding:28px}.wcard h2{font-size:24px;margin:2px 0 10px}.wnum{color:var(--c);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;margin:0}
 .wnav{display:flex;justify-content:space-between;gap:12px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
-.wlist{padding-left:22px;margin:14px 0 18px}.wlist li{margin:0 0 14px;line-height:1.5}.wlist li .btn{margin-top:10px}.wlist.plain{list-style:none;padding:0}.wlist.plain li{display:flex;gap:8px;align-items:center;margin:0 0 8px}.wlist.plain .ico{color:var(--ok)}
+.wlist{padding-left:22px;margin:14px 0 18px}.wlist li{margin:0 0 14px;line-height:1.5}.wlist li .btn{margin-top:10px}.wlist.plain{list-style:none;padding:0}.wlist.plain li{display:flex;gap:8px;align-items:center;margin:0 0 8px}.wlist.plain .ico{color:var(--ok)}.wlist.plain .btn .ico{color:inherit}.wlist.plain li .btn{margin-top:0}
+/* A review and approve only login (agency/signoff.ts) sees nothing it can't use. */
+body.reviewer nav.side [data-v=new],body.reviewer nav.side [data-v=automations],body.reviewer nav.side [data-v=templates-new],body.reviewer main a.btn[href="#new"],body.reviewer .card.gs{display:none}
 .starts{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:12px 14px}.starts>.option:nth-child(3){grid-column:2;grid-row:1/span 2;align-items:center;padding:22px 24px}.starts .option:not(div){padding:12px 16px;align-items:center}.starts .option:not(div) .lic{width:38px;height:38px}.starts .option:not(div) b{font-size:16px}.starts .urlrow{flex-direction:row;align-items:stretch;width:100%;margin-top:14px}.starts .urlrow input{flex:1;min-width:0}.starts .urlrow .btn{flex:none}@media(max-width:900px){.starts{grid-template-columns:1fr}.starts>.option:nth-child(3){grid-column:auto;grid-row:auto;align-items:flex-start}.starts .urlrow{flex-direction:column;align-items:flex-start}}
 a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--soft)}.btn.big{min-height:52px;font-size:17px;padding:10px 22px}
 .abbox{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}.abbox .check{margin:0}.abopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0 12px}.abres p .ico{vertical-align:-3px;margin-right:6px;color:var(--c)}
@@ -163,6 +165,7 @@ a.option{text-decoration:none}.option.on{border-color:var(--c);background:var(--
 @media(max-width:760px){.rcards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.rbar{grid-template-columns:1fr 56px;row-gap:4px}.rbar>span{grid-column:1/-1}.rbar .rtrack{grid-column:1}.rbar small{display:none}}
 #main h1{margin-top:0}.printonly{display:none}@media print{@page{margin:14mm}html,body{background:#fff!important}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}#top,#side,footer,.appver,#main iframe,.toast,#main .btn,#main .icon-btn,#main .hint a{display:none!important}.shell{display:block!important}main{padding:0!important;max-width:none!important}.card,.stat,.htile{break-inside:avoid;box-shadow:none!important}.printonly{display:block;color:#6b5a73;font-size:13px;margin:0 0 8px}}
+dl.facts{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:12px 0 0}dl.facts dt{color:var(--muted);font-size:14px;font-weight:600}dl.facts dd{margin:0}
 .lookhead{display:flex;align-items:center;gap:12px;margin:0 0 18px;font-size:18px}.lookhead img{max-height:44px;max-width:180px;object-fit:contain}
 </style>
 </head>
@@ -638,6 +641,7 @@ async function editor(id, kind) {
 		<iframe class="preview" id="preview" hidden title="Preview" sandbox=""></iframe>
 		<p class="hint" style="margin-top:10px">Paste straight in from Word, Google Docs or a web page, or paste HTML on the HTML tab. <code>{{first_name|there}}</code> puts in each reader's first name. A designed email can place its own unsubscribe link with <code>{{unsubscribe_url}}</code>; otherwise we add one at the bottom.</p>
 	</div>
+	${isT ? "" : `<div id="soCard"></div>`}
 	<div class="card" ${isT ? "hidden" : ""}><h2>Send</h2><label for="testTo">Send a test to</label><div class="row"><input class="grow" id="testTo" type="email" placeholder="you@example.com" style="width:auto"><button class="btn ghost" id="test">${icon("test")}Send test</button></div>
 		<label for="at">Or choose when it goes</label><div class="row"><input class="grow" id="at" type="datetime-local" style="width:auto"><button class="btn ghost" id="schedule">${icon("clock")}Schedule</button></div>
 		<div class="row" style="margin-top:18px"><button class="btn ghost" id="check">${icon("check")}Check before you send</button><button class="btn" id="send">${icon("send")}Send now</button></div></div>`;
@@ -797,6 +801,7 @@ async function editor(id, kind) {
 	};
 	loadVisual(html);
 	recount();
+	if (!isT && ADDON.signoff) ADDON.signoff(id, save);
 	window.onbeforeunload = () => (saved ? undefined : "Your changes are still saving.");
 }
 // The pop up sign up form for any website: choose the words and when it shows, then copy one line of code.

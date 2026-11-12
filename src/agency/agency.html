@@ -5,6 +5,7 @@
 window.NS_ADDON = (() => {
 	// -- Brands: the picker at the top, and a client's invite link -------------------------------------------------
 	function brandPicker() {
+		document.body.classList.toggle("reviewer", Boolean(ME?.can?.review));
 		const box = $("#brandPick");
 		if (!ME || !ME.licence || (ME.brands.length < 2 && ME.role !== "owner")) { box.innerHTML = ""; return; }
 		const all = manyBrands() && location.hash.startsWith("#brands");
@@ -35,7 +36,7 @@ window.NS_ADDON = (() => {
 		const mark = (b) => (b.logo ? `<img class="abmark" src="${esc(b.logo)}" alt="">` : `<span class="abmark" style="background:${esc(b.colour)};border:0">${esc((b.name || "?").trim().charAt(0).toUpperCase())}</span>`);
 		const svcName = (p) => (PROVIDERS.find((x) => x[0] === p) || [])[1];
 		const row = (b) => `<div class="abopts">
-			<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span></span></button></div>
+			<div><button type="button" class="abname" data-open="${b.id}" data-to="#campaigns">${mark(b)}<span>${esc(b.name)}<br><span class="hpill h-${b.sending ? "good" : b.health}" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon(b.sending ? "send" : HL[b.health][1])}${b.sending ? "Sending now" : HL[b.health][0]}</span>${b.waiting ? ` <span class="hpill h-ok" style="font-size:12px;padding:3px 9px;margin-top:4px">${icon("clock")}${num(b.waiting)} waiting for sign off</span>` : ""}</span></button></div>
 			<div class="abnum"><b>${num(b.subscribers)}</b><span class="muted">subscribers</span><br><span class="muted">${b.provider ? `Sends with ${esc(svcName(b.provider) || b.provider)}` : `<a href="#" data-open="${b.id}" data-to="#settings/sending">${icon("alert")} No sending service yet</a>`}</span></div>
 			<div class="abnum"><b>${num(b.sentMonth)}${b.limit ? ` <span class="muted" style="font-size:14px;font-weight:400">of ${num(b.limit)}</span>` : ""}</b><span class="muted">sent this month${b.limit ? " (client's limit)" : ""}</span>${b.limit ? `<div class="hmeter"><i style="width:${Math.min(100, (b.sentMonth / b.limit) * 100)}%"></i></div>` : ""}
 				${b.last ? `<span class="muted" style="display:block;margin-top:4px">Last: <a href="#" data-open="${b.id}" data-to="#email/${b.last.id}">${esc(b.last.name)}</a>, ${ago(b.last.at)}${b.opened != null ? `, ${pc2(b.opened, 1)} opened` : ""}</span>` : `<span class="muted" style="display:block;margin-top:4px">Nothing sent yet</span>`}</div>
@@ -76,8 +77,8 @@ window.NS_ADDON = (() => {
 	// -- People: logins for clients (Settings, People) ---------------------------------------------------------
 	async function people(head) {
 		const s = await api("/api/people");
-		const PERMS = [["send", "Send and schedule campaigns, and run automations"], ["import", "Import subscribers"], ["export", "Download subscribers"], ["delete", "Delete subscribers and lists"], ["settings", "Change settings (sending, tracking, API)"]];
-		const summary = (c) => { const on = PERMS.filter(([k]) => c[k]).map(([, t]) => t.split(" (")[0].toLowerCase()); return `${on.length ? `Can ${on.join(", ")}` : "Can write and test campaigns only"}${c.month_limit ? `. Up to ${num(c.month_limit)} emails a month` : ""}.`; };
+		const PERMS = [["review", "Review and approve only (they can't change anything)"], ["send", "Send and schedule campaigns, and run automations"], ["import", "Import subscribers"], ["export", "Download subscribers"], ["delete", "Delete subscribers and lists"], ["settings", "Change settings (sending, tracking, API)"]];
+		const summary = (c) => { if (c.review) return "Reviews and approves campaigns only."; const on = PERMS.filter(([k]) => c[k]).map(([, t]) => t.split(" (")[0].toLowerCase()); return `${on.length ? `Can ${on.join(", ")}` : "Can write and test campaigns only"}${c.month_limit ? `. Up to ${num(c.month_limit)} emails a month` : ""}.`; };
 		const form = (p = { can: s.start }) => `<label for="pn">Their name</label><input id="pn" value="${esc(p.name || "")}">
 			${p.id ? "" : `<label for="pe">Their email address</label><input id="pe" type="email">`}
 			<label for="pb">Their brand</label><select id="pb">${s.brands.map((b) => `<option value="${b.id}" ${b.id === (p.brand_id || ME?.current) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
@@ -90,7 +91,9 @@ window.NS_ADDON = (() => {
 		main.innerHTML = `${head}<div class="card"><h2>People</h2><p class="muted">Let a client sign in to just their own brand, and choose what they can do there. You can always see and do everything.</p>
 		<table class="data"><thead><tr><th>Who</th><th>Brand</th><th>What they can do</th><th></th></tr></thead><tbody>${s.people.map((p) => `<tr><td><b>${esc(p.name || p.email)}</b><br><span class="muted">${esc(p.email)}</span></td><td>${p.role === "owner" ? "Every brand" : esc(p.brand || "")}</td><td>${p.role === "owner" ? "Everything (owner)" : `${summary(p.can)}${p.joined ? "" : `<br><span class="muted">${icon("clock")} Hasn't used their invite yet</span>`}`}</td>
 		<td>${p.role === "owner" ? "" : `<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn ghost small" data-edit="${p.id}">${icon("pencil")}Edit</button><button class="btn ghost small" data-link="${p.id}">${icon("link")}New invite link</button><button class="btn ghost small" data-del="${p.id}">${icon("trash")}Remove</button></div>`}</td></tr>`).join("")}</tbody></table>
-		<div class="row" style="margin-top:14px"><button class="btn" id="padd">${icon("plus")}Invite a client</button></div></div>`;
+		<div class="row" style="margin-top:14px"><button class="btn" id="padd">${icon("plus")}Invite a client</button></div></div>
+		<div class="card" id="soSet"></div>`;
+		signoffSwitch();
 		$("#padd").onclick = () => {
 			const m = modal(`<h2>Invite a client</h2>${form()}<p class="err" id="pe2"></p><div class="row"><button class="btn" id="pgo">${icon("send")}Make an invite link</button><button class="btn ghost" data-close>${icon("x")}Cancel</button></div>`);
 			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { try { const v = read(m); const r = await api("/api/people", { body: v }); m.remove(); await settings("people"); showLink(r.link, v.name || v.email, r.emailed, v.send); } catch (err) { $("#pe2", m).textContent = err.message; } });
@@ -106,6 +109,88 @@ window.NS_ADDON = (() => {
 			$("#pgo", m).onclick = (e) => run(e.currentTarget, async () => { const send = $("#psend", m).checked; const r = await api(`/api/people/${p.id}/link`, { body: { send } }); m.remove(); showLink(r.link, p.name || p.email, r.emailed, send); });
 		});
 		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => run(b, async () => { await api(`/api/people/${b.dataset.del}`, { method: "DELETE" }); toast("Removed. They can't sign in any more."); settings("people"); }));
+	}
+
+	// -- Client sign off (agency/signoff.ts) ------------------------------------------------------------------------
+	async function signoffSwitch() {
+		const box = $("#soSet");
+		if (!box) return;
+		const s = await api("/api/signoff");
+		box.innerHTML = `<h2>Client sign off for ${esc(s.brand)}</h2><p class="muted">When it's on, ${esc(s.brand)}'s campaigns can't be sent or scheduled until a client login on this brand approves them. Use the brand picker at the top for other brands.</p>
+		<label class="check"><input type="checkbox" id="soOn" ${s.on ? "checked" : ""}> <span>Campaigns need the client's sign off before sending</span></label>
+		${s.on && !s.approvers.length ? `<p class="hint">${icon("alert")} Nobody can approve yet: invite someone for ${esc(s.brand)} above (a Review and approve only login is ideal), and they need to have chosen their password.</p>` : ""}`;
+		$("#soOn").onchange = (e) => run(null, async () => { await api("/api/signoff", { body: { on: e.target.checked } }); toast(e.target.checked ? "Sign off is on" : "Sign off is off"); signoffSwitch(); });
+	}
+	const SO = { waiting: ["Waiting for sign off", "clock", "ok"], approved: ["Approved", "check", "good"], changes: ["Changes asked for", "alert", "bad"], stale: ["Changed since it was approved", "alert", "ok"], none: ["Not asked yet", "clock", "ok"] };
+	const soPill = (state) => `<span class="hpill h-${SO[state][2]}" style="font-size:13px;padding:4px 10px">${icon(SO[state][1])}${SO[state][0]}</span>`;
+	const KINDS = { asked: "Asked for sign off", approved: "Approved", changes: "Asked for changes", withdrawn: "Withdrew the request" };
+	const historyHtml = (h) => h.length ? `<details class="embed" style="margin-top:14px" ${h.length < 4 ? "open" : ""}><summary>${icon("list")}What's happened</summary><ul class="wlist plain">${h.map((x) => `<li>${icon(x.kind === "approved" ? "check" : x.kind === "changes" ? "alert" : "clock")} <span><b>${esc(x.by)}</b>: ${KINDS[x.kind]}, ${when(x.at)}${x.kind === "approved" && !x.sameVersion ? " (an earlier version)" : ""}${x.note ? `<br><span class="muted">"${esc(x.note)}"</span>` : ""}</span></li>`).join("")}</ul></details>` : "";
+	/** The sign off card in the campaign editor, for whoever writes the campaign. */
+	async function signoffCard(id, save) {
+		const box = $("#soCard");
+		if (!box || !ME?.licence) return;
+		const s = await api(`/api/campaigns/${id}/signoff`).catch(() => null);
+		if (!s || !s.on || !$("#soCard")) { box && (box.innerHTML = ""); return; }
+		const locked = s.state === "waiting";
+		const blockSend = s.state !== "approved";
+		["#send", "#schedule"].forEach((q) => { const b = $(q); if (b) { b.disabled = blockSend; b.title = blockSend ? "Needs the client's sign off first" : ""; } });
+		let body = "";
+		if (s.state === "waiting") body = `<p>Waiting for ${esc(s.waitingOn.join(", ") || "the client")}. The campaign is locked until they answer.${s.sendAt ? ` Once approved it goes ${when(s.sendAt)}.` : " Once approved, you send it."}</p>
+			<div class="row">${s.canDecide ? `<a class="btn" href="#review/${id}">${icon("eye")}Review it</a>` : ""}${ME.can?.review ? "" : `<button class="btn ghost" id="soWd">${icon("undo")}Withdraw the request</button>`}</div>`;
+		else if (s.state === "approved") body = `<p>${icon("check")} Approved. You can send or schedule it below. Any change now needs a fresh sign off.</p>`;
+		else {
+			const why = s.state === "changes" ? `<div class="info">${icon("alert")}<p>Changes were asked for${s.history[0]?.note ? `: "${esc(s.history[0].note)}"` : "."} Make them, then ask again.</p></div>` : s.state === "stale" ? `<p class="hint">${icon("alert")} It has changed since it was approved, so it needs approving again.</p>` : `<p class="muted">This brand needs the client's sign off before anything goes out.</p>`;
+			body = `${why}${s.approvers.length ? `<label>Who approves it</label>${s.approvers.map((p, i) => `<label class="check"><input type="checkbox" name="soWho" value="${p.id}" ${s.approvers.length === 1 || i === 0 ? "checked" : ""}> <span>${esc(p.name || p.email)} <span class="muted">${esc(p.email)}</span></span></label>`).join("")}
+			<label for="soAt">Send it at <span class="hint">(optional: once approved it's scheduled for this time; leave empty to send it yourself)</span></label><input id="soAt" type="datetime-local">
+			<label for="soNote">A note for them <span class="hint">(optional)</span></label><textarea id="soNote" rows="2" style="min-height:70px"></textarea>
+			<p class="err" id="soE"></p><div class="row"><button class="btn" id="soAsk">${icon("send")}Ask for sign off</button></div>`
+			: `<p class="hint">${icon("alert")} Nobody can approve yet. Invite your client under <a href="#settings/people">Settings, People</a> first.</p>`}`;
+		}
+		box.innerHTML = `<div class="card"><div class="row"><h2 class="grow" style="margin:0">Client sign off</h2>${soPill(s.state)}</div><div style="margin-top:12px">${body}</div>${historyHtml(s.history)}</div>`;
+		$("#soAsk") && ($("#soAsk").onclick = (e) => run(e.currentTarget, async () => {
+			$("#soE").textContent = "";
+			try {
+				await save();
+				const at = $("#soAt").value;
+				const r = await api(`/api/campaigns/${id}/signoff/ask`, { body: { approvers: $$("[name=soWho]:checked").map((x) => x.value), send_at: at ? new Date(at).toISOString() : null, note: $("#soNote").value } });
+				toast(r.emailed ? `Asked. We've emailed ${r.emailed === 1 ? "them" : `${r.emailed} people`}.` : "Asked. We couldn't email them, so please send them the link from the campaign.");
+				signoffCard(id, save);
+			} catch (err) { $("#soE").textContent = err.message; }
+		}));
+		$("#soWd") && ($("#soWd").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${id}/signoff/withdraw`, { body: {} }); toast("Withdrawn. You can change it now."); signoffCard(id, save); }));
+	}
+	/** The review page: what a client sees when they're asked to approve a campaign. */
+	async function review(id) {
+		const [c, s] = await Promise.all([api(`/api/campaigns/${id}`), api(`/api/campaigns/${id}/signoff`)]);
+		const n = c.audience.lists.length ? await api("/api/audience", { body: c.audience }).catch(() => null) : null;
+		const from = `${c.from_name || c.defaults?.from_name || ""} <${c.from_email || c.defaults?.from_email || ""}>`;
+		main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">Review: ${esc(c.name || c.subject)}</h1>${soPill(s.state)}</div>
+		<div class="split" style="margin-top:16px"><div class="card"><h2>About this campaign</h2><dl class="facts">
+			<dt>Subject line</dt><dd><b>${esc(c.subject)}</b>${c.ab ? `<br><span class="muted">Also testing: ${esc(c.ab.subject)}</span>` : ""}</dd>
+			${c.preheader ? `<dt>Preview text</dt><dd>${esc(c.preheader)}</dd>` : ""}
+			<dt>From</dt><dd>${esc(from)}</dd>
+			<dt>Goes to</dt><dd>${n ? `${num(n.count)} ${n.count === 1 ? "person" : "people"}` : "No list chosen yet"}</dd>
+			<dt>When</dt><dd>${s.sendAt ? when(s.sendAt) : "When the agency sends it, after you approve"}</dd></dl></div>
+		<div class="card"><h2>Your answer</h2>${s.canDecide ? `<p class="muted">Read it through and send yourself a test if you like. Nothing goes out until you approve it.</p>
+			<label for="rvNote">A note <span class="hint">(needed if you'd like changes)</span></label><textarea id="rvNote" rows="3" style="min-height:90px"></textarea>
+			<p class="err" id="rvE"></p><div class="row"><button class="btn" id="rvYes">${icon("check")}Approve</button><button class="btn ghost" id="rvNo">${icon("pencil")}Ask for changes</button></div>`
+			: `<p>${s.state === "waiting" ? `Waiting for ${esc(s.waitingOn.join(", "))}.` : s.state === "approved" ? "This version has been approved." : s.state === "changes" ? "Changes were asked for. The agency will send it back to you." : "Nothing to approve at the moment."}</p>`}
+			<div class="row" style="margin-top:16px"><button class="btn ghost" id="rvTest">${icon("test")}Send me a test</button></div></div></div>
+		<div class="card"><div class="row"><h2 class="grow" style="margin:0">The email</h2><div class="seg" role="tablist"><button type="button" class="on" data-w="100%">${icon("globe")}Computer</button><button type="button" data-w="390px">${icon("user")}Phone</button></div></div>
+		<div style="display:flex;justify-content:center;margin-top:14px"><iframe class="preview" id="rvFrame" title="The email" sandbox="" src="/api/campaigns/${id}/preview?t=${Date.now()}" style="width:100%;min-height:720px;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe></div></div>
+		<div class="card">${historyHtml(s.history) || `<p class="hint">Nothing has happened yet.</p>`}</div>`;
+		$$(".seg [data-w]").forEach((b) => (b.onclick = () => { $$(".seg [data-w]").forEach((x) => x.classList.toggle("on", x === b)); $("#rvFrame").style.width = b.dataset.w; }));
+		$("#rvTest").onclick = (e) => run(e.currentTarget, async () => { await api(`/api/campaigns/${id}/test`, { body: { to: ME?.me?.email } }); toast(`Test sent to ${ME?.me?.email || "you"}`); });
+		const decide = (approve) => (e) => run(e.currentTarget, async () => { $("#rvE").textContent = ""; try { await api(`/api/campaigns/${id}/signoff/decide`, { body: { approve, note: $("#rvNote").value } }); toast(approve ? "Approved. Thank you." : "Sent back with your note."); review(id); } catch (err) { $("#rvE").textContent = err.message; } });
+		$("#rvYes") && ($("#rvYes").onclick = decide(true));
+		$("#rvNo") && ($("#rvNo").onclick = decide(false));
+	}
+	/** On All campaigns: what's waiting for this client's sign off. */
+	async function waitingBanner() {
+		if (!ME || ME.role !== "client" || (location.hash.slice(1) || "campaigns").split("/")[0] !== "campaigns") return;
+		const w = await api("/api/signoffs/waiting").catch(() => null);
+		if (!w || !w.waiting.length || $("#soWait")) return;
+		main.insertAdjacentHTML("afterbegin", `<div class="card" id="soWait"><h2>Waiting for your sign off</h2><ul class="wlist plain">${w.waiting.map((x) => `<li>${icon("clock")} <span><a href="#review/${x.id}"><b>${esc(x.name)}</b></a> <span class="muted">asked ${ago(x.at)}</span></span> <a class="btn small" href="#review/${x.id}" style="margin-left:auto">${icon("eye")}Review</a></li>`).join("")}</ul></div>`);
 	}
 
 	// -- White label (Settings, White label) ------------------------------------------------------------------------
@@ -183,6 +268,7 @@ window.NS_ADDON = (() => {
 
 	// -- For clients with white label: our name and help links become the agency's -----------------------------
 	function after() {
+		waitingBanner();
 		const L = window.NS_LOOK;
 		if (!L || !ME || ME.role !== "client") return;
 		main.querySelectorAll('a[href^="https://newslettersender.com"]').forEach((a) => { if (L.support) { a.href = L.support; a.textContent = a.textContent.replace(/guide|help.*$/i, "Ask for help") || "Ask for help"; } else a.replaceWith(document.createTextNode(a.textContent)); });
@@ -217,8 +303,9 @@ window.NS_ADDON = (() => {
 			history.replaceState(null, "", "#brands");
 			return "brands";
 		},
-		route: (v) => (v === "brands" && !manyBrands() ? "campaigns" : v),
-		views: { brands: allBrands },
+		route: (v) => (v === "brands" && !manyBrands() ? "campaigns" : v === "email" && ME?.can?.review ? "review" : v),
+		views: { brands: allBrands, review: () => review(location.hash.split("/")[1]) },
+		signoff: signoffCard,
 		tabs(SETTINGS) {
 			const owner = !ME || ME.role === "owner";
 			const extra = owner ? [...(ME?.licence ? [["people", "People", "users"], ["look", "White label", "pencil"]] : []), ["licence", "Licence", "check"]] : [];

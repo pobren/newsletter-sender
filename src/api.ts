@@ -816,6 +816,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
+			const locked = await addon.beforeEdit(db, me, brand, c);
+			if (locked) return bad(locked, 409);
 			const b = await body(request);
 			const slug = b.slug ? slugify(String(b.slug)) : slugify(str(b.subject, 200));
 			const clash = await db.prepare("SELECT id FROM campaigns WHERE slug = ? AND id != ?").bind(slug, c.id).first();
