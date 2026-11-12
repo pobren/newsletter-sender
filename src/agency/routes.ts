@@ -9,7 +9,7 @@ import { brandHealth } from "../health.ts";
 import { bad, body, freeSlug, ok, str } from "../kit.ts";
 import { sesKeys } from "../providers.ts";
 import { loadProvider } from "../settings.ts";
-import { askLicence, checkLicence, currentLicence, GRACE_DAYS, licenceStatus, saveLicence } from "./licence.ts";
+import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, renewedKey, renewUrl, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
 import { addressRoutes, appBase } from "./address.ts";
@@ -52,13 +52,23 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 
 	// -- The licence key (the owner only: team.ts) ----------------------------------------------------
 	if (path === "/api/licence" && method === "GET") {
-		const l = await currentLicence(db);
+		let l = await currentLicence(db);
 		const count = (await db.prepare("SELECT COUNT(*) AS n FROM brands").first<{ n: number }>())?.n ?? 0;
 		// Why a saved key isn't working: cancelled, or newslettersender.com not reached for GRACE_DAYS.
+		// Or this version came out after the licence's updates ended.
 		const saved = await getMeta(db, "agency_licence");
-		const s = saved && !l ? await licenceStatus(db) : null;
-		const problem = !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
-		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until }, brands: count, problem });
+		let c = saved && !l ? await checkLicence(saved) : null;
+		// Not covered: ask newslettersender.com now, in case they've just renewed (the answer carries the new key).
+		if (c?.ok && !covers(c.licence)) {
+			const a = await askLicence(c.licence.id, VERSION, saved!);
+			if (a?.key && (await renewedKey(db, c.licence, a.key))) {
+				l = await currentLicence(db);
+				c = null;
+			}
+		}
+		const s = saved && !l && c ? await licenceStatus(db) : null;
+		const problem = c?.ok && !covers(c.licence) ? notCovered(c.licence) : !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
+		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until, updates: l.updates }, brands: count, problem, renew: renewUrl(l?.id ?? (c?.ok ? c.licence.id : "")), today: new Date().toISOString().slice(0, 10) });
 	}
 	if (path === "/api/licence" && method === "POST") {
 		const key = (await body(request)).key;
@@ -68,10 +78,10 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		}
 		const c = await checkLicence(key);
 		if (!c.ok) return bad(c.error);
-		const answer = await askLicence(c.licence.id, VERSION);
+		const answer = await askLicence(c.licence.id, VERSION, String(key));
 		if (answer?.status === "cancelled") return bad(answer.message || "That licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake.");
 		await saveLicence(db, String(key).replace(/\s+/g, ""), answer);
-		return ok({ to: c.licence.to });
+		return ok({ to: c.licence.to, covered: covers(c.licence) });
 	}
 
 	// -- White label (the owner only: team.ts) -------------------------------------------------------------------
@@ -94,7 +104,7 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 	const licence = await currentLicence(db);
 	// Who's signed in, which brands they can open, and the licence (for the brand picker and Settings).
 	if (path === "/api/brands" && method === "GET") {
-		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until } });
+		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until, updates: licence.updates } });
 	}
 	if (!licence) return null; // the free edition: none of the routes below
 

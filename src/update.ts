@@ -12,6 +12,8 @@ import { linksToken } from "./settings.ts";
 import pkg from "../package.json" with { type: "json" };
 
 export const VERSION: string = pkg.version;
+/** The day this version was released (YYYY-MM-DD), from package.json. Agency licences cover versions by this date. */
+export const RELEASED: string = (pkg as { released?: string }).released ?? "";
 /** Where releases live. The newest one is always at …/latest/download/<file>. */
 export const RELEASES = "https://github.com/pobren/newsletter-sender/releases";
 const API = "https://api.cloudflare.com/client/v4";

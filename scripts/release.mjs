@@ -6,6 +6,8 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const conf = readFileSync("wrangler.jsonc", "utf8");
+// The release date: agency licences cover every version released on or before their "updates" date (src/agency/licence.ts).
+if (!/^\d{4}-\d{2}-\d{2}$/.test(pkg.released ?? "")) throw new Error('package.json needs "released": "YYYY-MM-DD" for this version');
 const date = /"compatibility_date"\s*:\s*"(\d{4}-\d{2}-\d{2})"/.exec(conf)?.[1];
 if (!date) throw new Error("No compatibility_date in wrangler.jsonc");
 const flags = /"compatibility_flags"\s*:\s*\[([^\]]*)\]/.exec(conf)?.[1].match(/"([^"]+)"/g)?.map((f) => f.slice(1, -1)) ?? [];
@@ -24,6 +26,6 @@ const files = readdirSync("dist")
 	.map((name) => ({ name, sha256: createHash("sha256").update(readFileSync(`dist/${name}`)).digest("hex"), type: type(name) }));
 if (!files.some((f) => f.name === "index.js")) throw new Error("dist/index.js is missing");
 
-const release = { version: pkg.version, date: new Date().toISOString().slice(0, 10), notes, compatibility_date: date, compatibility_flags: flags, main_module: "index.js", files };
+const release = { version: pkg.version, date: pkg.released, notes, compatibility_date: date, compatibility_flags: flags, main_module: "index.js", files };
 writeFileSync("dist/release.json", JSON.stringify(release, null, "\t") + "\n");
 console.log(files.map((f) => f.name).join(" "));
