@@ -278,15 +278,24 @@ window.NS_ADDON = (() => {
 	}
 
 	// -- Licence (Settings, Licence) ------------------------------------------------------------------------------
+	const longDate = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+	// Updates and email support run for 12 months; from 30 days before the end, a Renew button.
+	function updatesNote(updates, today, renew) {
+		const days = Math.round((Date.parse(updates) - Date.parse(today)) / 86400000);
+		const renewBtn = `<div class="row"><a class="btn ghost" href="${esc(renew)}" target="_blank" rel="noopener">${icon("refresh")}Renew updates and support</a></div>`;
+		if (days < 0) return `<div class="info">${icon("clock")}<p>Updates and email support ended on <b>${esc(longDate(updates))}</b>. The agency features keep working for good on this version and any released before then. Renew to get newer versions and email support.</p></div>${renewBtn}`;
+		return `<p class="hint">Updates and email support until <b>${esc(longDate(updates))}</b>.${days <= 30 ? " Renew to keep getting updates after that." : ""}</p>${days <= 30 ? renewBtn : ""}`;
+	}
 	async function licence(head) {
 		const s = await api("/api/licence");
 		const l = s.licence;
 		main.innerHTML = `${head}<div class="card"><h2>Licence</h2>
-		${l ? `<div class="info">${icon("check")}<p>Agency edition, licensed to <b>${esc(l.to)}</b>. ${l.brands ? `Up to ${num(l.brands)} brands (you have ${num(s.brands)}).` : "As many brands as you like."}${l.until ? ` Works until ${esc(l.until)}.` : ""} Once a day this copy checks the licence is still active with newslettersender.com, sending only the licence number and app version.</p></div>`
+		${l ? `<div class="info">${icon("check")}<p>Agency edition, licensed to <b>${esc(l.to)}</b>. ${l.brands ? `Up to ${num(l.brands)} brands (you have ${num(s.brands)}).` : "As many brands as you like."}${l.until ? ` Works until ${esc(longDate(l.until))}.` : ""} Once a day this copy checks the licence is still active with newslettersender.com, sending only the licence number, the app version and a short fingerprint of the key (never the key itself).</p></div>`
 			: `${s.problem ? `<p class="err" style="margin:0 0 12px">${esc(s.problem)}</p>` : ""}<p>Add your licence key to switch on more brands, client logins and all brands at a glance. Until then this works as the free edition, with one brand. Nothing is lost: brands and logins made before come back when you add a key.</p><a class="btn ghost" href="https://newslettersender.com/agency/" target="_blank" rel="noopener">${icon("key")}Get an agency licence</a>`}
+		${l && l.updates ? updatesNote(l.updates, s.today, s.renew) : ""}
 		<label for="lk" style="margin-top:16px">${l ? "Change your licence key" : "Your licence key"}</label><textarea id="lk" rows="3" placeholder="NSA-..." spellcheck="false" autocomplete="off"></textarea>
 		<p class="err" id="le"></p><div class="row"><button class="btn" id="lsave">${icon("check")}Save licence key</button>${l ? `<button class="btn ghost" id="loff">${icon("trash")}Remove licence key</button>` : ""}</div></div>`;
-		$("#lsave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/licence", { body: { key: $("#lk").value } }); toast(`Licensed to ${r.to}`); location.hash = "#settings/licence"; location.reload(); } catch (err) { $("#le").textContent = err.message; } });
+		$("#lsave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/licence", { body: { key: $("#lk").value } }); toast(r.covered === false ? "Saved, but this key's updates ended before this version came out" : `Licensed to ${r.to}`); location.hash = "#settings/licence"; location.reload(); } catch (err) { $("#le").textContent = err.message; } });
 		$("#loff") && ($("#loff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Remove the licence key? This goes back to the free edition (one brand) until you add one again. Nothing is deleted.")) return; await api("/api/licence", { body: { key: null } }); location.reload(); }));
 	}
 
