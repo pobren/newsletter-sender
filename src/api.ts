@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { cleanSegment, deleteSegment, forLists, getSegments, saveSegment } from "./segments.ts";
 import { cleanGoodbye, DEFAULT_TEXT, getGoodbye, saveGoodbye } from "./goodbye.ts";
 import { getFeed, makeDraft, readFeed, saveFeed } from "./blogfeed.ts";
 import { FIRSTS, getWarmup, saveWarmup, today, warmupStatus } from "./warmup.ts";
@@ -332,6 +333,25 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// Saved segments: named audience filters to pick when setting up a campaign.
+	if (path === "/api/segments") {
+		const own = (await db.prepare("SELECT id FROM lists WHERE brand_id = ?").bind(brand.id).all<{ id: string }>()).results.map((r) => r.id);
+		if (method === "POST") {
+			const s = cleanSegment(await body(request));
+			if (!s) return bad("Give the segment a name, and choose at least one list, tag or recent activity.");
+			try {
+				const seg = await saveSegment(db, brand.id, { ...s, audience: { ...s.audience, lists: s.audience.lists.filter((id) => own.includes(id)) } });
+				return ok({ segment: seg, segments: await getSegments(db, brand.id) });
+			} catch (e) {
+				return bad((e as Error).message);
+			}
+		}
+		if (method === "DELETE") {
+			const id = url.searchParams.get("id") ?? "";
+			await deleteSegment(db, brand.id, id);
+		}
+		return ok({ segments: (await getSegments(db, brand.id)).map((s) => ({ ...s, audience: forLists(s, own) })) });
 	}
 	// The goodbye email with a one click way back (Settings, Lists).
 	if (path === "/api/goodbye") {

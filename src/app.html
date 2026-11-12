@@ -606,6 +606,7 @@ async function editor(id, kind) {
 			<p class="hint">These start as your <a href="#settings">Settings</a>. Change them here for just this campaign.</p>`}
 		</div>
 		<div class="card"><h2>Who it goes to</h2>
+			<div class="row" id="segRow" style="gap:8px;margin-bottom:6px"><select id="segPick" aria-label="Saved segments" class="grow"></select><button type="button" class="btn ghost small" id="segDel" hidden>${icon("trash")}Delete segment</button></div>
 			${c.audience.resend ? `<div class="info" id="rsn">${icon("refresh")}<p>Only people who got <a href="#email/${esc(c.audience.resend.campaign)}"><b>${esc(c.resendOf?.name || "the first one")}</b></a> and didn't open it, and are still on these lists. A new subject line often helps.<br><button type="button" class="btn ghost small" id="rsnOff" style="margin-top:8px">${icon("x")}Send to everyone on the lists instead</button></p></div>` : ""}
 			<p class="step"><b>1</b>Choose the lists</p>
 			<div class="choices">${ls.map((l) => `<label class="choice"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}><span><b>${esc(l.name)}</b><small>${num(l.active)} subscribed</small></span></label>`).join("")}</div>
@@ -616,6 +617,8 @@ async function editor(id, kind) {
 			<select id="actDays" aria-label="How far back">${[7, 14, 30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === 90 ? "selected" : ""}>in the last ${d === 365 ? "year" : `${d} days`}</option>`).join("")}</select></div>
 			${c.tracking?.opens || c.tracking?.clicks ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to pick people by what they read.</p>`}
 			<p id="count" class="count"></p>
+			<div class="row" style="gap:8px"><button type="button" class="btn ghost small" id="segSave">${icon("save")}Save as a segment</button></div>
+			<div id="segForm" hidden><label for="segName">Segment name <span class="hint">(such as Active clickers; it keeps the lists, tags and recent activity above)</span></label><div class="row" style="gap:8px"><input id="segName" class="grow" maxlength="60" placeholder="Such as Active clickers"><button type="button" class="btn small" id="segOk">${icon("check")}Save segment</button><button type="button" class="btn ghost small" id="segNo">${icon("x")}Cancel</button></div></div>
 			<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past campaigns</label>
 		</div>
 	</div>
@@ -752,6 +755,34 @@ async function editor(id, kind) {
 		$("#actDays").disabled = !$("#act").value;
 		$("#act").onchange = () => { $("#actDays").disabled = !$("#act").value; recount(); changed(); };
 		$("#actDays").onchange = () => { recount(); changed(); };
+		// Saved segments: pick one to fill in the lists, tags and recent activity in one go.
+		let segs = [];
+		const segFill = () => { $("#segPick").innerHTML = `<option value="">${segs.length ? "Use a saved segment" : "No saved segments yet"}</option>${segs.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}`; $("#segPick").disabled = !segs.length; $("#segDel").hidden = true; };
+		api("/api/segments").then((r) => { segs = r.segments; segFill(); }).catch(() => { segFill(); });
+		$("#segPick").onchange = () => {
+			const s = segs.find((x) => x.id === $("#segPick").value);
+			$("#segDel").hidden = !s;
+			if (!s) return;
+			const a = s.audience;
+			if (a.lists.length) $$("[name=list]").forEach((x) => (x.checked = a.lists.includes(x.value)));
+			tags.clear(); a.tags.filter((t) => allTags.includes(t)).forEach((t) => tags.add(t));
+			$$("#tagChips [data-tag]").forEach((b) => { const on = tags.has(b.dataset.tag); b.classList.toggle("on", on); b.innerHTML = `${icon(on ? "check" : "tag")}${esc(b.dataset.tag)}`; });
+			const ok = a.activity && $(`#act option[value=${a.activity.kind}]`);
+			$("#act").value = ok ? a.activity.kind : ""; if (ok) $("#actDays").value = String(a.activity.days);
+			$("#actDays").disabled = !$("#act").value;
+			if (a.activity && !ok) toast("This segment picks people by what they read. Switch on opens or clicks in Settings to use that part.");
+			recount(); changed();
+		};
+		$("#segDel").onclick = (e) => run(e.currentTarget, async () => { const s = segs.find((x) => x.id === $("#segPick").value); if (!s || !confirm(`Delete the segment ${s.name}? Campaigns that used it keep their audience.`)) return; segs = (await api(`/api/segments?id=${encodeURIComponent(s.id)}`, { method: "DELETE" })).segments; segFill(); toast("Segment deleted"); });
+		$("#segSave").onclick = () => { $("#segForm").hidden = false; $("#segSave").hidden = true; const s = segs.find((x) => x.id === $("#segPick").value); $("#segName").value = s ? s.name : ""; $("#segName").focus(); };
+		$("#segNo").onclick = () => { $("#segForm").hidden = true; $("#segSave").hidden = false; };
+		$("#segOk").onclick = (e) => run(e.currentTarget, async () => {
+			const { resend: _r, ...audience } = gather().audience;
+			const r = await api("/api/segments", { body: { name: $("#segName").value, audience } });
+			segs = r.segments; segFill(); $("#segPick").value = r.segment.id; $("#segDel").hidden = false;
+			$("#segForm").hidden = true; $("#segSave").hidden = false;
+			toast(`Saved. Pick ${r.segment.name} next time you set up a campaign.`);
+		});
 	}
 	$("#tagChips") && $("#tagChips").addEventListener("click", (e) => { const b = e.target.closest("[data-tag]"); if (!b) return; const tg = b.dataset.tag; tags.has(tg) ? tags.delete(tg) : tags.add(tg); b.classList.toggle("on", tags.has(tg)); b.innerHTML = `${icon(tags.has(tg) ? "check" : "tag")}${esc(tg)}`; recount(); changed(); });
 	$("#asT") && ($("#asT").onclick = (e) => run(e.currentTarget, async () => { await save(); await api("/api/templates", { body: { from: id, name: $("#cname").value || $("#subject").value || "Untitled template" } }); toast("Saved as a template. Find it under All templates."); }));
