@@ -25,6 +25,7 @@ import { carryOnTomorrow } from "./warmup.ts";
 import { checkFeedsDue } from "./blogfeed.ts";
 import { tidyBacks } from "./goodbye.ts";
 import { tidyAiUse } from "./aihelper.ts";
+import { coldDue } from "./cold.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
@@ -103,6 +104,8 @@ export default {
 			tidyBacks(env.DB).catch((e) => console.error("goodbye", e)),
 			// Yesterday's writing helper counts.
 			tidyAiUse(env.DB).catch((e) => console.error("writing helper", e)),
+			// Cold contact clean up, once a day for newsletters that switched it on.
+			coldDue(env.DB).catch((e) => console.error("cold contacts", e)),
 			// The agency licence's daily check with newslettersender.com (agency/licence.ts): only the licence id, the version and a short fingerprint of the key.
 			checkLicenceIfDue(env.DB, VERSION).catch((e) => console.error("licence check", e)),
 			// Sign up rate limits only matter for ten minutes.

@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { cleanCold, getCold, GRACE_DAYS, lookCold, removeCold, saveCold, tagCold } from "./cold.ts";
 import { AiError, aiUse, DAILY_CAP, getAi, saveAi, TASKS, write } from "./aihelper.ts";
 import { cleanSegment, deleteSegment, forLists, getSegments, saveSegment } from "./segments.ts";
 import { cleanGoodbye, DEFAULT_TEXT, getGoodbye, saveGoodbye } from "./goodbye.ts";
@@ -334,6 +335,18 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// Cold contact clean up (Settings, Lists).
+	if (path === "/api/cold") {
+		if (method === "POST") await saveCold(db, brand.id, cleanCold(await body(request)));
+		const policy = await getCold(db, brand.id);
+		const look = cleanCold({ days: url.searchParams.get("days") ?? policy.days, min: url.searchParams.get("min") ?? policy.min });
+		return ok({ policy, look: await lookCold(db, brand.id, look), graceDays: GRACE_DAYS, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+	}
+	if ((path === "/api/cold/tag" || path === "/api/cold/remove") && method === "POST") {
+		const p = cleanCold(await body(request));
+		if (path === "/api/cold/tag") return ok(await tagCold(db, brand.id, p));
+		return ok({ removed: await removeCold(db, brand.id, p, { afterGrace: false }) });
 	}
 	// The writing helper (Settings, Writing helper; used in the campaign editor). Off unless switched on.
 	if (path === "/api/ai") {

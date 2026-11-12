@@ -1715,6 +1715,32 @@ async function blogSettings(head) {
 	$("#bfDel") && ($("#bfDel").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop checking your blog and forget it? Drafts already made stay.")) { await api("/api/blogfeed", { method: "DELETE" }); blogSettings(head); } }));
 }
 
+// -- Settings, Lists: cold contact clean up --------------------------------------------------------------------
+async function coldCard(days, min) {
+	const box = $("#coldCard");
+	if (!box) return;
+	const q = days ? `?days=${days}&min=${min}` : "";
+	const r = await api(`/api/cold${q}`);
+	const p = r.policy, d = days || p.days, m = min || p.min, L = r.look;
+	const can = r.tracking.opens || r.tracking.clicks;
+	box.innerHTML = `<h2>${icon("users")}Cold contacts</h2>
+	<p class="muted">People who haven't opened or clicked anything in a long while. Sending to them makes inboxes trust your emails less, and costs you for emails nobody reads. Tag them cold to send a "still want these?" email, then take off anyone who still doesn't read.</p>
+	${can ? "" : `<p class="hwarn">${icon("alert")}<span>Switch on opens or clicks in <a href="#settings/tracking">Tracking</a> first, so we can tell who reads your emails.</span></p>`}
+	<div class="row" style="gap:12px"><div class="grow"><label for="cdDays">No opens or clicks in</label><select id="cdDays">${[90, 180, 365].map((x) => `<option value="${x}" ${x === d ? "selected" : ""}>the last ${x === 365 ? "year" : `${x} days`}</option>`).join("")}</select></div>
+	<div class="grow"><label for="cdMin">From at least</label><select id="cdMin">${[1, 3, 5, 8, 10, 15].map((x) => `<option value="${x}" ${x === m ? "selected" : ""}>${x} ${x === 1 ? "email" : "emails"}</option>`).join("")}</select></div></div>
+	<p class="count" style="margin-top:12px">${icon("users")}<span>${!L.campaigns ? `None of your campaigns in that time could be tracked yet, so nobody counts as cold.` : L.count ? `<b>${num(L.count)}</b> ${L.count === 1 ? "person is" : "people are"} cold now, such as ${L.sample.map(esc).join(", ")}.` : "Nobody is cold. Everyone on your lists has read something lately."}${L.tagged ? ` ${num(L.tagged)} tagged ${esc("cold")} at the moment.` : ""}</span></p>
+	<div class="row" style="gap:8px"><button type="button" class="btn ghost small" id="cdTag" ${L.count ? "" : "disabled"}>${icon("tag")}Tag them cold now</button><button type="button" class="btn ghost small" id="cdRemove" ${L.count ? "" : "disabled"}>${icon("minus")}Take them off every list now</button></div>
+	<p class="hint">To win them back, send a campaign to the <b>cold</b> tag (step 2 of Who it goes to). Anyone who opens or clicks after that loses the tag by itself. Only campaigns we could track count, so switching tracking on never makes everyone look cold.</p>
+	<h3 style="margin-top:18px">Do it every day by itself</h3><p class="hint">Tags new cold contacts each morning and untags anyone who's read something since.</p><div><label class="check"><input type="checkbox" id="cdOn" ${p.on ? "checked" : ""}> Tag cold contacts every day</label><label class="check"><input type="checkbox" id="cdOff" ${p.remove ? "checked" : ""} ${p.on ? "" : "disabled"}> Then take them off every list if they still haven't read anything ${r.graceDays} days later</label></div>
+	<div class="row" style="margin-top:14px"><button type="button" class="btn" id="cdSave">${icon("save")}Save</button></div>`;
+	const vals = () => ({ days: Number($("#cdDays").value), min: Number($("#cdMin").value) });
+	$("#cdDays").onchange = $("#cdMin").onchange = () => coldCard(vals().days, vals().min);
+	$("#cdOn").onchange = () => { $("#cdOff").disabled = !$("#cdOn").checked; if (!$("#cdOn").checked) $("#cdOff").checked = false; };
+	$("#cdSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/cold", { body: { ...vals(), on: $("#cdOn").checked, remove: $("#cdOff").checked } }); toast("Saved"); coldCard(); });
+	$("#cdTag").onclick = (e) => run(e.currentTarget, async () => { const x = await api("/api/cold/tag", { body: vals() }); toast(`Tagged ${num(x.tagged)} cold${x.warmed ? `, and ${num(x.warmed)} who read something lately lost the tag` : ""}`); coldCard(vals().days, vals().min); });
+	$("#cdRemove").onclick = (e) => run(e.currentTarget, async () => { if (!confirm(`Take ${num(L.count)} cold ${L.count === 1 ? "person" : "people"} off every list? They won't get any more emails unless they sign up again.`)) return; const x = await api("/api/cold/remove", { body: vals() }); toast(`Done. ${num(x.removed)} ${x.removed === 1 ? "subscription" : "subscriptions"} ended.`); coldCard(vals().days, vals().min); });
+}
+
 // -- Settings, Writing helper: optional AI help in the campaign editor, off unless switched on -------------------
 async function aiSettings(head) {
 	const a = await api("/api/ai");
@@ -1763,7 +1789,8 @@ async function settings(section) {
 		<div class="rule"><div><b>When someone unsubscribes</b><p class="hint">Regulations only require opting subscribers out of the specific publication they selected. Unsubscribing from a single list keeps them on other relevant topics without losing them entirely.</p></div><div class="opts"><label><input type="radio" name="scope" value="list" ${b.unsub_scope === "all" ? "" : "checked"}>Remove only from the campaign's list</label><label><input type="radio" name="scope" value="all" ${b.unsub_scope === "all" ? "checked" : ""}>Opt out of all lists</label></div></div>
 		<div class="rule"><div><b>Goodbye email</b><p class="hint">A short note when someone unsubscribes, with a one click way back in case they pressed it by mistake. The way back works for 30 days and puts them back on exactly the lists they left. Someone who unsubscribes again within the month doesn't get a second one.</p></div><div class="opts"><label class="check"><input type="checkbox" id="gbOn" ${gb.on ? "checked" : ""}> Send a goodbye email</label></div></div>
 		<div id="gbText" ${gb.on ? "" : "hidden"}><label for="gbt">What it says <span class="hint">(a blank line starts a new paragraph; the Put me back on button goes underneath)</span></label><textarea id="gbt" rows="4">${esc(gb.text)}</textarea></div>
-		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form>`;
+		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form><div class="card" id="coldCard"></div>`;
+		coldCard();
 		$("#gbOn").onchange = () => { $("#gbText").hidden = !$("#gbOn").checked; };
 		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); await api("/api/goodbye", { body: { on: $("#gbOn").checked, text: $("#gbt").value } }); toast("Saved"); }); };
 	}
