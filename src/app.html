@@ -1053,9 +1053,12 @@ const ppl = (n) => `${num(n)} ${n === 1 ? "person" : "people"}`;
 const pct = (n, of) => (of ? `${(Math.round((n / of) * 1000) / 10).toLocaleString("en-GB")}%` : "0%");
 const flag = (cc) => String.fromCodePoint(...[...cc].map((ch) => 127397 + ch.charCodeAt(0)));
 const regionName = (() => { try { const d = new Intl.DisplayNames(["en-GB"], { type: "region" }); return (cc) => d.of(cc) || cc; } catch { return (cc) => cc; } })();
+/** Campaigns whose per-person detail was cleared (Settings, Tracking, How long to keep): no people buttons for them. */
+const CLEARED = new Set();
 /** Download or add-to-a-list buttons for the people behind a number. */
-const peopleBtns = (id, who, n = 0, label = "") => `<span class="pbtns"><a class="icon-btn" href="/api/campaigns/${id}/people?who=${who}${n ? `&n=${n}` : ""}" title="Download ${label} as a CSV" download>${icon("download")}</a><button class="icon-btn" type="button" data-addto="${who}" data-n="${n}" data-label="${esc(label)}" title="Add ${label} to a list">${icon("plus")}</button></span>`;
+const peopleBtns = (id, who, n = 0, label = "") => CLEARED.has(id) ? "" : `<span class="pbtns"><a class="icon-btn" href="/api/campaigns/${id}/people?who=${who}${n ? `&n=${n}` : ""}" title="Download ${label} as a CSV" download>${icon("download")}</a><button class="icon-btn" type="button" data-addto="${who}" data-n="${n}" data-label="${esc(label)}" title="Add ${label} to a list">${icon("plus")}</button></span>`;
 function reportHtml(c) {
+	if (c.cleared) CLEARED.add(c.id);
 	const s = c.stats, sent = s.sent, tr = c.tracking || {};
 	const unopened = Math.max(0, sent - s.opens - s.bounced);
 	const card = (cls, big, label, line, extra = "") => `<div class="rcard ${cls}"><span class="rbig">${big}</span><b>${label}</b><span class="muted">${line}</span>${extra}</div>`;
@@ -1089,7 +1092,7 @@ function addToList(c, ls, b) {
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
 	<p class="printonly">Campaign report from ${esc(document.getElementById("appName")?.textContent || "Newsletter Sender")}, made ${new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}</p>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}${c.cleared ? `. Who opened and clicked was cleared, as set in <a href="#settings/tracking">Settings, Tracking</a>; the totals stay` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	<div id="abr">${abHtml(c)}</div>${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>${pollsHtml(c)}
 	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.status === "sent" ? `<button class="btn ghost" id="pdf">${icon("download")}Download PDF report</button>` : ""}${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
@@ -1715,6 +1718,28 @@ async function blogSettings(head) {
 	$("#bfDel") && ($("#bfDel").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop checking your blog and forget it? Drafts already made stay.")) { await api("/api/blogfeed", { method: "DELETE" }); blogSettings(head); } }));
 }
 
+// -- Settings, Tracking: how long to keep who opened and clicked -------------------------------------------------
+async function retentionCard(look) {
+	const box = $("#rtCard");
+	if (!box) return;
+	const r = await api(`/api/retention${look !== undefined ? `?days=${look}` : ""}`);
+	const pick = look !== undefined ? look : r.days;
+	const name = (d) => (d ? (d === 365 ? "1 year" : `${d / 365} years`) : "Forever");
+	box.innerHTML = `<h2>${icon("clock")}How long to keep who opened and clicked</h2>
+	<p class="muted">Each campaign keeps a line for every reader: whether it reached them, if they opened it and which links they clicked. Over the years that's most of your database. Choose how long to keep those lines. After that we keep each campaign's totals (sent, opens, clicks, bounces, links and countries) so its report still adds up, and clear who did what.</p>
+	<label for="rtDays">Keep who opened and clicked for</label><select id="rtDays" style="width:auto">${r.choices.map((d) => `<option value="${d}" ${d === pick ? "selected" : ""}>${name(d)}</option>`).join("")}</select>
+	${pick ? `<p class="hint">${r.older.campaigns ? `${num(r.older.campaigns)} ${r.older.campaigns === 1 ? "campaign is" : "campaigns are"} older than that, with ${num(r.older.rows)} reader ${r.older.rows === 1 ? "line" : "lines"}${r.older.campaigns === 1 ? "" : " between them"}.` : "No campaigns are older than that yet."} Clearing happens a little at a time, in the background. It can't be undone: you won't be able to download or add to a list the people behind those older numbers.</p>` : `<p class="hint">Forever is the default. The shortest is a year, because picking people by what they read, cold contacts and sending again to people who didn't open all look back up to a year.</p>`}
+	<div class="row" style="margin-top:12px"><button type="button" class="btn" id="rtSave">${icon("save")}Save</button></div>`;
+	$("#rtDays").onchange = () => retentionCard(Number($("#rtDays").value));
+	$("#rtSave").onclick = (e) => run(e.currentTarget, async () => {
+		const d = Number($("#rtDays").value);
+		if (d && (!r.days || d < r.days) && r.older.campaigns && !confirm(`Clear who opened and clicked on ${num(r.older.campaigns)} older ${r.older.campaigns === 1 ? "campaign" : "campaigns"}? Their totals stay. This can't be undone.`)) return;
+		await api("/api/retention", { body: { days: d } });
+		toast(d ? `Saved. We keep who opened and clicked for ${name(d).toLowerCase()}.` : "Saved. We keep who opened and clicked forever.");
+		retentionCard();
+	});
+}
+
 // -- Settings, Lists: cold contact clean up --------------------------------------------------------------------
 async function coldCard(days, min) {
 	const box = $("#coldCard");
@@ -1802,11 +1827,13 @@ async function settings(section) {
 		<label class="check"><input type="checkbox" id="to" ${b.track_opens ? "checked" : ""}> <span>Track email opens <span class="hint">Adds a 1 pixel tracking image to each email. Because modern email clients (like Apple Mail) cache or pre-fetch images, treat open rates as a general estimate rather than an exact figure.</span></span></label>
 		<label class="check"><input type="checkbox" id="tc" ${b.track_clicks ? "checked" : ""}> <span>Track link clicks <span class="hint">Routes links through your tracking domain before redirecting subscribers onward to record engagement.</span></span></label>
 		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#reports">${icon("chart")}View reports</a></div></form>
+		<div class="card" id="rtCard"></div>
 		<div class="card" id="lk"><h2>Custom domain for email links</h2>
 		<p class="muted">Brand all outgoing links (such as unsubscribe links, web versions and click tracking URLs) with your own domain (e.g. news.yourdomain.com) rather than ${esc(location.host)}. A custom domain builds subscriber trust and improves inbox placement.</p>
 		<div id="lkBody"><p class="muted">Loading…</p></div></div>`;
 		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
 		linksCard();
+		retentionCard();
 	}
 	if (sec === "backups") {
 		const s = await api("/api/backups");

@@ -8,6 +8,7 @@ import { getMeta, iso, newId, type AccountRow, type Env } from "../db.ts";
 import { brandHealth } from "../health.ts";
 import { bad, body, freeSlug, ok, str } from "../kit.ts";
 import { sesKeys } from "../providers.ts";
+import { keptOne } from "../retention.ts";
 import { loadProvider } from "../settings.ts";
 import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, renewedKey, renewUrl, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
@@ -108,7 +109,8 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 			const lc = (last.results[0] as any) ?? null;
 			let opened: number | null = null;
 			if (lc && b.track_opens) {
-				const o = await db.prepare("SELECT COUNT(*) AS sent, COUNT(opened_at) AS opened FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(lc.id).first<{ sent: number; opened: number }>();
+				const k = await keptOne(db, lc.id);
+				const o = k ? { sent: k.stats.sent ?? 0, opened: k.stats.opens ?? 0 } : await db.prepare("SELECT COUNT(*) AS sent, COUNT(opened_at) AS opened FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(lc.id).first<{ sent: number; opened: number }>();
 				opened = o?.sent ? o.opened / o.sent : null;
 			}
 			const p = await loadProvider(db, b);

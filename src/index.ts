@@ -17,7 +17,7 @@
 
 import { runDue } from "./automations.ts";
 import { backupIfDue } from "./backup.ts";
-import { handleApi } from "./api.ts";
+import { handleApi, reportTotals } from "./api.ts";
 import { ensureSchema, type Env, type SendBatch } from "./db.ts";
 import { handlePublic } from "./public.ts";
 import { consume, resume, startDue } from "./sending.ts";
@@ -26,6 +26,7 @@ import { checkFeedsDue } from "./blogfeed.ts";
 import { tidyBacks } from "./goodbye.ts";
 import { tidyAiUse } from "./aihelper.ts";
 import { coldDue } from "./cold.ts";
+import { clearOld } from "./retention.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
@@ -106,6 +107,8 @@ export default {
 			tidyAiUse(env.DB).catch((e) => console.error("writing helper", e)),
 			// Cold contact clean up, once a day for newsletters that switched it on.
 			coldDue(env.DB).catch((e) => console.error("cold contacts", e)),
+			// Open and click log retention: clear old campaigns' per-person rows, a chunk a minute.
+			clearOld(env.DB, (id) => reportTotals(env.DB, id)).catch((e) => console.error("retention", e)),
 			// The agency licence's daily check with newslettersender.com (agency/licence.ts): only the licence id, the version and a short fingerprint of the key.
 			checkLicenceIfDue(env.DB, VERSION).catch((e) => console.error("licence check", e)),
 			// Sign up rate limits only matter for ten minutes.

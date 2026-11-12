@@ -8,6 +8,7 @@
 //     10 failures in a row.
 
 import { fireSafely } from "./automations.ts";
+import { keptOne, withKept } from "./retention.ts";
 import { cleanEmail, cleanTag } from "./csv.ts";
 import { getMeta, iso, logEvent, newId, origin, setMeta, type BrandRow, type Env, type ListRow } from "./db.ts";
 import { sealText, sendOne, unsealText } from "./providers.ts";
@@ -302,8 +303,8 @@ export async function handleV1(request: Request, env: Env, url: URL): Promise<Re
 	// -- Campaigns
 	if (path === "/api/v1/campaigns" && method === "GET") {
 		const { results } = await db.prepare(`SELECT c.id, c.name, c.subject, c.status, c.send_at, c.started_at, c.finished_at, c.total, c.created_at,
-			(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent FROM campaigns c WHERE c.brand_id = ? ORDER BY c.created_at DESC LIMIT 100`).bind(brand.id).all();
-		return json({ data: results });
+			(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent FROM campaigns c WHERE c.brand_id = ? ORDER BY c.created_at DESC LIMIT 100`).bind(brand.id).all<any>();
+		return json({ data: await withKept(db, results) });
 	}
 	if (path === "/api/v1/campaigns" && method === "POST") {
 		const b = await body(request);
@@ -327,7 +328,9 @@ export async function handleV1(request: Request, env: Env, url: URL): Promise<Re
 	if (cm && method === "GET") {
 		const c = await db.prepare("SELECT id, name, subject, preheader, status, send_at, started_at, finished_at, total, created_at, updated_at FROM campaigns WHERE id = ? AND brand_id = ?").bind(cm[1], brand.id).first<any>();
 		if (!c) return fail("There's no campaign with that id.", 404);
-		const counts = (await db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(c.id).all<{ status: string; n: number }>()).results;
+		// Older than the retention setting: the per-person rows are gone, so the saved totals stand in.
+		const kept = await keptOne(db, c.id);
+		const counts = kept ? [{ status: "sent", n: kept.stats.sent ?? 0 }] : (await db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(c.id).all<{ status: string; n: number }>()).results;
 		const ev = (await db.prepare("SELECT kind, COUNT(DISTINCT subscriber_id) AS n FROM events WHERE campaign_id = ? GROUP BY kind").bind(c.id).all<{ kind: string; n: number }>()).results;
 		const n = (k: string) => ev.find((e) => e.kind === k)?.n ?? 0;
 		return json({ ...c, stats: { ...Object.fromEntries(counts.map((x) => [x.status, x.n])), unsubscribed: n("unsubscribed"), bounced: n("bounced"), complained: n("complained") } });

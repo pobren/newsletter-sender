@@ -11,6 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
+import { cleanKeep, forgetKept, getKeep, KEEP_CHOICES, keptOne, olderThan, saveKeep, withKept, type Kept } from "./retention.ts";
 import { cleanCold, getCold, GRACE_DAYS, lookCold, removeCold, saveCold, tagCold } from "./cold.ts";
 import { AiError, aiUse, DAILY_CAP, getAi, saveAi, TASKS, write } from "./aihelper.ts";
 import { cleanSegment, deleteSegment, forLists, getSegments, saveSegment } from "./segments.ts";
@@ -335,6 +336,13 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
 		}
 		return ok(await warmupStatus(db, brand.id));
+	}
+	// Open and click log retention (Settings, Tracking).
+	if (path === "/api/retention") {
+		if (method === "POST") await saveKeep(db, brand.id, cleanKeep((await body(request))?.days));
+		const days = await getKeep(db, brand.id);
+		const look = cleanKeep(url.searchParams.get("days") ?? days);
+		return ok({ days, choices: KEEP_CHOICES, older: await olderThan(db, brand.id, look), look });
 	}
 	// Cold contact clean up (Settings, Lists).
 	if (path === "/api/cold") {
@@ -845,8 +853,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent,
 			(SELECT COUNT(opened_at) FROM sends x WHERE x.campaign_id = c.id) AS opens,
 			(SELECT COUNT(clicked_at) FROM sends x WHERE x.campaign_id = c.id) AS clicks
-			FROM campaigns c WHERE c.brand_id = ? ORDER BY COALESCE(c.started_at, c.send_at, c.updated_at) DESC LIMIT 500`).bind(brand.id).all();
-		return ok({ campaigns: results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+			FROM campaigns c WHERE c.brand_id = ? ORDER BY COALESCE(c.started_at, c.send_at, c.updated_at) DESC LIMIT 500`).bind(brand.id).all<any>();
+		return ok({ campaigns: await withKept(db, results), tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 	if (path === "/api/campaigns" && method === "POST") {
 		const b = await body(request);
@@ -879,6 +887,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const n = Number(b?.n ?? url.searchParams.get("n") ?? 0);
 		const pick = usesLink(reportPeople(who));
 		if (!pick) return bad("Please choose who.");
+		if (await keptOne(db, c.id)) return bad("Who opened and clicked this campaign was cleared, as set under Settings, Tracking. The totals are still in the report.");
 		const sel = `SELECT x.subscriber_id FROM sends x WHERE x.campaign_id = ?1 AND ${pick}`;
 		if (method === "POST") {
 			const l = await db.prepare("SELECT id, name FROM lists WHERE id = ? AND brand_id = ?").bind(String(b?.list ?? ""), brand.id).first<{ id: string; name: string }>();
@@ -908,8 +917,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const editable = c.status === "draft" || c.status === "scheduled";
 		if (!action && method === "GET") {
 			const stats = await campaignStats(db, c.id);
-			const links = brand.track_clicks ? (await db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(c.id).all()).results : [];
-			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
+			const kept = await keptOne(db, c.id);
+			const links = kept ? (brand.track_clicks ? kept.links : []) : brand.track_clicks ? (await db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(c.id).all()).results : [];
+			const countries = kept ? (brand.track_opens || brand.track_clicks ? kept.countries : []) : brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
 			const polls = pollsIn(c.html);
@@ -920,7 +930,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const ab = parseAb(c.ab);
 			const abOut = ab && { subject: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by, at: ab.at ?? null, winner: ab.winner ?? null, results: ab.bTo != null ? await abResults(db, c, ab) : null };
 			if (abOut?.results && !abOut.winner && abOut.results.a[ab!.by] + abOut.results.b[ab!.by] > 0) (abOut as any).leading = winnerOf(abOut.results, ab!.by);
-			return ok({ ...c, ab: abOut, resendOf, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			return ok({ ...c, cleared: Boolean(kept), ab: abOut, resendOf, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
@@ -939,7 +949,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (!action && method === "DELETE") {
 			if (c.status === "sending") return bad("This one is sending. Stop it first, then delete it.");
-			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
+			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), forgetKept(db, c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
 			return ok();
 		}
 		if (action === "preview") {
@@ -1240,7 +1250,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			db.prepare(`SELECT e.at, e.kind, e.detail, s.email, c.name, c.subject FROM events e LEFT JOIN subscribers s ON s.id = e.subscriber_id LEFT JOIN campaigns c ON c.id = e.campaign_id
 				WHERE e.brand_id = ? AND e.kind IN ('bounced', 'soft_bounce', 'complained') ORDER BY e.id DESC LIMIT 100`).bind(brand.id),
 		]);
-		return ok({ emails: emails.results, problems: problems.results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+		return ok({ emails: await withKept(db, emails.results as any[]), problems: problems.results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 
 	// -- Images ----------------------------------------------------------------------------------------
@@ -1281,6 +1291,23 @@ function usesLink(sql: string | null): string | null {
 
 /** What happened to a campaign's emails. */
 export async function campaignStats(db: D1Database, id: string) {
+	// Older than the newsletter's retention: the rows are gone, so use the totals saved before they went.
+	const kept = await keptOne(db, id);
+	if (kept) return kept.stats as unknown as Awaited<ReturnType<typeof countStats>>;
+	return countStats(db, id);
+}
+
+/** A campaign's totals, links and countries, saved before its per-person rows are cleared (retention.ts). */
+export async function reportTotals(db: D1Database, id: string): Promise<Omit<Kept, "cleared_at">> {
+	const [stats, links, countries] = await Promise.all([
+		countStats(db, id),
+		db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(id).all<any>(),
+		db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(id).all<any>(),
+	]);
+	return { stats, links: links.results, countries: countries.results };
+}
+
+async function countStats(db: D1Database, id: string) {
 	const [byStatus, byEvent, engaged] = await db.batch([
 		db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(id),
 		db.prepare("SELECT kind, COUNT(DISTINCT subscriber_id) AS n FROM events WHERE campaign_id = ? GROUP BY kind").bind(id),
