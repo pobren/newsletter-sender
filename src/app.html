@@ -403,7 +403,7 @@ function route() {
 	(views[v] || campaigns)().then(done, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
-const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };
+const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "profile.updated": "Changed their details", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };
 function statsHtml(s, total, tracking) {
 	const tr = tracking === true ? { opens: true, clicks: true } : tracking || {};
 	const done = s.sent + s.failed + s.skipped;
@@ -815,7 +815,7 @@ function checkModal(items) {
 	<div class="row"><button class="btn" data-close>${icon("check")}Done</button></div>`);
 }
 // -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
-const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
+const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", updated: "changes their details (name, lists or fields)", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
 const hourText = (h) => (h === 0 ? "midnight" : h === 12 ? "midday" : `${h % 12}${h < 12 ? "am" : "pm"}`);
 const ACT = { email: "Send them an email", add_list: "Add them to a list", remove_list: "Take them off a list", tag: "Tag them", notify: "Email me", webhook: "Tell another app (webhook)" };
 const ACT_ICON = { email: "send", add_list: "plus", remove_list: "minus", tag: "tag", notify: "mail", webhook: "link" };
@@ -828,7 +828,7 @@ function autoSentence(a, ls, cs) {
 	const steps = `${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
 	if (t.kind === "yearly") return `Each year on their ${t.field || "date"}, at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
 	if (t.kind === "date") return `On ${t.date ? new Date(t.date + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "a day to choose"} at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
-	const when = t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
+	const when = t.kind === "updated" ? `on ${t.list ? ln(t.list) : "any list"} changes their details` : t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
 	return `When someone ${when}: ${steps}`;
 }
 async function automations() {
@@ -858,6 +858,8 @@ async function automation(id) {
 		if (trig.kind === "date") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select></div>
 			<div class="arow"><span class="aword">On</span><input type="date" data-t="date" value="${esc(trig.date || "")}" aria-label="Day"><span class="aword">for</span><select data-t="list">${listSel(trig.list || "", true)}</select>${hourSel}</div>
 			<p class="hint">Everyone on the list that day starts it. For one email to a whole list, a scheduled campaign is quicker.</p>`;
+		if (trig.kind === "updated") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select><span class="aword">on</span><select data-t="list">${listSel(trig.list || "", true)}</select></div>
+			<p class="hint">On their Manage your subscription page, or through the API. It starts again each time they change something, once the last run has finished. Pair it with Tag them, Add them to a list or Tell another app (webhook) to keep your CRM up to date.</p>`;
 		const which = trig.kind === "joined" || trig.kind === "unsubscribed"
 			? `<select data-t="list">${listSel(trig.list || "", true)}</select>`
 			: `<select data-t="campaign">${opt("", "Any email", trig.campaign || "")}${cs.map((c) => opt(c.id, c.name || c.subject, trig.campaign || "")).join("")}</select>${trig.kind === "clicked" ? `<select data-t="link" ${trig.campaign ? "" : "disabled"}><option value="0">Any link</option></select>` : ""}`;
@@ -1740,7 +1742,7 @@ async function settings(section) {
 	if (sec === "api") {
 		const s = await api("/api/developer");
 		const when = (t) => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Never";
-		const LABEL = { "subscriber.subscribed": "Someone subscribes", "subscriber.pending": "Someone signs up and needs to confirm", "subscriber.unsubscribed": "Someone unsubscribes", "subscriber.bounced": "An email bounces", "subscriber.complained": "Someone marks you as spam", "campaign.started": "A campaign starts sending", "campaign.sent": "A campaign finishes", "campaign.paused": "A campaign is paused" };
+		const LABEL = { "subscriber.subscribed": "Someone subscribes", "subscriber.pending": "Someone signs up and needs to confirm", "subscriber.unsubscribed": "Someone unsubscribes", "subscriber.bounced": "An email bounces", "subscriber.complained": "Someone marks you as spam", "subscriber.updated": "Someone changes their details", "campaign.started": "A campaign starts sending", "campaign.sent": "A campaign finishes", "campaign.paused": "A campaign is paused" };
 		main.innerHTML = `${head}<div class="card"><h2>API keys</h2>
 		<p class="muted">Add subscribers from your website or online store, create campaign drafts and trigger one off transactional emails directly from your own code. Pass your API key in the Authorization header. Keep your keys secure on your server, never expose them in client side code.</p>
 		<label>API base URL</label><code class="row" style="display:flex;gap:8px;align-items:center"><span class="grow">${esc(s.base)}</span>${copyBtn(s.base)}</code>

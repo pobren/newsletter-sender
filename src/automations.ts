@@ -1,20 +1,24 @@
 // Automations: "when someone does this, then do that", with waits in between. A trigger (joining a list, opening or
 // clicking an email, unsubscribing) starts a run for that person; the minute cron carries each run on when its next
 // step is due. Each person goes through an automation once, except yearly ones (like a birthday), which start again
-// each year. Date triggers are checked once a day, from the hour chosen (UK time).
+// each year, and profile updates, which start again each time someone changes their details (once the last run is over). Date triggers are checked once a day, from the hour chosen (UK time).
 import { iso, linkBase, logEvent, newId, origin, type BrandRow, type Env, type SubscriberRow } from "./db.ts";
 import { sendOne } from "./providers.ts";
 import { listHeaders, renderEmail } from "./render.ts";
 import { mergeSubject } from "./sending.ts";
 import { loadProvider } from "./settings.ts";
 
-export const TRIGGERS = ["joined", "opened", "clicked", "unsubscribed", "yearly", "date"] as const;
+export const TRIGGERS = ["joined", "opened", "clicked", "unsubscribed", "yearly", "date", "updated"] as const;
 export const ACTIONS = ["email", "add_list", "remove_list", "tag", "notify", "webhook"] as const;
 
 export interface Trigger {
 	kind: (typeof TRIGGERS)[number];
-	/** joined / unsubscribed: this list ("" for any). */
+	/** joined / unsubscribed: this list ("" for any). updated: only people on this list ("" for anyone). */
 	list?: string;
+	/** updated (the event only): the lists the person is on now. */
+	lists?: string[];
+	/** updated (the event only): what changed, such as "name" or "lists". */
+	changed?: string[];
 	/** opened / clicked: this campaign ("" for any). */
 	campaign?: string;
 	/** clicked: this link number in the campaign (0 for any). */
@@ -43,7 +47,7 @@ const hex = (v: unknown, n = 16) => (typeof v === "string" && new RegExp(`^[0-9a
 /** Keeps only what makes sense in a trigger. */
 export function cleanTrigger(t: any): Trigger | null {
 	if (!t || !(TRIGGERS as readonly string[]).includes(t.kind)) return null;
-	if (t.kind === "joined" || t.kind === "unsubscribed") return { kind: t.kind, list: hex(t.list) };
+	if (t.kind === "joined" || t.kind === "unsubscribed" || t.kind === "updated") return { kind: t.kind, list: hex(t.list) };
 	const hour = Math.max(0, Math.min(23, Math.floor(Number(t.hour ?? 9)) || 0));
 	if (t.kind === "yearly") return { kind: t.kind, list: hex(t.list), field: typeof t.field === "string" ? t.field.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 40) : "", hour };
 	if (t.kind === "date") return { kind: t.kind, list: hex(t.list), date: typeof t.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : "", hour };
@@ -84,6 +88,7 @@ export function cleanSteps(v: unknown): Step[] {
 export function matches(t: Trigger, e: Trigger): boolean {
 	if (t.kind !== e.kind) return false;
 	if (t.kind === "joined" || t.kind === "unsubscribed") return !t.list || t.list === e.list;
+	if (t.kind === "updated") return !t.list || (e.lists ?? []).includes(t.list);
 	if (t.campaign && t.campaign !== e.campaign) return false;
 	return t.kind !== "clicked" || !t.link || t.link === e.link;
 }
@@ -115,7 +120,9 @@ export async function fire(db: D1Database, brandId: string, subscriberId: string
 		const t = cleanTrigger(parse(a.trigger));
 		const steps = cleanSteps(parse(a.steps));
 		if (!t || !steps.length || !matches(t, e)) continue;
-		stmts.push(db.prepare("INSERT INTO automation_runs (automation_id, subscriber_id, step, due_at, status, created_at) VALUES (?, ?, 0, ?, 'waiting', ?) ON CONFLICT (automation_id, subscriber_id) DO NOTHING")
+		// A profile update starts again each time, once the last run has finished; anything else runs once a person.
+		const again = t.kind === "updated" ? "DO UPDATE SET step = 0, due_at = excluded.due_at, status = 'waiting', created_at = excluded.created_at WHERE automation_runs.status != 'waiting'" : "DO NOTHING";
+		stmts.push(db.prepare(`INSERT INTO automation_runs (automation_id, subscriber_id, step, due_at, status, created_at) VALUES (?, ?, 0, ?, 'waiting', ?) ON CONFLICT (automation_id, subscriber_id) ${again}`)
 			.bind(a.id, subscriberId, iso(new Date(now + steps[0].wait * 3_600_000)), iso(new Date(now))));
 	}
 	if (stmts.length) await db.batch(stmts);

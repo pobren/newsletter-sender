@@ -7,6 +7,7 @@
 //     with NewsletterSender-Event and NewsletterSender-Delivery headers. Up to 5 per brand; one is switched off after
 //     10 failures in a row.
 
+import { fireSafely } from "./automations.ts";
 import { cleanEmail, cleanTag } from "./csv.ts";
 import { getMeta, iso, logEvent, newId, origin, setMeta, type BrandRow, type Env, type ListRow } from "./db.ts";
 import { sealText, sendOne, unsealText } from "./providers.ts";
@@ -20,11 +21,11 @@ export const MAX_KEYS = 10;
 export const MAX_HOOKS = 5;
 const PER_MINUTE = 60;
 
-export const EVENTS = ["subscriber.subscribed", "subscriber.pending", "subscriber.unsubscribed", "subscriber.bounced", "subscriber.complained", "campaign.started", "campaign.sent", "campaign.paused"] as const;
+export const EVENTS = ["subscriber.subscribed", "subscriber.pending", "subscriber.unsubscribed", "subscriber.bounced", "subscriber.complained", "subscriber.updated", "campaign.started", "campaign.sent", "campaign.paused"] as const;
 /** The app's own event names, as webhooks call them. */
 const EVENT_OF: Record<string, (typeof EVENTS)[number]> = {
 	subscribed: "subscriber.subscribed", signed_up: "subscriber.pending", unsubscribed: "subscriber.unsubscribed", bounced: "subscriber.bounced",
-	complained: "subscriber.complained", "campaign.started": "campaign.started", "campaign.sent": "campaign.sent", "campaign.paused": "campaign.paused",
+	complained: "subscriber.complained", "profile.updated": "subscriber.updated", "campaign.started": "campaign.started", "campaign.sent": "campaign.sent", "campaign.paused": "campaign.paused",
 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -278,7 +279,16 @@ export async function handleV1(request: Request, env: Env, url: URL): Promise<Re
 				if (v === null) delete fields[k];
 				else if (typeof v === "string" || typeof v === "number") fields[k.slice(0, 40)] = String(v).slice(0, 500);
 			}
-			await db.prepare("UPDATE subscribers SET name = ?, tags = ?, fields = ? WHERE id = ?").bind("name" in b ? str(b.name, 120) || null : s.name, JSON.stringify(tags), JSON.stringify(fields), s.id).run();
+			const name = "name" in b ? str(b.name, 120) || null : s.name;
+			await db.prepare("UPDATE subscribers SET name = ?, tags = ?, fields = ? WHERE id = ?").bind(name, JSON.stringify(tags), JSON.stringify(fields), s.id).run();
+			// Profile update automations, when the API changed their name or fields (tags alone don't count, so an
+			// automation that tags people can't start itself again).
+			const changed = [...(name !== s.name ? ["name"] : []), ...(JSON.stringify(fields) !== JSON.stringify(safeJson(s.fields) ?? {}) ? ["fields"] : [])];
+			if (changed.length) {
+				await logEvent(db, brand.id, "profile.updated", s.id, null, `Changed ${changed.join(" and ")} by the API`).run();
+				const lists = (await db.prepare("SELECT list_id FROM memberships WHERE subscriber_id = ? AND status = 'active'").bind(s.id).all<{ list_id: string }>()).results.map((r) => r.list_id);
+				await fireSafely(db, brand.id, s.id, { kind: "updated", lists, changed });
+			}
 			return json(await subscriberOut(db, (await findSubscriber(db, brand.id, s.id))!));
 		}
 		if (method === "DELETE") {

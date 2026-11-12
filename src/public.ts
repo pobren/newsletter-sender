@@ -318,10 +318,19 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 				}
 			}
 			if (stmts.length) await db.batch(stmts);
+			const changed: string[] = [];
+			if (name !== (s.name ?? "")) changed.push("name");
 			for (const l of lists) {
 				const on = l.status === "active" || l.status === "pending";
 				if (on && !want.has(l.id)) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: l.id });
 				else if (!on && want.has(l.id) && !s.suppressed) await fireSafely(db, b.id, s.id, { kind: "joined", list: l.id });
+				if (on !== want.has(l.id) && !changed.includes("lists")) changed.push("lists");
+			}
+			// Profile update automations: they changed their own details.
+			if (changed.length) {
+				const now = (await db.prepare("SELECT list_id FROM memberships WHERE subscriber_id = ? AND status = 'active'").bind(s.id).all<{ list_id: string }>()).results.map((r) => r.list_id);
+				await logEvent(db, b.id, "profile.updated", s.id, null, `Changed ${changed.join(" and ")} on the subscription page`).run();
+				await fireSafely(db, b.id, s.id, { kind: "updated", lists: now, changed });
 			}
 			s.name = name || null;
 			lists = await load();
