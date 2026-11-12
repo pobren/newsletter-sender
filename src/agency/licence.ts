@@ -3,15 +3,24 @@
 // A key is "NSA-" + the licence as base64url JSON + "." + an Ed25519 signature of that text, made with the private
 // key only the licensor has. The app checks the signature with the public keys below.
 //
-// Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id
-// and the app version (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
+// Once a day the app also asks newslettersender.com whether the licence is still active, sending only the licence id,
+// the app version and a short fingerprint of the key, never the key itself (Paul, 10 Nov 2026: so a licence bought by fraud can be cancelled). A cancelled licence turns the
 // agency features off. If newslettersender.com can't be reached, the licence keeps working for GRACE_DAYS after the
 // last good answer. Keys that site never sold answer "unknown", which counts as active.
 //
 // Without a valid key the agency edition works as the free edition (one brand, no client logins). Nothing is
 // deleted: the other brands and logins come back as soon as a valid key is added.
+//
+// Updates (Paul, 11 Nov 2026): a licence includes 12 months of updates and email support. The key's `updates` date
+// says until when. Every version released on or before that date keeps the agency features for good; a version
+// released after it runs as the free edition until a renewed key is added (or Undo goes back). A key with no
+// `updates` date covers every version.
 
 import { getMeta, setMeta } from "../db.ts";
+import { RELEASED } from "../update.ts";
+
+/** Where an owner renews updates and email support: their account on newslettersender.com (it asks them to sign in). */
+export const renewUrl = (id: string) => `https://newslettersender.com/account/renew/${id ? `?order=${encodeURIComponent(id)}` : ""}`;
 
 export const PUBLIC_KEY = "fTOc_d68Dwd-nW9JQnK-eeqJIqNgLOGsXcUe42AHv7A";
 /** Keys bought on newslettersender.com are signed with this one (its private half lives only in that Worker). */
@@ -26,8 +35,10 @@ export interface Licence {
 	to: string;
 	/** How many brands it allows; 0 for no limit. */
 	brands: number;
-	/** The last day it works (YYYY-MM-DD), or null for no end. */
+	/** The last day it works at all (YYYY-MM-DD), or null for no end. Bought keys have none. */
 	until: string | null;
+	/** Updates until (YYYY-MM-DD): versions released on or before this day are covered. Null for every version. */
+	updates: string | null;
 	/** When it was made (YYYY-MM-DD). */
 	at: string;
 }
@@ -64,8 +75,21 @@ export async function checkLicence(key: unknown, today = new Date().toISOString(
 	}
 	if (l?.v !== 1 || typeof l.to !== "string") return { ok: false, error: "That licence key is for a different version. Please update Newsletter Sender." };
 	if (l.until && l.until < today) return { ok: false, error: `That licence ended on ${l.until}.` };
-	return { ok: true, licence: { v: 1, id: String(l.id ?? ""), to: l.to, brands: Math.max(0, Math.floor(Number(l.brands) || 0)), until: l.until ?? null, at: String(l.at ?? "") } };
+	const updates = typeof (l as any).updates === "string" && /^\d{4}-\d{2}-\d{2}$/.test((l as any).updates) ? (l as any).updates : null;
+	return { ok: true, licence: { v: 1, id: String(l.id ?? ""), to: l.to, brands: Math.max(0, Math.floor(Number(l.brands) || 0)), until: l.until ?? null, updates, at: String(l.at ?? "") } };
 }
+
+/** Whether the licence's updates cover a version released on `released` (YYYY-MM-DD). */
+export function covers(l: Pick<Licence, "updates">, released: string = RELEASED): boolean {
+	return !l.updates || !released || released <= l.updates;
+}
+
+/** "12 Nov 2027" from "2027-11-12". */
+export const longDate = (d: string) => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** What to tell the owner when this version came out after their updates ended. */
+export const notCovered = (l: Pick<Licence, "updates">, released: string = RELEASED) =>
+	`Your licence covers versions released up to ${longDate(l.updates!)}, and this version came out on ${longDate(released)}. The agency features are off until you renew, or you can go back to the previous version under Settings, Updates. Nothing has been deleted.`;
 
 // ---- The daily check -------------------------------------------------------------------------------------------
 
@@ -99,14 +123,26 @@ export function statusAllows(s: LicenceStatus | null, now = Date.now()): boolean
 	return now - Date.parse(s.ok_at) <= GRACE_DAYS * DAY;
 }
 
+/** The first 16 hex characters of SHA-256 of the key this copy holds. Proves to newslettersender.com that this copy
+ *  holds a key for the licence, so a renewed key only goes back to a copy that already had one. The key itself never leaves. */
+export async function keyPrint(key: string): Promise<string> {
+	const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key.replace(/\s+/g, "")));
+	return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+}
+
 /** Asks newslettersender.com about this licence. Null when it couldn't be reached. */
-export async function askLicence(id: string, version: string, fetcher: typeof fetch = fetch): Promise<Pick<LicenceStatus, "status" | "message"> | null> {
+export async function askLicence(id: string, version: string, key: string, fetcher: typeof fetch = fetch): Promise<(Pick<LicenceStatus, "status" | "message"> & { key?: string }) | null> {
 	try {
-		const res = await fetcher(`${CHECK_URL}?id=${encodeURIComponent(id)}&v=${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(10_000), headers: { "user-agent": `NewsletterSender/${version}` } });
+		const res = await fetcher(CHECK_URL, {
+			method: "POST",
+			body: JSON.stringify({ id, v: version, k: await keyPrint(key) }),
+			signal: AbortSignal.timeout(10_000),
+			headers: { "content-type": "application/json", "user-agent": `NewsletterSender/${version}` },
+		});
 		if (res.status >= 500) return null;
-		const d = (await res.json()) as { status?: string; message?: string };
+		const d = (await res.json()) as { status?: string; message?: string; key?: string };
 		if (d.status === "cancelled") return { status: "cancelled", message: typeof d.message === "string" ? d.message.slice(0, 300) : undefined };
-		return { status: d.status === "active" ? "active" : "unknown" };
+		return { status: d.status === "active" ? "active" : "unknown", ...(typeof d.key === "string" && d.key.length < 2000 ? { key: d.key } : {}) };
 	} catch {
 		return null;
 	}
@@ -120,13 +156,24 @@ export async function checkLicenceIfDue(db: D1Database, version: string, fetcher
 	if (s && Date.parse(s.next_at) > now) return;
 	const c = await checkLicence(key);
 	if (!c.ok) return;
-	const answer = await askLicence(c.licence.id, version, fetcher);
+	const answer = await askLicence(c.licence.id, version, key, fetcher);
+	if (answer?.key) await renewedKey(db, c.licence, answer.key);
 	const at = new Date(now).toISOString();
 	const next: LicenceStatus = answer
 		? { ...answer, ok_at: at, next_at: new Date(now + DAY).toISOString() }
 		: { status: s?.status ?? "unknown", message: s?.message, ok_at: s?.ok_at ?? at, next_at: new Date(now + DAY / 24).toISOString() };
 	await setMeta(db, STATUS, JSON.stringify(next));
 	cache = null;
+}
+
+/** After a renewal, newslettersender.com answers with the same licence signed again with a later updates date.
+ *  Swaps it in, so nobody has to paste anything. Only a properly signed key for the same licence, with more updates. */
+export async function renewedKey(db: D1Database, now: Licence, key: string, raw?: string): Promise<boolean> {
+	const c = await checkLicence(key, undefined, raw);
+	if (!c.ok || c.licence.id !== now.id || !now.updates || !(c.licence.updates === null || c.licence.updates > now.updates)) return false;
+	await setMeta(db, "agency_licence", key.replace(/\s+/g, ""));
+	cache = null;
+	return true;
 }
 
 // The key is checked once per Worker, then remembered for a few minutes (it can change from Settings at any time).
@@ -137,7 +184,7 @@ export async function currentLicence(db: D1Database): Promise<Licence | null> {
 	if (cache && Date.now() - cache.at < 300_000) return cache.licence;
 	const key = await getMeta(db, "agency_licence");
 	const c = key ? await checkLicence(key) : null;
-	const allowed = c?.ok ? statusAllows(await licenceStatus(db)) : false;
+	const allowed = c?.ok ? covers(c.licence) && statusAllows(await licenceStatus(db)) : false;
 	cache = { key, at: Date.now(), licence: c?.ok && allowed ? c.licence : null };
 	return cache.licence;
 }

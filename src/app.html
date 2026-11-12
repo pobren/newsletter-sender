@@ -1736,13 +1736,18 @@ async function updatesCard(check = false) {
 	try { u = await api(`/api/update${check ? "?check" : ""}`); } catch (err) { box.innerHTML = `<h2>Updates</h2><p class="err">${esc(err.message)}</p>`; return; }
 	const when = (d) => new Date(d).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 	const undoable = u.last?.before && !u.last.undone && u.last.to === u.version;
+	// An agency licence covers versions released up to its updates date.
+	const longDay = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+	const past = !!(u.latest && u.updates && u.latest.date && u.latest.date > u.updates);
 	box.innerHTML = `<h2>Updates</h2><p>You're on version <b>${esc(u.version)}</b>.</p>
 	${u.latest ? `<div class="info">${icon("gift")}<div><p><b>Version ${esc(u.latest.version)} is out.</b></p>${u.latest.notes.length ? `<ul style="margin:8px 0 0;padding-left:20px">${u.latest.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}<p style="margin-top:8px">Updating takes about ten seconds. Your subscribers, emails, settings and web addresses all stay as they are, and you can go back if anything looks wrong.</p></div></div>
-	<div class="row"><button class="btn" id="upGo">${icon("download")}Update to ${esc(u.latest.version)}</button><a class="btn ghost" href="${esc(u.releases)}" target="_blank" rel="noopener">${icon("list")}All releases</a></div>`
+	${past ? `<div class="info">${icon("alert")}<p>This version came out after your agency licence's updates ended on <b>${esc(longDay(u.updates))}</b>. Installing it switches the agency features off until you renew. Nothing is deleted, and you can go back.</p></div>` : ""}
+	<div class="row">${past ? `<a class="btn" href="${esc(u.renew)}" target="_blank" rel="noopener">${icon("refresh")}Renew updates and support</a><button class="btn ghost" id="upGo">${icon("download")}Update anyway</button>` : `<button class="btn" id="upGo">${icon("download")}Update to ${esc(u.latest.version)}</button>`}<a class="btn ghost" href="${esc(u.releases)}" target="_blank" rel="noopener">${icon("list")}All releases</a></div>`
 	: `<p class="muted">You have the newest version.</p><div class="row"><button class="btn ghost" id="upCheck">${icon("refresh")}Check again</button><a class="btn ghost" href="${esc(u.releases)}" target="_blank" rel="noopener">${icon("list")}All releases</a></div>`}
 	${undoable ? `<p class="hint" style="margin-top:14px">Updated from ${esc(u.last.from)} on ${when(u.last.at)}.</p><div class="row"><button class="btn ghost small" id="upUndo">${icon("undo")}Go back to ${esc(u.last.from)}</button></div>` : ""}<p class="err" id="upe"></p>`;
 	$("#upCheck") && ($("#upCheck").onclick = (e) => run(e.currentTarget, () => updatesCard(true)));
 	$("#upGo") && ($("#upGo").onclick = (e) => run(e.currentTarget, async () => {
+		if (past && !confirm("Update anyway? The agency features switch off until you renew. Nothing is deleted.")) return;
 		$("#upe").textContent = "";
 		try {
 			const r = await api("/api/update/install", { body: {} });
