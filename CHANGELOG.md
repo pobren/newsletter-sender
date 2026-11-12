@@ -4,7 +4,7 @@ Each version's notes show in the app when it's available. Newest first.
 
 ## 0.3.1
 
-- Agency licences include 12 months of updates and email support. Settings, Licence shows the date, and offers a Renew button from 30 days before it.
+- Agency licences include 12 months of updates and email support. Settings, Licence shows the date, and offers a Renew button from 30 days before it. Once you've renewed in your account on newslettersender.com, the new key is picked up by itself.
 - After that date, the agency features keep working for good on every version released before it. A newer version asks for a renewal before you install it, and nothing is ever deleted.
 
 ## 0.3.0

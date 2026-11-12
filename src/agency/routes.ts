@@ -9,7 +9,7 @@ import { brandHealth } from "../health.ts";
 import { bad, body, freeSlug, ok, str } from "../kit.ts";
 import { sesKeys } from "../providers.ts";
 import { loadProvider } from "../settings.ts";
-import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, RENEW_URL, saveLicence } from "./licence.ts";
+import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, renewedKey, renewUrl, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
 
@@ -40,15 +40,23 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 
 	// -- The licence key (the owner only: team.ts) ----------------------------------------------------
 	if (path === "/api/licence" && method === "GET") {
-		const l = await currentLicence(db);
+		let l = await currentLicence(db);
 		const count = (await db.prepare("SELECT COUNT(*) AS n FROM brands").first<{ n: number }>())?.n ?? 0;
 		// Why a saved key isn't working: cancelled, or newslettersender.com not reached for GRACE_DAYS.
 		// Or this version came out after the licence's updates ended.
 		const saved = await getMeta(db, "agency_licence");
-		const c = saved && !l ? await checkLicence(saved) : null;
-		const s = saved && !l ? await licenceStatus(db) : null;
+		let c = saved && !l ? await checkLicence(saved) : null;
+		// Not covered: ask newslettersender.com now, in case they've just renewed (the answer carries the new key).
+		if (c?.ok && !covers(c.licence)) {
+			const a = await askLicence(c.licence.id, VERSION);
+			if (a?.key && (await renewedKey(db, c.licence, a.key))) {
+				l = await currentLicence(db);
+				c = null;
+			}
+		}
+		const s = saved && !l && c ? await licenceStatus(db) : null;
 		const problem = c?.ok && !covers(c.licence) ? notCovered(c.licence) : !s ? null : s.status === "cancelled" ? s.message || "This licence has been cancelled. Email hello@newslettersender.com if you think that's a mistake." : `We couldn't check your licence with newslettersender.com for ${GRACE_DAYS} days, so the agency features are paused. They come back as soon as the check works again.`;
-		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until, updates: l.updates }, brands: count, problem, renew: RENEW_URL, today: new Date().toISOString().slice(0, 10) });
+		return ok({ licence: l && { to: l.to, id: l.id, brands: l.brands, until: l.until, updates: l.updates }, brands: count, problem, renew: renewUrl(l?.id ?? (c?.ok ? c.licence.id : "")), today: new Date().toISOString().slice(0, 10) });
 	}
 	if (path === "/api/licence" && method === "POST") {
 		const key = (await body(request)).key;

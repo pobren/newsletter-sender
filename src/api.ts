@@ -1,7 +1,7 @@
 // The dashboard's JSON. Everything here needs the owner signed in, apart from set-up and sign in.
 
 import { install, latest, newer, RELEASES, undo, VERSION } from "./update.ts";
-import { checkLicence, RENEW_URL } from "./agency/licence.ts";
+import { checkLicence, renewUrl } from "./agency/licence.ts";
 import { cleanReferrals, parseReferrals } from "./referrals.ts";
 import { checkPassword, clearCookie, clearFailures, currentAccount, hashPassword, noteFailure, passwordProblem, sessionCookie, setupCodeMatches, setupTokenOk, signOutEverywhere, tooManyTries } from "./auth.ts";
 import { cleanEmail, cleanTag, csvLine, fieldKey } from "./csv.ts";
@@ -147,7 +147,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			// An agency licence's updates date, so the page can warn before installing a version it doesn't cover.
 			const key = await getMeta(db, "agency_licence");
 			const c = key ? await checkLicence(key) : null;
-			return { version: VERSION, latest: rel && newer(rel.version, VERSION) ? rel : null, last: JSON.parse((await getMeta(db, "update_last")) ?? "null"), releases: RELEASES, updates: c?.ok ? c.licence.updates : null, renew: RENEW_URL };
+			return { version: VERSION, latest: rel && newer(rel.version, VERSION) ? rel : null, last: JSON.parse((await getMeta(db, "update_last")) ?? "null"), releases: RELEASES, updates: c?.ok ? c.licence.updates : null, renew: renewUrl(c?.ok ? c.licence.id : "") };
 		};
 		if (path === "/api/update" && method === "GET") return ok(await status(url.searchParams.has("check")));
 		if (path === "/api/update/install" && method === "POST") {

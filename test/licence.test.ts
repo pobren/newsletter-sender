@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { askLicence, CHECK_URL, checkLicence, covers, GRACE_DAYS, notCovered, statusAllows } from "../src/agency/licence.ts";
+import { askLicence, CHECK_URL, checkLicence, covers, GRACE_DAYS, notCovered, renewedKey, renewUrl, statusAllows } from "../src/agency/licence.ts";
 
 // A key pair just for these tests, so the real signing key never has to be here.
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const pub = publicKey.export({ type: "spki", format: "der" }).subarray(12).toString("base64url");
 // Makes a key the way the licensor's tools do: "NSA-" + base64url JSON + "." + an Ed25519 signature.
-const make = (to: string, brands = "0", until = "", updates?: string) => {
-	const text = Buffer.from(JSON.stringify({ v: 1, id: randomBytes(6).toString("hex"), to, brands: Number(brands), until: until || null, ...(updates === undefined ? {} : { updates }), at: "2026-11-06" })).toString("base64url");
+const make = (to: string, brands = "0", until = "", updates?: string, id = randomBytes(6).toString("hex")) => {
+	const text = Buffer.from(JSON.stringify({ v: 1, id, to, brands: Number(brands), until: until || null, ...(updates === undefined ? {} : { updates }), at: "2026-11-06" })).toString("base64url");
 	return `NSA-${text}.${sign(null, Buffer.from(text), privateKey).toString("base64url")}`;
 };
 
@@ -83,4 +83,23 @@ test("updates: keys without a date (made before 0.3.1) cover every version", asy
 	// A malformed date is ignored rather than locking anyone out.
 	const bad = await checkLicence(make("Typo Ltd", "0", "", "next year"), "2026-11-12", pub);
 	assert.equal(bad.ok && bad.licence.updates, null);
+});
+
+test("a renewal from the daily check swaps in the new key, only for the same licence with more updates", async () => {
+	const saved: Record<string, string | null> = {};
+	const db = { prepare: (sql: string) => ({ bind: (...a: any[]) => ({ run: async () => { if (/INSERT|REPLACE|UPDATE/i.test(sql)) saved[a[0]] = a[1]; }, first: async () => null }) }) } as any;
+	const old = (await checkLicence(make("Acme", "0", "", "2027-11-12", "abc123"), "2026-11-12", pub)) as any;
+	assert.ok(old.ok);
+	assert.equal(await renewedKey(db, old.licence, make("Acme", "0", "", "2028-11-12", "abc123"), pub), true);
+	assert.match(String(saved.agency_licence ?? Object.values(saved)[0]), /^NSA-/);
+	for (const k in saved) delete saved[k];
+	assert.equal(await renewedKey(db, old.licence, make("Acme", "0", "", "2028-11-12", "other1"), pub), false); // another licence
+	assert.equal(await renewedKey(db, old.licence, make("Acme", "0", "", "2027-01-01", "abc123"), pub), false); // fewer updates
+	assert.equal(await renewedKey(db, old.licence, "NSA-rubbish.sig", pub), false);
+	assert.equal(Object.keys(saved).length, 0);
+});
+
+test("the renew link goes to the account on newslettersender.com", () => {
+	assert.equal(renewUrl("abc123"), "https://newslettersender.com/account/renew/?order=abc123");
+	assert.equal(renewUrl(""), "https://newslettersender.com/account/renew/");
 });

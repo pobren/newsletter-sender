@@ -19,8 +19,8 @@
 import { getMeta, setMeta } from "../db.ts";
 import { RELEASED } from "../update.ts";
 
-/** Where an owner renews updates and email support. */
-export const RENEW_URL = "https://newslettersender.com/contact/?topic=agency";
+/** Where an owner renews updates and email support: their account on newslettersender.com (it asks them to sign in). */
+export const renewUrl = (id: string) => `https://newslettersender.com/account/renew/${id ? `?order=${encodeURIComponent(id)}` : ""}`;
 
 export const PUBLIC_KEY = "fTOc_d68Dwd-nW9JQnK-eeqJIqNgLOGsXcUe42AHv7A";
 /** Keys bought on newslettersender.com are signed with this one (its private half lives only in that Worker). */
@@ -124,13 +124,13 @@ export function statusAllows(s: LicenceStatus | null, now = Date.now()): boolean
 }
 
 /** Asks newslettersender.com about this licence. Null when it couldn't be reached. */
-export async function askLicence(id: string, version: string, fetcher: typeof fetch = fetch): Promise<Pick<LicenceStatus, "status" | "message"> | null> {
+export async function askLicence(id: string, version: string, fetcher: typeof fetch = fetch): Promise<(Pick<LicenceStatus, "status" | "message"> & { key?: string }) | null> {
 	try {
 		const res = await fetcher(`${CHECK_URL}?id=${encodeURIComponent(id)}&v=${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(10_000), headers: { "user-agent": `NewsletterSender/${version}` } });
 		if (res.status >= 500) return null;
-		const d = (await res.json()) as { status?: string; message?: string };
+		const d = (await res.json()) as { status?: string; message?: string; key?: string };
 		if (d.status === "cancelled") return { status: "cancelled", message: typeof d.message === "string" ? d.message.slice(0, 300) : undefined };
-		return { status: d.status === "active" ? "active" : "unknown" };
+		return { status: d.status === "active" ? "active" : "unknown", ...(typeof d.key === "string" && d.key.length < 2000 ? { key: d.key } : {}) };
 	} catch {
 		return null;
 	}
@@ -145,12 +145,23 @@ export async function checkLicenceIfDue(db: D1Database, version: string, fetcher
 	const c = await checkLicence(key);
 	if (!c.ok) return;
 	const answer = await askLicence(c.licence.id, version, fetcher);
+	if (answer?.key) await renewedKey(db, c.licence, answer.key);
 	const at = new Date(now).toISOString();
 	const next: LicenceStatus = answer
 		? { ...answer, ok_at: at, next_at: new Date(now + DAY).toISOString() }
 		: { status: s?.status ?? "unknown", message: s?.message, ok_at: s?.ok_at ?? at, next_at: new Date(now + DAY / 24).toISOString() };
 	await setMeta(db, STATUS, JSON.stringify(next));
 	cache = null;
+}
+
+/** After a renewal, newslettersender.com answers with the same licence signed again with a later updates date.
+ *  Swaps it in, so nobody has to paste anything. Only a properly signed key for the same licence, with more updates. */
+export async function renewedKey(db: D1Database, now: Licence, key: string, raw?: string): Promise<boolean> {
+	const c = await checkLicence(key, undefined, raw);
+	if (!c.ok || c.licence.id !== now.id || !now.updates || !(c.licence.updates === null || c.licence.updates > now.updates)) return false;
+	await setMeta(db, "agency_licence", key.replace(/\s+/g, ""));
+	cache = null;
+	return true;
 }
 
 // The key is checked once per Worker, then remembered for a few minutes (it can change from Settings at any time).
