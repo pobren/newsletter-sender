@@ -32,7 +32,7 @@ const OPEN = 6;
 export const MAX_TRIES = 10;
 
 /** Default emails a second for services that don't tell us their limit. The owner can change it. */
-export const DEFAULT_RATE: Record<string, number> = { ses: 1, postmark: 20, mailgun: 20, brevo: 10, resend: 2 };
+export const DEFAULT_RATE: Record<string, number> = { ses: 1, postmark: 20, mailgun: 20, brevo: 10, resend: 2, sendgrid: 20 };
 
 /** One worker's share of the brand's rate, in emails a second. */
 /** How often a batch looks again to see if the send was paused or stopped. */

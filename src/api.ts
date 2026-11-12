@@ -11,7 +11,7 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
-import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
+import { addWebhook, isProvider, parseProvider, PROVIDERS, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
@@ -313,7 +313,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			sending: providerSummary(provider),
 			rate: brand.rate,
 			fromEmail: brand.from_email,
-			hooks: Object.fromEntries(["ses", "postmark", "mailgun", "brevo", "resend"].map((p) => [p, `${base}/hooks/${p}/${brand.hook_key}`])),
+			hooks: Object.fromEntries(PROVIDERS.map(({ id }) => [id, `${base}/hooks/${id}/${brand.hook_key}`])),
 			ses: setup ? { ...setup, records: sesRecords(setup.domain, setup.tokens, setup.region) } : null,
 			cloudflareEmail: Boolean(env.EMAIL),
 		});

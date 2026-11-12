@@ -5,7 +5,7 @@
   <p><a href="https://newslettersender.com/">Website</a> · <a href="#install">Install</a> · <a href="https://github.com/pobren/newsletter-sender/issues">Report a bug</a></p>
 </div>
 
-Newsletter Sender runs in your own Cloudflare account. Your subscribers, your emails and your stats stay there, and you send through your own Amazon SES account (or Postmark, Mailgun, Brevo or Resend), so you pay their sending price and nothing per subscriber.
+Newsletter Sender runs in your own Cloudflare account. Your subscribers, your emails and your stats stay there, and you send through your own Amazon SES account (or Postmark, Mailgun, Brevo, Resend or SendGrid), so you pay their sending price and nothing per subscriber.
 
 **Free for your own newsletters, source available.** See [Licence](#licence) below.
 
@@ -32,7 +32,7 @@ Newsletter Sender runs in your own Cloudflare account. Your subscribers, your em
 
 - A Cloudflare account on the Workers Paid plan ($5 a month). The free plan limits each run to a few milliseconds of work and 50 outside requests, which isn't enough to send a batch of emails.
 - A domain to send from, such as `news@yourdomain.com`.
-- An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo or Resend.
+- An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo, Resend or SendGrid.
 
 ## Install
 
@@ -68,9 +68,9 @@ To remove the AWS user later, delete the `newsletter-sender` stack in CloudForma
 
 <img src="docs/sending.png" alt="The Sending tab: choosing a service, keys and the bounce webhook" width="100%">
 
-### Postmark, Mailgun, Brevo or Resend
+### Postmark, Mailgun, Brevo, Resend or SendGrid
 
-Paste your key on the **Sending** tab and your plan's emails a second. We send a test to you before saving. Then add the webhook address it shows in that service, for bounces and spam complaints.
+Paste your key on the **Sending** tab and your plan's emails a second. We send a test to you before saving. We add the webhook for bounces and spam complaints in that service for you. If the key isn't allowed to, the tab shows the address to add yourself.
 
 ## Sign up confirmations
 

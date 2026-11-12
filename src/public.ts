@@ -4,7 +4,7 @@
 
 import { csvLine, cleanEmail } from "./csv.ts";
 import { getMeta, isBlocked, iso, linkBase, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
-import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
+import { isProvider, parseProviderEvents, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
 import { campaignContent, safeJson, sendSig, shareSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
@@ -466,7 +466,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	}
 
 	// -- Bounces and complaints from the sending services ------------------------------------------
-	const hm = /^\/hooks\/(ses|postmark|mailgun|brevo|resend)\/([0-9a-f]{32})$/.exec(path);
+	const hm = /^\/hooks\/([a-z]{2,12})\/([0-9a-f]{32})$/.exec(path);
 	if (hm && request.method === "POST") {
 		const b = await db.prepare("SELECT * FROM brands WHERE hook_key = ?").bind(hm[2]).first<BrandRow>();
 		if (!b) return new Response("Not found", { status: 404 });
@@ -484,10 +484,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			}
 			return new Response("OK");
 		}
-		if (isProvider(hm[1])) {
-			const e = parseProviderEvent(hm[1], body);
-			if (e) await recordMailEvent(db, b, e);
-		}
+		if (isProvider(hm[1])) for (const e of parseProviderEvents(hm[1], body)) await recordMailEvent(db, b, e);
 		return new Response("OK");
 	}
 	return null;

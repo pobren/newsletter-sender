@@ -1,12 +1,12 @@
 // Sending services. Newsletters go out through Amazon SES (the main way, at the account's full speed) or the owner's
-// own Postmark, Mailgun, Brevo or Resend. Cloudflare's own email service only sends sign up confirmations and other
+// own Postmark, Mailgun, Brevo, Resend or SendGrid. Cloudflare's own email service only sends sign up confirmations and other
 // one off emails (Cloudflare describes it as for transactional email), never newsletters.
 //
 // The owner's keys are kept encrypted in the database (seal / unseal), and never shown again once saved.
 
 import { ses, type AwsKeys } from "./aws.ts";
 
-export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend";
+export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend" | "sendgrid";
 
 export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: string }[] = [
 	{ id: "ses", name: "Amazon SES", keyLabel: "Secret access key", help: "In AWS: IAM, Users, your sending user, Security credentials, Create access key." },
@@ -14,6 +14,7 @@ export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: 
 	{ id: "mailgun", name: "Mailgun", keyLabel: "Sending API key", help: "In Mailgun: Send, Sending, Domain settings, Sending keys." },
 	{ id: "brevo", name: "Brevo", keyLabel: "API key", help: "In Brevo: your name, SMTP & API, API keys." },
 	{ id: "resend", name: "Resend", keyLabel: "API key", help: "In Resend: API Keys, Create API key (Full access, so we can add the bounce webhook)." },
+	{ id: "sendgrid", name: "SendGrid", keyLabel: "API key", help: "In SendGrid: Settings, API Keys, Create API Key (Full Access, so we can add the bounce webhook)." },
 ];
 export const isProvider = (x: unknown): x is ProviderId => PROVIDERS.some((p) => p.id === x);
 export const providerName = (id: ProviderId) => PROVIDERS.find((p) => p.id === id)!.name;
@@ -32,6 +33,8 @@ export interface ProviderConfig {
 	/** Mailgun only: the sending domain, and whether the account is in Mailgun's EU region. */
 	mailgunDomain?: string;
 	mailgunRegion?: "us" | "eu";
+	/** SendGrid only: an EU regional account sends through api.eu.sendgrid.com. */
+	sendgridRegion?: "us" | "eu";
 	/** Postmark, Mailgun, Brevo or Resend: we added our bounce and complaint webhook there ourselves. */
 	hookAdded?: boolean;
 }
@@ -58,13 +61,14 @@ export function parseProvider(input: Record<string, unknown>, fromEmail: string)
 		out.mailgunDomain = d;
 		out.mailgunRegion = input.mailgunRegion === "eu" ? "eu" : "us";
 	}
+	if (input.provider === "sendgrid") out.sendgridRegion = input.sendgridRegion === "eu" ? "eu" : "us";
 	return out;
 }
 
 /** What the owner sees about their sending set-up: never the key itself. */
 export function providerSummary(c: ProviderConfig | null) {
 	if (!c) return null;
-	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
+	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? (c.sendgridRegion === "eu" ? "EU" : null), mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
 }
 
 export interface OutEmail {
@@ -90,6 +94,8 @@ export interface Sent {
 	quota?: boolean;
 	error?: string;
 }
+
+const sendgridApi = (c: ProviderConfig) => (c.sendgridRegion === "eu" ? "https://api.eu.sendgrid.com" : "https://api.sendgrid.com");
 
 const quoteName = (n: string) => `"${n.replace(/["\\\r\n]/g, "")}"`;
 
@@ -122,6 +128,25 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 				method: "POST",
 				headers: { "api-key": c.key, "content-type": "application/json", accept: "application/json" },
 				body: JSON.stringify({ sender: { name: fromName, email: fromEmail }, to: [{ email: m.to }], subject: m.subject, textContent: m.text, htmlContent: m.html, ...(m.replyTo ? { replyTo: { email: m.replyTo } } : {}), ...(someHeaders ? { headers } : {}) }),
+			},
+		};
+	}
+	if (c.provider === "sendgrid") {
+		// We track opens and clicks ourselves and use our own unsubscribe link, so SendGrid's are switched off.
+		return {
+			url: `${sendgridApi(c)}/v3/mail/send`,
+			init: {
+				method: "POST",
+				headers: { authorization: `Bearer ${c.key}`, "content-type": "application/json" },
+				body: JSON.stringify({
+					personalizations: [{ to: [{ email: m.to }], ...(m.tags ? { custom_args: m.tags } : {}) }],
+					from: { email: fromEmail, name: fromName },
+					...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
+					subject: m.subject,
+					content: [{ type: "text/plain", value: m.text }, { type: "text/html", value: m.html }],
+					...(someHeaders ? { headers } : {}),
+					tracking_settings: { click_tracking: { enable: false, enable_text: false }, open_tracking: { enable: false }, subscription_tracking: { enable: false } },
+				}),
 			},
 		};
 	}
@@ -179,7 +204,8 @@ export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: st
 			try {
 				d = JSON.parse(text);
 			} catch {}
-			return { ok: true, id: d?.MessageID ?? d?.messageId ?? d?.id ?? undefined };
+			// SendGrid answers 202 with no body, and puts its id in a header.
+			return { ok: true, id: d?.MessageID ?? d?.messageId ?? d?.id ?? res.headers.get("x-message-id") ?? undefined };
 		}
 		return classify(res.status, text);
 	} catch (e) {
@@ -194,7 +220,7 @@ export function classify(status: number, text: string): Sent {
 	if (status === 429 || /Throttl|TooManyRequests|Maximum sending rate exceeded|rate limit/i.test(text)) return { ok: false, throttled: true, error };
 	if (status >= 500) return { ok: false, throttled: true, error };
 	// An address the service refuses outright (on its suppression list, or not a valid address).
-	if (/InvalidParameterValue.*(address|Destination)|Illegal address|inactive recipient|is not a valid email|suppress/i.test(text)) return { ok: false, permanent: true, error };
+	if (/InvalidParameterValue.*(address|Destination)|Illegal address|inactive recipient|is not a valid email|does not contain a valid address|suppress/i.test(text)) return { ok: false, permanent: true, error };
 	return { ok: false, error };
 }
 
@@ -274,7 +300,7 @@ export function parseSesEvent(message: any): MailEvent | null {
 	return null;
 }
 
-/** A bounce or complaint webhook from Postmark, Mailgun, Brevo or Resend. */
+/** A bounce or complaint webhook from Postmark, Mailgun, Brevo or Resend (SendGrid: parseProviderEvents). */
 export function parseProviderEvent(provider: ProviderId, body: any): MailEvent | null {
 	if (provider === "postmark") {
 		if (body?.RecordType === "Bounce") {
@@ -308,6 +334,29 @@ export function parseProviderEvent(provider: ProviderId, body: any): MailEvent |
 	return null;
 }
 
+/**
+ * Every event in one webhook post. SendGrid sends a list of events in each post; the others send one.
+ */
+export function parseProviderEvents(provider: ProviderId, body: any): MailEvent[] {
+	if (provider === "sendgrid") return (Array.isArray(body) ? body : []).slice(0, 1000).map(sendgridEvent).filter((e): e is MailEvent => e !== null);
+	const e = parseProviderEvent(provider, body);
+	return e ? [e] : [];
+}
+
+/** One SendGrid event. Our tags come back as top level fields (custom_args). */
+export function sendgridEvent(e: any): MailEvent | null {
+	const extra = { sub: tag(e?.ns_sub), campaign: tag(e?.ns_campaign) };
+	// "bounce" is a hard bounce; "blocked" (also sent as a bounce) is a soft one.
+	if (e?.event === "bounce") return { kind: "bounce", permanent: e.type !== "blocked", addresses: addrs([e.email]), detail: String(e.reason || e.type || "Bounced").slice(0, 120), ...extra };
+	if (e?.event === "spamreport") return { kind: "complaint", permanent: true, addresses: addrs([e.email]), detail: "Marked as spam", ...extra };
+	// SendGrid dropped it without trying: an address that bounced or complained before, or isn't valid.
+	if (e?.event === "dropped" && /bounced|invalid|spam/i.test(String(e.reason ?? ""))) {
+		const spam = /spam/i.test(String(e.reason));
+		return { kind: spam ? "complaint" : "bounce", permanent: true, addresses: addrs([e.email]), detail: `SendGrid: ${String(e.reason).slice(0, 100)}`, ...extra };
+	}
+	return null;
+}
+
 /** Where SNS may send us to confirm a subscription: only Amazon's own SNS addresses. */
 export function trustedSubscribeUrl(url: unknown): boolean {
 	try {
@@ -321,7 +370,7 @@ export function trustedSubscribeUrl(url: unknown): boolean {
 // -- Bounce and complaint webhooks, added for the owner ----------------------------------------------------
 
 /**
- * Adds our bounce and spam complaint webhook in Postmark, Mailgun, Brevo or Resend, with the key the owner has just
+ * Adds our bounce and spam complaint webhook in Postmark, Mailgun, Brevo, Resend or SendGrid, with the key the owner has just
  * pasted, so they don't have to do it by hand. Leaves any webhooks they already have alone, and does nothing if ours is
  * already there. Never throws: says what went wrong instead, so the owner can add it themselves.
  */
@@ -337,7 +386,7 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 		return { ok: res.ok, status: res.status, data, text };
 	};
 	const failed = (r: { status: number; text: string }) => {
-		if (r.status === 401 || r.status === 403) return { error: `${name} didn't let this key add webhooks${c.provider === "resend" ? " (a Sending access key can't; a Full access key can)" : ""}. Add the address below in ${name} yourself.` };
+		if (r.status === 401 || r.status === 403) return { error: `${name} didn't let this key add webhooks${c.provider === "resend" ? " (a Sending access key can't; a Full access key can)" : c.provider === "sendgrid" ? " (a Restricted Access key can't; a Full Access key can)" : ""}. Add the address below in ${name} yourself.` };
 		return { error: `${name} said: ${r.text.replace(/\s+/g, " ").slice(0, 160) || `error ${r.status}`}` };
 	};
 	try {
@@ -391,6 +440,27 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 			if (!list.ok) return failed(list);
 			if ((list.data?.data ?? []).some((w: any) => w?.endpoint === hookUrl)) return { ok: true };
 			const r = await call("https://api.resend.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ endpoint: hookUrl, events: ["email.bounced", "email.complained"] }) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		if (c.provider === "sendgrid") {
+			const h = { authorization: `Bearer ${c.key}`, "content-type": "application/json" };
+			const events = { enabled: true, url: hookUrl, bounce: true, dropped: true, spam_report: true, deferred: false, delivered: false, processed: false, open: false, click: false, unsubscribe: false, group_unsubscribe: false, group_resubscribe: false };
+			const base = `${sendgridApi(c)}/v3/user/webhooks/event/settings`;
+			const list = await call(`${base}/all`, { headers: h });
+			if (list.ok) {
+				if ((list.data?.webhooks ?? []).some((w: any) => w?.url === hookUrl && w?.enabled)) return { ok: true };
+				const have = (list.data?.webhooks ?? []).find((w: any) => w?.url === hookUrl);
+				const r = have?.id
+					? await call(`${base}/${encodeURIComponent(have.id)}`, { method: "PATCH", headers: h, body: JSON.stringify(events) })
+					: await call(base, { method: "POST", headers: h, body: JSON.stringify({ ...events, friendly_name: "Newsletter Sender" }) });
+				return r.ok ? { ok: true } : failed(r);
+			}
+			if (list.status !== 404) return failed(list);
+			// Accounts with just the one event webhook: only take it over when it's empty or already ours.
+			const one = await call(base, { headers: h });
+			if (!one.ok) return failed(one);
+			if (one.data?.url && one.data.url !== hookUrl) return { error: "SendGrid already sends its events to another address, and this account can only have one. Add ours in SendGrid yourself, or remove the other one first." };
+			const r = await call(base, { method: "PATCH", headers: h, body: JSON.stringify(events) });
 			return r.ok ? { ok: true } : failed(r);
 		}
 		return { error: "Amazon SES reports bounces its own way." };
