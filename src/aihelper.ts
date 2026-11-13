@@ -99,7 +99,7 @@ export class AiError extends Error {}
 /** Run one use of the helper for a newsletter. Throws AiError with a message for the person when it can't. */
 export async function write(env: Env, brand: { id: string; name: string }, task: Task, input: string, now = new Date()): Promise<string[]> {
 	if (!(await getAi(env.DB, brand.id)).on) throw new AiError("The writing helper is off. Switch it on under Settings, Writing helper.");
-	if (!env.AI) throw new AiError("The writing helper isn't connected to Cloudflare's AI yet. Update to the latest version and it connects by itself.");
+	if (!env.AI) throw new AiError("The writing helper isn't connected to Cloudflare's AI yet. The owner can press Connect it for me under Settings, Writing helper.");
 	const text = (task === "subjects" ? textOf(input) : input.replace(/\r/g, "").trim()).slice(0, MAX_TEXT);
 	if (text.length < 3) throw new AiError(task === "draft" ? "Type a few notes first." : task === "subjects" ? "Write the email first, then we can suggest subject lines for it." : "Pick some of the email's text first.");
 	const used = await aiUse(env.DB, brand.id, now);

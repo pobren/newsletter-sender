@@ -1788,10 +1788,11 @@ async function aiSettings(head) {
 	<p class="muted">An optional helper in the campaign editor. It suggests subject lines, tidies up or shortens a bit of your email you pick, and turns rough notes into a first draft. It's off unless you switch it on, and it never sends anything or changes your email unless you press its buttons.</p>
 	<div class="info">${icon("cloud")}<p>It uses Cloudflare's own AI on your Cloudflare account, so your emails don't go to any other company and there's no key to set up. Cloudflare gives every account a free allowance each day, which covers about 80 uses. Past that, Cloudflare bills your account about £1 per 1,000 uses. There's a limit of ${num(a.cap)} uses a day.</p></div>
 	<label class="check" style="margin-top:14px"><input type="checkbox" id="aiOn" ${a.on ? "checked" : ""}> Show the writing helper in the campaign editor</label>
-	${a.on && !a.ready ? `<p class="hwarn">${icon("alert")}<span>It's switched on, but it isn't connected to Cloudflare's AI yet. Update to the latest version and it connects by itself.</span></p>` : ""}
+	${a.on && !a.ready ? `<p class="hwarn">${icon("alert")}<span>It's switched on, but it isn't connected to Cloudflare's AI yet. Press Connect it for me and we add it to your app on Cloudflare, keeping everything else as it is. It takes about a minute.</span></p><div class="row"><button type="button" class="btn ghost" id="aiConnect">${icon("cloud")}Connect it for me</button></div>` : ""}
 	${a.used.month ? `<p class="hint">Used ${num(a.used.month)} ${a.used.month === 1 ? "time" : "times"} this month, ${num(a.used.today)} today.</p>` : ""}
 	<p class="hint">It's written by AI, so read what it suggests before you use it. It can get things wrong.</p>
 	<div class="row" style="margin-top:14px"><button class="btn" id="aiSave">${icon("save")}Save changes</button></div></div>`;
+	$("#aiConnect") && ($("#aiConnect").onclick = (e) => run(e.currentTarget, async () => { await api("/api/update/connect-ai", { body: {} }); toast("Connected. Give it a minute, then come back to this page."); }));
 	$("#aiSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/ai", { body: { on: $("#aiOn").checked } }); toast($("#aiOn").checked ? "The writing helper is on. Find it above the email in the campaign editor." : "The writing helper is off."); aiSettings(head); });
 }
 
