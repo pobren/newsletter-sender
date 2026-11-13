@@ -52,7 +52,7 @@ export function notAllowed(a: Pick<AccountRow, "role">, can: Can, path: string, 
 	// A reviewer looks, sends themselves tests and approves; nothing else changes.
 	if (can.review && write && !/^\/api\/(campaigns\/[0-9a-f]{16}\/(test|signoff\/decide)|audience|brands\/switch|signout|signout-everywhere|account\/password|passkey(\/.*)?)$/.test(path))
 		return "Your login is for reviewing and approving campaigns. Please ask the agency to make changes.";
-	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|links)$/.test(path) && write)))
+	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|sending\/warmup|blogfeed|blogfeed\/draft|goodbye|ai|cold|cold\/tag|cold\/remove|retention|links)$/.test(path) && write)))
 		return "Changing settings is switched off for your login. Please ask the owner.";
 	if (!can.send && ((/^\/api\/campaigns\/[0-9a-f]{16}\/(send|schedule|resume)$/.test(path) && write) || (/^\/api\/automations(\/|$)/.test(path) && write)))
 		return "Sending is switched off for your login. You can still write and test campaigns: the owner sends them.";

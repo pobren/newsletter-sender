@@ -5,7 +5,7 @@
   <p><a href="https://newslettersender.com/">Website</a> · <a href="#install">Install</a> · <a href="https://github.com/pobren/newsletter-sender/issues">Report a bug</a></p>
 </div>
 
-Newsletter Sender runs in your own Cloudflare account. Your subscribers, your emails and your stats stay there, and you send through your own Amazon SES account (or Postmark, Mailgun, Brevo or Resend), so you pay their sending price and nothing per subscriber.
+Newsletter Sender runs in your own Cloudflare account. Your subscribers, your emails and your stats stay there, and you send through your own Amazon SES account (or Postmark, Mailgun, Brevo, Resend, SendGrid, SparkPost or any SMTP server), so you pay their sending price and nothing per subscriber.
 
 **Free for your own newsletters, source available.** See [Licence](#licence) below.
 
@@ -32,7 +32,7 @@ Newsletter Sender runs in your own Cloudflare account. Your subscribers, your em
 
 - A Cloudflare account on the Workers Paid plan ($5 a month). The free plan limits each run to a few milliseconds of work and 50 outside requests, which isn't enough to send a batch of emails.
 - A domain to send from, such as `news@yourdomain.com`.
-- An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo or Resend.
+- An [Amazon SES](https://aws.amazon.com/ses/) account (recommended), or Postmark, Mailgun, Brevo, Resend, SendGrid, SparkPost or any SMTP server.
 
 ## Install
 
@@ -68,9 +68,13 @@ To remove the AWS user later, delete the `newsletter-sender` stack in CloudForma
 
 <img src="docs/sending.png" alt="The Sending tab: choosing a service, keys and the bounce webhook" width="100%">
 
-### Postmark, Mailgun, Brevo or Resend
+### Postmark, Mailgun, Brevo, Resend, SendGrid or SparkPost
 
-Paste your key on the **Sending** tab and your plan's emails a second. We send a test to you before saving. Then add the webhook address it shows in that service, for bounces and spam complaints.
+Paste your key on the **Sending** tab and your plan's emails a second. We send a test to you before saving. We add the webhook for bounces and spam complaints in that service for you. If the key isn't allowed to, the tab shows the address to add yourself.
+
+### Your own SMTP server
+
+Enter your email host's SMTP server, port (587 or 465; Cloudflare doesn't allow 25), user name and password. We open one connection for each email, so keep the speed low unless your host allows more. Bounces come back to your from address as emails, so check that inbox after each newsletter.
 
 ## Sign up confirmations
 
@@ -79,6 +83,12 @@ Confirmation and welcome emails go through Cloudflare's own email service, so th
 ## Robot check (optional)
 
 Sign in, set-up and sign up forms can use [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/). In Cloudflare, add a Turnstile widget for your Newsletter Sender address (Managed), then add two secrets to the Worker: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. It switches on once both are there.
+
+## Writing helper (optional)
+
+Off unless you switch it on under **Settings › Writing helper**. In the campaign editor it suggests subject lines, tidies up, shortens or warms up the text you pick, and turns rough notes into a first draft. It never changes your email unless you press its buttons.
+
+It uses [Cloudflare's own AI](https://developers.cloudflare.com/workers-ai/) on your Cloudflare account, so your emails don't go to any other company and there's no key to set up. Cloudflare's free daily allowance covers about 80 uses a day; past that Cloudflare bills your account about £1 per 1,000 uses. There's a limit of 300 uses a day for each newsletter.
 
 ## How it works
 

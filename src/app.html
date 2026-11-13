@@ -74,7 +74,7 @@ nav.side p{margin:20px 12px 6px;font-size:12px;font-weight:700;letter-spacing:.0
 nav.side a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:var(--text);text-decoration:none;font-weight:600;font-size:15px}
 nav.side a.on,nav.side a:hover{background:var(--pink);color:var(--cd)}
 .shell main{max-width:none;margin:0;min-width:0;min-height:70vh}.shell:has(>#side[hidden]) main{max-width:1200px;margin:0 auto}
-.toolbar-row{margin:18px 0 14px}input.search{width:260px;max-width:100%}
+.toolbar-row{margin:18px 0 14px}.aibox{margin-top:14px;padding:14px;border:1px dashed var(--line);border-radius:12px;background:var(--bg)}.aibox .chips{margin-top:6px}input.search{width:260px;max-width:100%}
 .card.flush{padding:0;overflow:hidden}.pad{padding:22px;margin:0}.small{font-size:13px}.scroll{overflow-x:auto}
 table.data th{background:var(--bg);padding:12px 14px;white-space:nowrap}table.data td{padding:12px 14px;vertical-align:middle}table.data tr:last-child td{border-bottom:0}table.data .c{text-align:center;width:1%}table.data tr:hover td{background:var(--soft)}table.data a{text-decoration:none}table.data a:hover{text-decoration:underline}
 .rate{display:inline-block;padding:1px 8px;border-radius:999px;font-size:13px;font-weight:700;margin-right:4px;background:#f1eef3;color:var(--text)}.rate.open{background:#dff5ea;color:var(--ok)}.rate.click{background:#e6efff;color:#1d4fa3}.rate.bad{background:#fde4ea;color:var(--bad)}
@@ -416,7 +416,7 @@ function route() {
 	(views[v] || campaigns)().then(() => { done(); ADDON.after?.(); }, (e) => { done(); main.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
 }
 
-const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };
+const KIND = { subscribed: "Subscribed", signed_up: "Signed up (not confirmed yet)", unsubscribed: "Unsubscribed", removed: "Taken off a list", blocklist: "Blocklist", bounced: "Bounced (won't be emailed again)", soft_bounce: "Bounced for now", complained: "Marked an email as spam", imported: "Imported", "profile.updated": "Changed their details", "campaign.started": "Started sending", "campaign.sent": "Finished sending", "campaign.paused": "Sending paused", "campaign.cancelled": "Sending stopped", "campaign.not_sent": "Scheduled email didn't go", "sending.connected": "Sending connected", update: "Newsletter Sender updated" };
 function statsHtml(s, total, tracking) {
 	const tr = tracking === true ? { opens: true, clicks: true } : tracking || {};
 	const done = s.sent + s.failed + s.skipped;
@@ -619,6 +619,7 @@ async function editor(id, kind) {
 			<p class="hint">These start as your <a href="#settings">Settings</a>. Change them here for just this campaign.</p>`}
 		</div>
 		<div class="card"><h2>Who it goes to</h2>
+			<div class="row" id="segRow" style="gap:8px;margin-bottom:6px"><select id="segPick" aria-label="Saved segments" class="grow"></select><button type="button" class="btn ghost small" id="segDel" hidden>${icon("trash")}Delete segment</button></div>
 			${c.audience.resend ? `<div class="info" id="rsn">${icon("refresh")}<p>Only people who got <a href="#email/${esc(c.audience.resend.campaign)}"><b>${esc(c.resendOf?.name || "the first one")}</b></a> and didn't open it, and are still on these lists. A new subject line often helps.<br><button type="button" class="btn ghost small" id="rsnOff" style="margin-top:8px">${icon("x")}Send to everyone on the lists instead</button></p></div>` : ""}
 			<p class="step"><b>1</b>Choose the lists</p>
 			<div class="choices">${ls.map((l) => `<label class="choice"><input type="checkbox" name="list" value="${l.id}" ${c.audience.lists.includes(l.id) ? "checked" : ""}><span><b>${esc(l.name)}</b><small>${num(l.active)} subscribed</small></span></label>`).join("")}</div>
@@ -629,12 +630,17 @@ async function editor(id, kind) {
 			<select id="actDays" aria-label="How far back">${[7, 14, 30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === 90 ? "selected" : ""}>in the last ${d === 365 ? "year" : `${d} days`}</option>`).join("")}</select></div>
 			${c.tracking?.opens || c.tracking?.clicks ? "" : `<p class="hint">Switch on opens or clicks in <a href="#settings/tracking">Settings</a> to pick people by what they read.</p>`}
 			<p id="count" class="count"></p>
+			<div class="row" style="gap:8px"><button type="button" class="btn ghost small" id="segSave">${icon("save")}Save as a segment</button></div>
+			<div id="segForm" hidden><label for="segName">Segment name <span class="hint">(such as Active clickers; it keeps the lists, tags and recent activity above)</span></label><div class="row" style="gap:8px"><input id="segName" class="grow" maxlength="60" placeholder="Such as Active clickers"><button type="button" class="btn small" id="segOk">${icon("check")}Save segment</button><button type="button" class="btn ghost small" id="segNo">${icon("x")}Cancel</button></div></div>
 			<label class="check"><input type="checkbox" id="public" ${c.public ? "checked" : ""}> Show it in the public archive of past campaigns</label>
 		</div>
 	</div>
 	<div class="card"><div class="row"><h2 class="grow">The email</h2>
 		<div class="seg" role="tablist"><button type="button" data-mode="visual" class="on">${icon("pencil")}Visual editor</button><button type="button" data-mode="html">${icon("code")}HTML</button><button type="button" data-mode="preview">${icon("eye")}Preview</button></div>
-		<label class="btn ghost small" style="margin:0">${icon("upload")}Upload a design<input type="file" id="design" accept=".html,.htm,text/html" hidden></label>${isT ? "" : `<button type="button" class="btn ghost small" id="asT">${icon("save")}Save as template</button>`}</div>
+		<label class="btn ghost small" style="margin:0">${icon("upload")}Upload a design<input type="file" id="design" accept=".html,.htm,text/html" hidden></label>${isT ? "" : `<button type="button" class="btn ghost small" id="asT">${icon("save")}Save as template</button><button type="button" class="btn ghost small" id="aiBtn" hidden>${icon("wand")}Writing helper</button>`}</div>
+		${isT ? "" : `<div class="aibox" id="aiBox" hidden><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost small" id="aiSubj">${icon("text")}Suggest subject lines</button><select id="aiHow" aria-label="How to rewrite it" style="width:auto"><option value="tidy">Tidy it up</option><option value="shorter">Make it shorter</option><option value="friendlier">Make it friendlier</option></select><button type="button" class="btn ghost small" id="aiRe">${icon("wand")}Rewrite the text I've picked</button></div>
+		<label for="aiNotes">Or write a first draft from your notes</label><textarea id="aiNotes" rows="3" placeholder="Such as: new sourdough loaf from Saturday, Christmas orders open 1 Dec, shop closed 25 to 27 Dec"></textarea>
+		<div class="row" style="margin-top:8px"><button type="button" class="btn ghost small" id="aiDraft">${icon("pencil")}Write a first draft</button><span class="hint grow">Written by AI on your Cloudflare account. Read it through before you send.</span></div><div id="aiOut"></div></div>`}
 		<div class="toolbar" id="tb"><select id="fmt" title="Text style" aria-label="Text style"><option value="p">Text</option><option value="h1">Big heading</option><option value="h2">Heading</option><option value="h3">Small heading</option></select>${TOOLS.map((t) => (t === "|" ? `<span class="sep"></span>` : `<button type="button" class="icon-btn" data-cmd="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${icon(t[1])}</button>`)).join("")}</div>
 		<iframe class="wys" id="wys" title="Write your email here" sandbox="allow-same-origin"></iframe>
 		<textarea class="code" id="code" hidden spellcheck="false" aria-label="The email's HTML"></textarea>
@@ -656,6 +662,41 @@ async function editor(id, kind) {
 		return docMode ? `<!doctype html>\n${d.documentElement.outerHTML}` : d.body.innerHTML;
 	};
 	const current = () => (mode === "html" ? code.value : mode === "visual" ? readVisual() : html);
+	// The writing helper, when it's switched on: subject lines, rewriting what's picked, and a first draft from notes.
+	if (!isT) api("/api/ai").then((a) => {
+		if (!a.on || signal.aborted) return;
+		$("#aiBtn").hidden = false;
+		$("#aiBtn").onclick = () => { $("#aiBox").hidden = !$("#aiBox").hidden; };
+		const ask = async (task, text) => (await api("/api/ai/write", { body: { task, text } })).result;
+		const picked = () => { const d = frameDoc(); const s = d && d.getSelection(); return mode === "visual" && s && s.rangeCount && !s.isCollapsed ? s.toString() : ""; };
+		const para = (ps) => ps.map((p) => `<p>${esc(p)}</p>`).join("");
+		$("#aiSubj").onclick = (e) => run(e.currentTarget, async () => {
+			const r = await ask("subjects", current());
+			$("#aiOut").innerHTML = `<p class="hint">Press one to use it as the subject line.</p><div class="chips">${r.map((s) => `<button type="button" class="chip" data-subj="${esc(s)}">${icon("text")}${esc(s)}</button>`).join("")}</div>`;
+		});
+		$("#aiOut").addEventListener("click", (e) => { const b = e.target.closest("[data-subj]"); if (!b) return; $("#subject").value = b.dataset.subj; changed(); toast("Subject line changed"); });
+		$("#aiRe").onclick = (e) => run(e.currentTarget, async () => {
+			if (mode !== "visual") throw new Error("Switch to the visual editor, then pick some text.");
+			const text = picked();
+			if (!text.trim()) throw new Error("Pick some of the email's text first, by dragging over it.");
+			const d = frameDoc(), range = d.getSelection().getRangeAt(0).cloneRange();
+			const r = await ask($("#aiHow").value, text);
+			wys.contentWindow.focus();
+			const s = d.getSelection(); s.removeAllRanges(); s.addRange(range);
+			if (r.length === 1 && !/\n/.test(text.trim())) d.execCommand("insertText", false, r[0]);
+			else d.execCommand("insertHTML", false, para(r));
+			$("#aiOut").innerHTML = `<p class="okmsg">${icon("check")} Done. Press undo in the toolbar if you liked it better before.</p>`;
+		});
+		$("#aiDraft").onclick = (e) => run(e.currentTarget, async () => {
+			if (mode !== "visual") throw new Error("Switch to the visual editor first.");
+			const r = await ask("draft", $("#aiNotes").value);
+			const d = frameDoc();
+			const empty = !d.body.textContent.trim();
+			if (empty) d.body.innerHTML = para(r); else d.body.insertAdjacentHTML("beforeend", para(r));
+			changed();
+			$("#aiOut").innerHTML = `<p class="okmsg">${icon("check")} ${empty ? "Your first draft is in the email." : "The draft is at the end of the email."} Read it through and make it yours.</p>`;
+		});
+	}).catch(() => {});
 	const loadVisual = (h) => {
 		html = h;
 		docMode = isDoc(h);
@@ -766,6 +807,34 @@ async function editor(id, kind) {
 		$("#actDays").disabled = !$("#act").value;
 		$("#act").onchange = () => { $("#actDays").disabled = !$("#act").value; recount(); changed(); };
 		$("#actDays").onchange = () => { recount(); changed(); };
+		// Saved segments: pick one to fill in the lists, tags and recent activity in one go.
+		let segs = [];
+		const segFill = () => { $("#segPick").innerHTML = `<option value="">${segs.length ? "Use a saved segment" : "No saved segments yet"}</option>${segs.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}`; $("#segPick").disabled = !segs.length; $("#segDel").hidden = true; };
+		api("/api/segments").then((r) => { segs = r.segments; segFill(); }).catch(() => { segFill(); });
+		$("#segPick").onchange = () => {
+			const s = segs.find((x) => x.id === $("#segPick").value);
+			$("#segDel").hidden = !s;
+			if (!s) return;
+			const a = s.audience;
+			if (a.lists.length) $$("[name=list]").forEach((x) => (x.checked = a.lists.includes(x.value)));
+			tags.clear(); a.tags.filter((t) => allTags.includes(t)).forEach((t) => tags.add(t));
+			$$("#tagChips [data-tag]").forEach((b) => { const on = tags.has(b.dataset.tag); b.classList.toggle("on", on); b.innerHTML = `${icon(on ? "check" : "tag")}${esc(b.dataset.tag)}`; });
+			const ok = a.activity && $(`#act option[value=${a.activity.kind}]`);
+			$("#act").value = ok ? a.activity.kind : ""; if (ok) $("#actDays").value = String(a.activity.days);
+			$("#actDays").disabled = !$("#act").value;
+			if (a.activity && !ok) toast("This segment picks people by what they read. Switch on opens or clicks in Settings to use that part.");
+			recount(); changed();
+		};
+		$("#segDel").onclick = (e) => run(e.currentTarget, async () => { const s = segs.find((x) => x.id === $("#segPick").value); if (!s || !confirm(`Delete the segment ${s.name}? Campaigns that used it keep their audience.`)) return; segs = (await api(`/api/segments?id=${encodeURIComponent(s.id)}`, { method: "DELETE" })).segments; segFill(); toast("Segment deleted"); });
+		$("#segSave").onclick = () => { $("#segForm").hidden = false; $("#segSave").hidden = true; const s = segs.find((x) => x.id === $("#segPick").value); $("#segName").value = s ? s.name : ""; $("#segName").focus(); };
+		$("#segNo").onclick = () => { $("#segForm").hidden = true; $("#segSave").hidden = false; };
+		$("#segOk").onclick = (e) => run(e.currentTarget, async () => {
+			const { resend: _r, ...audience } = gather().audience;
+			const r = await api("/api/segments", { body: { name: $("#segName").value, audience } });
+			segs = r.segments; segFill(); $("#segPick").value = r.segment.id; $("#segDel").hidden = false;
+			$("#segForm").hidden = true; $("#segSave").hidden = false;
+			toast(`Saved. Pick ${r.segment.name} next time you set up a campaign.`);
+		});
 	}
 	$("#tagChips") && $("#tagChips").addEventListener("click", (e) => { const b = e.target.closest("[data-tag]"); if (!b) return; const tg = b.dataset.tag; tags.has(tg) ? tags.delete(tg) : tags.add(tg); b.classList.toggle("on", tags.has(tg)); b.innerHTML = `${icon(tags.has(tg) ? "check" : "tag")}${esc(tg)}`; recount(); changed(); });
 	$("#asT") && ($("#asT").onclick = (e) => run(e.currentTarget, async () => { await save(); await api("/api/templates", { body: { from: id, name: $("#cname").value || $("#subject").value || "Untitled template" } }); toast("Saved as a template. Find it under All templates."); }));
@@ -830,7 +899,7 @@ function checkModal(items) {
 	<div class="row"><button class="btn" data-close>${icon("check")}Done</button></div>`);
 }
 // -- Automations: "when someone does this, then do that", in plain sentences ------------------------------------
-const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
+const TRIG = { joined: "joins a list", opened: "opens an email", clicked: "clicks a link in an email", unsubscribed: "unsubscribes", updated: "changes their details (name, lists or fields)", yearly: "has a date each year, like a birthday", date: "is on a list on a set day" };
 const hourText = (h) => (h === 0 ? "midnight" : h === 12 ? "midday" : `${h % 12}${h < 12 ? "am" : "pm"}`);
 const ACT = { email: "Send them an email", add_list: "Add them to a list", remove_list: "Take them off a list", tag: "Tag them", notify: "Email me", webhook: "Tell another app (webhook)" };
 const ACT_ICON = { email: "send", add_list: "plus", remove_list: "minus", tag: "tag", notify: "mail", webhook: "link" };
@@ -843,7 +912,7 @@ function autoSentence(a, ls, cs) {
 	const steps = `${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
 	if (t.kind === "yearly") return `Each year on their ${t.field || "date"}, at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
 	if (t.kind === "date") return `On ${t.date ? new Date(t.date + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "a day to choose"} at ${hourText(t.hour ?? 9)}, for ${ln(t.list)}: ${steps}`;
-	const when = t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
+	const when = t.kind === "updated" ? `on ${t.list ? ln(t.list) : "any list"} changes their details` : t.kind === "joined" ? `joins ${ln(t.list)}` : t.kind === "unsubscribed" ? `unsubscribes from ${ln(t.list)}` : t.kind === "opened" ? `opens ${cn(t.campaign)}` : `clicks ${t.link ? `link ${t.link}` : "a link"} in ${cn(t.campaign)}`;
 	return `When someone ${when}: ${steps}`;
 }
 async function automations() {
@@ -873,6 +942,8 @@ async function automation(id) {
 		if (trig.kind === "date") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select></div>
 			<div class="arow"><span class="aword">On</span><input type="date" data-t="date" value="${esc(trig.date || "")}" aria-label="Day"><span class="aword">for</span><select data-t="list">${listSel(trig.list || "", true)}</select>${hourSel}</div>
 			<p class="hint">Everyone on the list that day starts it. For one email to a whole list, a scheduled campaign is quicker.</p>`;
+		if (trig.kind === "updated") return `<div class="arow"><span class="aword">When someone</span><select data-t="kind">${Object.entries(TRIG).map(([k, v]) => opt(k, v, trig.kind)).join("")}</select><span class="aword">on</span><select data-t="list">${listSel(trig.list || "", true)}</select></div>
+			<p class="hint">On their Manage your subscription page, or through the API. It starts again each time they change something, once the last run has finished. Pair it with Tag them, Add them to a list or Tell another app (webhook) to keep your CRM up to date.</p>`;
 		const which = trig.kind === "joined" || trig.kind === "unsubscribed"
 			? `<select data-t="list">${listSel(trig.list || "", true)}</select>`
 			: `<select data-t="campaign">${opt("", "Any email", trig.campaign || "")}${cs.map((c) => opt(c.id, c.name || c.subject, trig.campaign || "")).join("")}</select>${trig.kind === "clicked" ? `<select data-t="link" ${trig.campaign ? "" : "disabled"}><option value="0">Any link</option></select>` : ""}`;
@@ -997,9 +1068,12 @@ const ppl = (n) => `${num(n)} ${n === 1 ? "person" : "people"}`;
 const pct = (n, of) => (of ? `${(Math.round((n / of) * 1000) / 10).toLocaleString("en-GB")}%` : "0%");
 const flag = (cc) => String.fromCodePoint(...[...cc].map((ch) => 127397 + ch.charCodeAt(0)));
 const regionName = (() => { try { const d = new Intl.DisplayNames(["en-GB"], { type: "region" }); return (cc) => d.of(cc) || cc; } catch { return (cc) => cc; } })();
+/** Campaigns whose per-person detail was cleared (Settings, Tracking, How long to keep): no people buttons for them. */
+const CLEARED = new Set();
 /** Download or add-to-a-list buttons for the people behind a number. */
-const peopleBtns = (id, who, n = 0, label = "") => `<span class="pbtns"><a class="icon-btn" href="/api/campaigns/${id}/people?who=${who}${n ? `&n=${n}` : ""}" title="Download ${label} as a CSV" download>${icon("download")}</a><button class="icon-btn" type="button" data-addto="${who}" data-n="${n}" data-label="${esc(label)}" title="Add ${label} to a list">${icon("plus")}</button></span>`;
+const peopleBtns = (id, who, n = 0, label = "") => CLEARED.has(id) ? "" : `<span class="pbtns"><a class="icon-btn" href="/api/campaigns/${id}/people?who=${who}${n ? `&n=${n}` : ""}" title="Download ${label} as a CSV" download>${icon("download")}</a><button class="icon-btn" type="button" data-addto="${who}" data-n="${n}" data-label="${esc(label)}" title="Add ${label} to a list">${icon("plus")}</button></span>`;
 function reportHtml(c) {
+	if (c.cleared) CLEARED.add(c.id);
 	const s = c.stats, sent = s.sent, tr = c.tracking || {};
 	const unopened = Math.max(0, sent - s.opens - s.bounced);
 	const card = (cls, big, label, line, extra = "") => `<div class="rcard ${cls}"><span class="rbig">${big}</span><b>${label}</b><span class="muted">${line}</span>${extra}</div>`;
@@ -1033,7 +1107,7 @@ function addToList(c, ls, b) {
 async function report(c, ls) {
 	main.innerHTML = `<div class="row"><a class="btn ghost small" href="#campaigns">${icon("back")}All campaigns</a><h1 class="grow">${esc(c.name || c.subject)}</h1>${pill(c.status)}</div>${c.name ? `<p class="muted" style="margin:6px 0 0">Subject: ${esc(c.subject)}</p>` : ""}
 	<p class="printonly">Campaign report from ${esc(document.getElementById("appName")?.textContent || "Newsletter Sender")}, made ${new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}</p>
+	<p class="muted">${c.started_at ? `Started ${when(c.started_at)}` : ""}${c.finished_at ? ` · finished ${when(c.finished_at)}` : ""} · to ${esc(ls.filter((l) => c.audience.lists.includes(l.id)).map((l) => l.name).join(", "))}${c.audience.tags.length ? ` with tags ${esc(c.audience.tags.join(", "))}` : ""}${c.audience.activity ? `, only people who ${esc({ opened: "opened an email", not_opened: "didn't open any email", clicked: "clicked a link", not_clicked: "didn't click any link", joined: "joined" }[c.audience.activity.kind])} in the last ${c.audience.activity.days} days` : ""}${c.resendOf ? `, only people who didn't open <a href="#email/${esc(c.resendOf.id)}">${esc(c.resendOf.name)}</a>` : ""}${c.cleared ? `. Who opened and clicked was cleared, as set in <a href="#settings/tracking">Settings, Tracking</a>; the totals stay` : ""}</p>
 	${c.pausedWhy ? `<div class="card"><p class="err">${esc(c.pausedWhy)}</p></div>` : ""}
 	<div id="abr">${abHtml(c)}</div>${c.stats.queued ? `<div id="live">${liveHtml(c, 0)}</div>` : ""}<div id="rep">${reportHtml(c) || statsHtml(c.stats, c.total, c.tracking)}</div>${pollsHtml(c)}
 	<div class="row">${c.status === "sending" ? `<button class="btn" id="pause">${icon("pause")}Pause</button>` : ""}${c.status === "sending" || c.status === "paused" ? `<button class="btn danger" id="stop">${icon("x")}Stop sending</button>` : ""}${c.status === "paused" ? `<button class="btn" id="resume">${icon("play")}Carry on sending</button>` : ""}${c.status === "sent" && c.tracking.opens ? `<button class="btn ghost" id="again">${icon("refresh")}Send again to people who didn't open</button>` : ""}<button class="btn ghost" id="dup">${icon("copy")}Duplicate</button>${c.status === "sent" ? `<button class="btn ghost" id="pdf">${icon("download")}Download PDF report</button>` : ""}${c.webUrl ? `<a class="btn ghost" href="${esc(c.webUrl)}" target="_blank">${icon("eye")}View on the web</a>` : ""}</div>
@@ -1316,8 +1390,11 @@ const PROVIDERS = [
 	["mailgun", "Mailgun", "Paste your Sending API key", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjYxIj48cGF0aCBmaWxsPSIjZjA2YjY2IiBkPSJNMTI2LjE0My4wNDhDMTk3LjY4NS4wNDggMjU2IDU4LjM2MyAyNTYgMTMwLjAyNWE0Mi4wODMgNDIuMDgzIDAgMCAxLTYzLjk2NyAzNS43MWwtLjYtLjM2bC0uMjQxLjYwMWMtMTguMTA4IDMyLjgyNS01Ny44MDMgNDcuMDU5LTkyLjY0MyAzMy4yMmMtMzQuODQtMTMuODM3LTUzLjk1MS01MS40MjgtNDQuNjAyLTg3LjczMWM5LjM0OS0zNi4zMDQgNDQuMjQtNTkuOTg4IDgxLjQzLTU1LjI3NnM2NS4wNzMgMzYuMzQ4IDY1LjA3MyA3My44MzZhMTMuNzA3IDEzLjcwNyAwIDAgMCAyNy4yOTQgMGMwLTU2LjEzMi00NS40NjktMTAxLjY1NS0xMDEuNjAxLTEwMS43MjFjLTQ3LjA4My0uMDg1LTg4LjA3IDMyLjE1Mi05OS4wODMgNzcuOTNjLTExLjAxMiA0NS43NzYgMTAuODMgOTMuMTI4IDUyLjggMTE0LjQ2NnM5My4wOTggMTEuMDg1IDEyMy41OTYtMjQuNzg0bDIxLjY0MyAxOC4yNzZhMTI5LjUgMTI5LjUgMCAwIDEtOTguOTU2IDQ1LjkzQzU1Ljg2NCAyNTcuOTg2IDAgMjAwLjM5NyAwIDEzMC4wODZTNTUuODY0IDIuMTg1IDEyNi4xNDMuMDQ4bTAgODMuOTI2YTQ2LjE3MSA0Ni4xNzEgMCAxIDAgLjEyIDkyLjIyM2MyNC41NTEtMS4yODYgNDMuNzg5LTIxLjU4NCA0My43NTctNDYuMTY5cy0xOS4zMjMtNDQuODMyLTQzLjg3Ny00Ni4wNTRtMCAyNy40MTRjMTAuMjkzIDAgMTguNjM3IDguMzQ0IDE4LjYzNyAxOC42MzdzLTguMzQ0IDE4LjYzNy0xOC42MzcgMTguNjM3cy0xOC42MzctOC4zNDQtMTguNjM3LTE4LjYzN3M4LjM0NC0xOC42MzcgMTguNjM3LTE4LjYzNyIvPjwvc3ZnPgo="],
 	["brevo", "Brevo", "Paste your API key", "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjQgMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZmlsbD0iIzBCOTk2RSIgZD0iTTEyIDBBMTIgMTIgMCAwIDAgMCAxMmExMiAxMiAwIDAgMCAxMiAxMiAxMiAxMiAwIDAgMCAxMi0xMkExMiAxMiAwIDAgMCAxMiAwek03LjIgNC44aDUuNzQ3YzIuMzQgMCAzLjg5NSAxLjQwNiAzLjg5NSAzLjUxNiAwIDEuMDIyLS4zNDggMS44NjItMS4wOSAyLjU4OEMxNy4xODkgMTEuODEyIDE4IDEzLjIyIDE4IDE0Ljc4NWMwIDIuODYtMi42NCA1LjAxNi02LjE2NCA1LjAxNkg3LjE5OXYtMTV6bTIuMDg1IDEuOTUydjUuNTM3aC4wN2MuMjMzLS40MzIuODU4LS43OTYgMi4yNDktMS4yMjYgMi4wMzktLjY1OSAzLjAzNy0xLjUyIDMuMDM3LTIuNjU1IDAtLjk5OC0uNzY2LTEuNjU2LTEuOTI0LTEuNjU2SDkuMjg1em00Ljg3IDUuMjY2Yy0uNzY2LjM4NS0xLjY3Ljc0OC0yLjc2IDEuMTEtMS4yMjkuMzg3LTIuMTEgMS4zODYtMi4xMSAyLjQwN3YyLjMxNWgyLjM2NWMyLjM4NyAwIDQuMTQ5LTEuMzQgNC4xNDktMy4xNTUgMC0xLjA2Ny0uNjI1LTIuMDg3LTEuNjQ1LTIuNjc3eiIvPjwvc3ZnPgo="],
 	["resend", "Resend", "Paste your API key", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2Ij48cGF0aCBkPSJNMTU2LjU3NSAwYzQ5LjU4MiAwIDc5LjA3IDI5LjQ4OCA3OS4wNyA2OC42MzJzLTI5LjQ4OCA2OC42MzItNzkuMDcgNjguNjMyaC0yNS4wNTJMMjU2IDI1NmgtODcuOTQybC05NC43MjktOTAuMDNjLTYuNzg0LTYuMjYzLTkuOTE2LTEzLjU3LTkuOTE2LTE5LjgzM2MwLTguODczIDYuMjYzLTE2LjcwMSAxOC4yNjctMjAuMDk0bDQ4LjgtMTMuMDQ4YzE4LjUyNy00Ljk1OCAzMS4zMTQtMTkuMzEgMzEuMzE0LTM4LjFjMC0yMi45NjQtMTguNzktMzYuMjczLTQyLjAxNC0zNi4yNzNIMFYweiIvPjwvc3ZnPgo="],
+	["sendgrid", "SendGrid", "Paste your API key", "", "#1a82e2"],
+	["sparkpost", "SparkPost", "Paste your API key", "", "#fa6423"],
+	["smtp", "Your own SMTP server", "Any email host, with a user name and password", "", "#4b5563", "@"],
 ];
-const logo = (id) => { const p = PROVIDERS.find((x) => x[0] === id); return p && p[3] ? `<img src="${p[3]}" alt="">` : `<span class="pm" aria-hidden="true">P</span>`; };
+const logo = (id) => { const p = PROVIDERS.find((x) => x[0] === id); return p && p[3] ? `<img src="${p[3]}" alt="">` : `<span class="pm" aria-hidden="true"${p?.[4] ? ` style="background:${p[4]};color:#fff"` : ""}>${p ? p[5] || p[1][0] : "P"}</span>`; };
 // Where to get the keys, for each service.
 const HELP = {
 	ses: { guide: "https://newslettersender.com/help/amazon-ses/", steps: ["Choose your region, then press <b>Create the user and keys in AWS</b>. In AWS, tick the box at the bottom and press <b>Create stack</b>.", "When it says CREATE_COMPLETE (about a minute), open the <b>Outputs</b> tab and copy the two keys into the boxes below.", "Press Save, then <b>Set up Amazon SES for me</b>."], links: [["Open Amazon SES", "https://console.aws.amazon.com/ses/home"]] },
@@ -1326,6 +1403,9 @@ const HELP = {
 	mailgun: { steps: ["In Mailgun, add and verify your sending domain.", "Create an API key under API security.", "Paste it below with your sending domain and region."], links: [["Open Mailgun API keys", "https://app.mailgun.com/settings/api_security"]] },
 	brevo: { steps: ["In Brevo, open SMTP and API, then API keys.", "Generate a new API key and copy it.", "Make sure your sending domain is authenticated under Senders and domains."], links: [["Open Brevo API keys", "https://app.brevo.com/settings/keys/api"]] },
 	resend: { steps: ["In Resend, add and verify your domain under Domains.", "Open API keys and create one with Full access, so we can add the bounce webhook for you.", "Paste it below."], links: [["Open Resend API keys", "https://resend.com/api-keys"]] },
+	sendgrid: { steps: ["In SendGrid, verify your sending domain under Settings, Sender Authentication.", "Open Settings, API Keys and press Create API Key. Choose Full Access, so we can add the bounce webhook for you.", "Paste it below. If your SendGrid account is in the EU region, choose EU."], links: [["Open SendGrid API keys", "https://app.sendgrid.com/settings/api_keys"]] },
+	sparkpost: { steps: ["In SparkPost, add and verify your sending domain under Configuration, Domains.", "Open Configuration, API Keys and press New API Key. Tick Transmissions: Read/Write and Event Webhooks: Read/Write, so we can add the bounce webhook for you.", "Paste it below. If you signed up at app.eu.sparkpost.com, choose EU."], links: [["Open SparkPost API keys", "https://app.sparkpost.com/account/api-keys"]] },
+	smtp: { steps: ["Find your email host's SMTP settings: the server name, port, user name and password. Most hosts list them in their help pages, often next to the settings for Outlook or Apple Mail.", "Use port 587 or 465. Cloudflare doesn't allow port 25.", "Check your host is happy for you to send newsletters, and how many emails an hour it allows. Many shared hosts allow only a few hundred."], links: [] },
 };
 // The CloudFormation template (aws/newsletter-sender-ses.yaml in the repo). AWS only takes templates from S3.
 // Empty until the template is on S3: then the one button replaces the manual steps.
@@ -1353,16 +1433,18 @@ async function sending(head = "") {
 	let manual = false;
 	const recs = (r) => r.map((x) => `<div class="rec"><b>${x.type}${x.priority ? ` ${x.priority}` : ""}</b><code><span class="grow">${esc(x.name)}</span>${copyBtn(x.name)}</code><code><span class="grow">${esc(x.value)}</span>${copyBtn(x.value)}</code><span class="hint" style="grid-column:1/-1">${esc(x.why)}${x.optional ? " Optional." : ""}</span></div>`).join("");
 	main.innerHTML = `${head}<p class="muted">Newsletters are sent from <b>${esc(s.fromEmail)}</b> (update this under Your company). API credentials are encrypted securely within your own Cloudflare account and are never displayed again.</p>
-	${s.sending ? `<div class="card"><div class="row"><h2 class="grow" style="display:flex;gap:10px;align-items:center">${logo(s.sending.provider)} Sending via ${esc(s.sending.name)}</h2><button class="btn danger small" id="remove">${icon("trash")}Remove</button></div><p class="muted">Key ending in ${esc(s.sending.keyEnd)}${s.sending.region ? ` · Region: ${esc((REGIONS.find((r) => r[0] === s.sending.region) || [])[1] || "")}${(REGIONS.find((r) => r[0] === s.sending.region) || [])[1] ? ` (${esc(s.sending.region)})` : esc(s.sending.region)}` : ""} · Dispatches up to ${num(s.rate)} emails per second (a send to 10,000 subscribers completes in roughly ${Math.max(1, Math.round(10000 / s.rate / 60))} ${Math.max(1, Math.round(10000 / s.rate / 60)) === 1 ? "minute" : "minutes"}).</p>
+	${s.sending ? `<div class="card"><div class="row"><h2 class="grow" style="display:flex;gap:10px;align-items:center">${logo(s.sending.provider)} Sending via ${esc(s.sending.name)}</h2><button class="btn danger small" id="remove">${icon("trash")}Remove</button></div><p class="muted">${s.sending.smtp ? `${esc(s.sending.smtp.host)}, port ${esc(s.sending.smtp.port)}${s.sending.smtp.user ? `, signed in as ${esc(s.sending.smtp.user)}` : ""}` : `Key ending in ${esc(s.sending.keyEnd)}`}${s.sending.region ? ` · Region: ${esc((REGIONS.find((r) => r[0] === s.sending.region) || [])[1] || "")}${(REGIONS.find((r) => r[0] === s.sending.region) || [])[1] ? ` (${esc(s.sending.region)})` : esc(s.sending.region)}` : ""} · Dispatches up to ${num(s.rate)} emails per second (a send to 10,000 subscribers completes in roughly ${Math.max(1, Math.round(10000 / s.rate / 60))} ${Math.max(1, Math.round(10000 / s.rate / 60)) === 1 ? "minute" : "minutes"}).</p>
 	${s.sending.provider === "ses" ? `${s.sending.cloudflareDns ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")} <span><b>Cloudflare DNS linked:</b> Required DNS records are managed and configured automatically.</span> <button class="btn ghost small" id="cfOff">${icon("x")}Stop</button></p>`
 	: `<details class="embed" style="margin:0 0 16px"><summary>${icon("cloud")}Is your domain on Cloudflare? We can add the DNS records for you</summary>
 		<ol class="hint"><li>Press <b>Make a Cloudflare token</b>. Under Account Resources choose your account and under Zone Resources choose your domain, then Continue to summary, Create Token.</li><li>Copy the token and paste it here.</li></ol>
 		<div class="helplinks"><a class="btn ghost small" href="${CF_TOKEN_URL}" target="_blank" rel="noopener">${icon("ext")}Make a Cloudflare token</a></div>
 		<div class="row"><input id="cft" class="grow" type="password" autocomplete="off" data-lpignore="true" placeholder="Paste the token" style="width:auto"><button class="btn small" id="cfSave">${icon("save")}Save</button></div><p class="err" id="cfe"></p></details>`}
 	<div class="row"><a class="btn" href="#ses/3">${icon("wand")}Open the setup wizard</a><button class="btn ghost" id="sesSetup">${icon("cog")}Configure Amazon SES automatically</button><button class="btn ghost" id="sesCheck">${icon("refresh")}Check verification status</button></div><div id="sesOut">${s.ses ? (s.sending.cloudflareDns ? `<details class="embed"><summary>${icon("list")}View DNS records for Amazon SES</summary>${recs(s.ses.records)}</details>` : `<h3 style="margin-top:18px">Add these to your domain's DNS</h3><p class="hint">In Cloudflare: your domain, DNS, Records, Add record. Turn the orange cloud off (DNS only) for the CNAMEs. <a href="https://newslettersender.com/help/amazon-ses/#dns" target="_blank" rel="noopener">Help with DNS</a></p>${recs(s.ses.records)}`) : ""}</div>`
+	: s.sending.provider === "smtp" ? `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>An SMTP server sends bounces back to <b>${esc(s.fromEmail)}</b> as emails, and we can't see them there. Please check that inbox after each newsletter and unsubscribe anyone whose email bounces for good. Your subscribers can always unsubscribe with the link in each email.</p>`
 	: s.sending.bounces ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")} <span><b>Bounces and spam complaints:</b> we added our webhook in ${esc(s.sending.name)} for you, so anyone who bounces or complains is never emailed again.</span></p><details class="embed"><summary>${icon("list")}The webhook address</summary><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code></details>`
 	: `<h3 style="margin-top:18px">Bounces and spam complaints</h3><p>We couldn't add our webhook in ${esc(s.sending.name)} for you. Add this address there as a webhook, for bounces and spam complaints, so we stop emailing them:</p><code class="copy"><span class="grow">${esc(s.hooks[s.sending.provider])}</span>${copyBtn(s.hooks[s.sending.provider])}</code><div class="row" style="margin-top:10px"><button class="btn ghost small" id="hookAgain">${icon("refresh")}Add it for me</button></div><p class="err" id="hookErr"></p>`}</div>` : ""}
 	<div class="card"><h2>${s.sending ? "Change sending provider" : "Choose a sending provider"}</h2><div class="tiles">${PROVIDERS.map(([id, n, t]) => `<button class="tile ${id === pick ? "on" : ""}" data-p="${id}">${logo(id)}<span><b>${n}</b><span>${t}</span></span></button>`).join("")}</div><div id="pf"></div></div>
+	${s.sending ? `<div class="card" id="wuCard"></div>` : ""}
 	<div class="card"><h2>Sign up confirmations</h2>${s.cloudflareEmail ? `<p>${icon("check")} Cloudflare's email service sends sign up confirmations and welcome emails. It needs <b>${esc(s.fromEmail.split("@")[1])}</b> set up under Email Sending in your Cloudflare dashboard. Newsletters always go through the service above.</p>` : `<p>Sign up confirmations go through the service above.</p>`}
 	<div class="row"><input id="ct" type="email" placeholder="Send a test confirmation to…" class="grow" style="width:auto"><button class="btn ghost" id="ctest">${icon("test")}Send test</button></div></div>`;
 	const form = () => {
@@ -1377,9 +1459,11 @@ async function sending(head = "") {
 		}
 		$("#pf").innerHTML = helpHtml(ses ? "ses_manual" : pick) + (ses ? `<label for="region">Region <span class="hint">(eu-west-1 is Ireland, eu-west-2 is London)</span></label><select id="region">${REGIONS.map(([r, n]) => `<option value="${r}">${n} (${r})</option>`).join("")}</select>
 		<label>Access key ID</label><input id="kid" name="aws-access-key-id" placeholder="AKIA..." autocomplete="off" data-lpignore="true"><label>Secret access key</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">`
-		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails per second <span class="hint">(your plan's limit${pick === "resend" ? "; Resend allows 2 unless you've asked for more" : ""})</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
+		: pick === "smtp" ? `<label>SMTP server</label><input id="sh" placeholder="smtp.yourhost.com" autocomplete="off"><div class="row"><div class="grow"><label>Port</label><input id="sp" type="number" min="1" max="65535" value="587"></div><div class="grow"><label>Security</label><select id="ss"><option value="starttls">STARTTLS (usually port 587)</option><option value="tls">TLS (usually port 465)</option></select></div></div><label>User name <span class="hint">(often your full email address)</span></label><input id="su" autocomplete="off" data-lpignore="true"><label>Password</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true"><label>Emails per second <span class="hint">(we open one connection per email; keep this low unless your host allows more)</span></label><input id="rate" type="number" min="1" max="50" placeholder="3"><p class="hint">We send a test to your own address before saving, to check it works.</p>`
+		: `<label>${pick === "postmark" ? "Server API token" : "API key"}</label><input id="key" type="password" autocomplete="new-password" data-lpignore="true">${pick === "mailgun" ? `<label>Mailgun sending domain</label><input id="mgd" placeholder="mg.yourdomain.com"><label>Region</label><select id="mgr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}${pick === "sendgrid" ? `<label>Region <span class="hint">(EU only for an EU regional account)</span></label><select id="sgr"><option value="us">Global</option><option value="eu">EU</option></select>` : ""}${pick === "sparkpost" ? `<label>Region <span class="hint">(EU if you signed up at app.eu.sparkpost.com)</span></label><select id="spr"><option value="us">US</option><option value="eu">EU</option></select>` : ""}<label>Emails per second <span class="hint">(your plan's limit${pick === "resend" ? "; Resend allows 2 unless you've asked for more" : ""})</span></label><input id="rate" type="number" min="1" max="1000" placeholder="${{ postmark: 20, mailgun: 20, brevo: 10, resend: 2, sendgrid: 20, sparkpost: 20 }[pick]}"><p class="hint">We send a test to your own address before saving, to check the key works.</p>`) + `<p class="err" id="pe"></p><button class="btn" id="psave" style="margin-top:14px">${icon("save")}Save</button>`;
 		if (ses && s.sending?.region) $("#region").value = s.sending.region;
-		$("#psave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/sending", { body: { provider: pick, key: $("#key").value, accessKeyId: $("#kid")?.value, region: $("#region")?.value, mailgunDomain: $("#mgd")?.value, mailgunRegion: $("#mgr")?.value, rate: $("#rate")?.value } }); toast(pick === "ses" ? "Saved" : r.hook ? "Saved. Please add the bounce webhook yourself (below)" : "Saved, and the bounce webhook is added"); route(); } catch (err) { $("#pe").textContent = err.message; } });
+		$("#psave").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/sending", { body: { provider: pick, key: $("#key").value, accessKeyId: $("#kid")?.value, region: $("#region")?.value, mailgunDomain: $("#mgd")?.value, mailgunRegion: $("#mgr")?.value, sendgridRegion: $("#sgr")?.value, sparkpostRegion: $("#spr")?.value, smtpHost: $("#sh")?.value, smtpPort: $("#sp")?.value, smtpSecurity: $("#ss")?.value, smtpUser: $("#su")?.value, rate: $("#rate")?.value } }); toast(pick === "ses" || pick === "smtp" ? "Saved" : r.hook ? "Saved. Please add the bounce webhook yourself (below)" : "Saved, and the bounce webhook is added"); route(); } catch (err) { $("#pe").textContent = err.message; } });
+		$("#sp") && ($("#sp").oninput = () => { $("#ss").value = $("#sp").value === "465" ? "tls" : "starttls"; });
 	};
 	$$(".tile").forEach((t) => (t.onclick = () => { pick = t.dataset.p; manual = false; form(); }));
 	form();
@@ -1394,6 +1478,25 @@ async function sending(head = "") {
 	}));
 	$("#hookAgain") && ($("#hookAgain").onclick = (e) => run(e.currentTarget, async () => { try { await api("/api/sending/webhook", { body: {} }); toast("Bounce webhook added"); route(); } catch (err) { $("#hookErr").textContent = err.message; } }));
 	$("#ctest").onclick = (e) => run(e.currentTarget, async () => { await api("/api/sending/test", { body: { to: $("#ct").value } }); toast("Test sent"); });
+	if ($("#wuCard")) warmupCard(await api("/api/sending/warmup"));
+}
+
+// Settings, Sending: domain warm up (src/warmup.ts).
+function warmupCard(w) {
+	const steps = (p) => `${p.slice(0, 6).map(num).join(", ")} and so on, reaching ${num(p[p.length - 1])} a day on day ${p.length}`;
+	$("#wuCard").innerHTML = `<h2>${icon("chart")}Warm up a new domain</h2>
+	<p class="muted">Inboxes like Gmail, Yahoo and Microsoft trust a new sending domain slowly. Warm up sends a small number of emails on the first day, and half as many again each day after. When a campaign reaches the day's number it pauses, and carries on by itself the next day.</p>
+	${w.on ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span><b>Day ${num(w.day)}:</b> ${num(w.used)} of ${num(w.limit)} emails sent today.${w.waiting ? ` ${w.waiting === 1 ? "One campaign carries" : `${num(w.waiting)} campaigns carry`} on tomorrow.` : ""} A new day starts at midnight UTC.</span></p>
+		<p class="hint">Your plan: ${steps(w.plan)}. Then warm up switches itself off.</p>
+		<div class="row"><button class="btn ghost" id="wuOff">${icon("x")}Stop warming up</button></div>`
+	: `${w.finished ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span>Your domain is warmed up, so there's no daily number any more.</span></p>` : ""}
+		<label for="wuFirst">Emails on the first day</label><select id="wuFirst">${[[50, "50: a brand new domain"], [200, "200: a domain that has sent a little"], [1000, "1,000: a domain with some history"]].map(([n, t]) => `<option value="${n}">${t}</option>`).join("")}</select>
+		<p class="hint" id="wuPlan"></p>
+		<div class="row"><button class="btn" id="wuOn">${icon("play")}Start warming up</button></div>`}<p class="err" id="wuErr"></p>`;
+	const show = () => { const first = Number($("#wuFirst").value); const p = []; for (let d = 0; ; d++) { const raw = first * 1.5 ** d; const m = 10 ** Math.max(0, Math.floor(Math.log10(raw)) - 1); const n = Math.round(raw / m) * m; if (n > 50000) break; p.push(n); } $("#wuPlan").textContent = `Your plan: ${steps(p)}.`; };
+	if ($("#wuFirst")) { $("#wuFirst").onchange = show; show(); }
+	$("#wuOn") && ($("#wuOn").onclick = (e) => run(e.currentTarget, async () => { warmupCard(await api("/api/sending/warmup", { body: { on: true, first: Number($("#wuFirst").value) } })); toast("Warm up started"); }));
+	$("#wuOff") && ($("#wuOff").onclick = (e) => run(e.currentTarget, async () => { if (!confirm("Stop warming up? Campaigns waiting for tomorrow carry on within a minute, at full speed.")) return; warmupCard(await api("/api/sending/warmup", { body: { on: false } })); }));
 }
 
 // -- Amazon SES set up wizard: one clear step a page, in order ------------------------------------------------------
@@ -1602,8 +1705,98 @@ async function blocklist(type) {
 	};
 }
 
+// -- Settings, Blog posts: each new post becomes a draft campaign (src/blogfeed.ts) --------------------------------------
+async function blogSettings(head) {
+	const [{ feed: f }, ls] = await Promise.all([api("/api/blogfeed"), api("/api/lists")]);
+	const lists = Array.isArray(ls) ? ls : ls.lists;
+	const chosen = new Set(f?.lists ?? (lists.length === 1 ? [lists[0].id] : []));
+	const when = (t) => new Date(t).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+	main.innerHTML = `${head}<div class="card"><h2>${icon("rss")}Blog posts to newsletter drafts</h2>
+	<p class="muted">We check your blog once an hour. Each new post becomes a draft campaign, with the post's title, picture, a short summary and a Read the full post button. Nothing is sent by itself: you check the draft, change anything you like, then send or schedule it.</p>
+	${f?.on ? `<p class="okmsg" style="display:flex;gap:8px;align-items:center">${icon("check")}<span>Checking <b>${esc(f.url)}</b>${f.checked_at ? `, last looked ${esc(when(f.checked_at))}` : ""}. ${f.made ? `${num(f.made)} ${f.made === 1 ? "draft" : "drafts"} so far.` : "New posts from now on become drafts."}</span></p>` : ""}
+	${f?.error ? `<p class="hwarn">${icon("alert")}<span>The last check didn't work: ${esc(f.error)}</span></p>` : ""}
+	<label for="bfu">Your blog's address <span class="hint">(or its RSS or Atom feed; we find the feed from the address)</span></label><input id="bfu" value="${esc(f?.url || "")}" placeholder="https://yourblog.com">
+	<label>New drafts go to</label><div>${lists.map((l) => `<label class="check"><input type="checkbox" name="bfl" value="${esc(l.id)}" ${chosen.has(l.id) ? "checked" : ""}> ${esc(l.name)}</label>`).join("")}</div>
+	<p class="err" id="bfe"></p><div id="bfLatest"></div>
+	<div class="row"><button class="btn" id="bfSave">${icon("save")}${f?.on ? "Save" : "Start checking my blog"}</button>${f ? `<button class="btn ghost" id="bfDraft">${icon("plus")}Make a draft from the newest post now</button>${f.on ? `<button class="btn ghost" id="bfOff">${icon("pause")}Stop checking</button>` : ""}<button class="btn danger" id="bfDel">${icon("trash")}Remove</button>` : ""}</div></div>`;
+	const pick = () => $$("[name=bfl]:checked").map((x) => x.value);
+	$("#bfSave").onclick = (e) => run(e.currentTarget, async () => {
+		try {
+			const r = await api("/api/blogfeed", { body: { url: $("#bfu").value, lists: pick() } });
+			toast("Saved. New posts become drafts from now on.");
+			await blogSettings(head);
+			if (r.latest?.length) $("#bfLatest").innerHTML = `<p class="hint">The newest posts we found: ${r.latest.map((p) => `<b>${esc(p.title)}</b>`).join(", ")}. These are already out, so they won't become drafts. Press Make a draft from the newest post now to see one.</p>`;
+		} catch (err) { $("#bfe").textContent = err.message; }
+	});
+	$("#bfDraft") && ($("#bfDraft").onclick = (e) => run(e.currentTarget, async () => { try { const r = await api("/api/blogfeed/draft", { body: {} }); toast("Draft made"); location.hash = `email/${r.id}`; } catch (err) { $("#bfe").textContent = err.message; } }));
+	$("#bfOff") && ($("#bfOff").onclick = (e) => run(e.currentTarget, async () => { await api("/api/blogfeed", { body: { on: false, lists: pick() } }); blogSettings(head); }));
+	$("#bfDel") && ($("#bfDel").onclick = (e) => run(e.currentTarget, async () => { if (confirm("Stop checking your blog and forget it? Drafts already made stay.")) { await api("/api/blogfeed", { method: "DELETE" }); blogSettings(head); } }));
+}
+
+// -- Settings, Tracking: how long to keep who opened and clicked -------------------------------------------------
+async function retentionCard(look) {
+	const box = $("#rtCard");
+	if (!box) return;
+	const r = await api(`/api/retention${look !== undefined ? `?days=${look}` : ""}`);
+	const pick = look !== undefined ? look : r.days;
+	const name = (d) => (d ? (d === 365 ? "1 year" : `${d / 365} years`) : "Forever");
+	box.innerHTML = `<h2>${icon("clock")}How long to keep who opened and clicked</h2>
+	<p class="muted">Each campaign keeps a line for every reader: whether it reached them, if they opened it and which links they clicked. Over the years that's most of your database. Choose how long to keep those lines. After that we keep each campaign's totals (sent, opens, clicks, bounces, links and countries) so its report still adds up, and clear who did what.</p>
+	<label for="rtDays">Keep who opened and clicked for</label><select id="rtDays" style="width:auto">${r.choices.map((d) => `<option value="${d}" ${d === pick ? "selected" : ""}>${name(d)}</option>`).join("")}</select>
+	${pick ? `<p class="hint">${r.older.campaigns ? `${num(r.older.campaigns)} ${r.older.campaigns === 1 ? "campaign is" : "campaigns are"} older than that, with ${num(r.older.rows)} reader ${r.older.rows === 1 ? "line" : "lines"}${r.older.campaigns === 1 ? "" : " between them"}.` : "No campaigns are older than that yet."} Clearing happens a little at a time, in the background. It can't be undone: you won't be able to download or add to a list the people behind those older numbers.</p>` : `<p class="hint">Forever is the default. The shortest is a year, because picking people by what they read, cold contacts and sending again to people who didn't open all look back up to a year.</p>`}
+	<div class="row" style="margin-top:12px"><button type="button" class="btn" id="rtSave">${icon("save")}Save</button></div>`;
+	$("#rtDays").onchange = () => retentionCard(Number($("#rtDays").value));
+	$("#rtSave").onclick = (e) => run(e.currentTarget, async () => {
+		const d = Number($("#rtDays").value);
+		if (d && (!r.days || d < r.days) && r.older.campaigns && !confirm(`Clear who opened and clicked on ${num(r.older.campaigns)} older ${r.older.campaigns === 1 ? "campaign" : "campaigns"}? Their totals stay. This can't be undone.`)) return;
+		await api("/api/retention", { body: { days: d } });
+		toast(d ? `Saved. We keep who opened and clicked for ${name(d).toLowerCase()}.` : "Saved. We keep who opened and clicked forever.");
+		retentionCard();
+	});
+}
+
+// -- Settings, Lists: cold contact clean up --------------------------------------------------------------------
+async function coldCard(days, min) {
+	const box = $("#coldCard");
+	if (!box) return;
+	const q = days ? `?days=${days}&min=${min}` : "";
+	const r = await api(`/api/cold${q}`);
+	const p = r.policy, d = days || p.days, m = min || p.min, L = r.look;
+	const can = r.tracking.opens || r.tracking.clicks;
+	box.innerHTML = `<h2>${icon("users")}Cold contacts</h2>
+	<p class="muted">People who haven't opened or clicked anything in a long while. Sending to them makes inboxes trust your emails less, and costs you for emails nobody reads. Tag them cold to send a "still want these?" email, then take off anyone who still doesn't read.</p>
+	${can ? "" : `<p class="hwarn">${icon("alert")}<span>Switch on opens or clicks in <a href="#settings/tracking">Tracking</a> first, so we can tell who reads your emails.</span></p>`}
+	<div class="row" style="gap:12px"><div class="grow"><label for="cdDays">No opens or clicks in</label><select id="cdDays">${[90, 180, 365].map((x) => `<option value="${x}" ${x === d ? "selected" : ""}>the last ${x === 365 ? "year" : `${x} days`}</option>`).join("")}</select></div>
+	<div class="grow"><label for="cdMin">From at least</label><select id="cdMin">${[1, 3, 5, 8, 10, 15].map((x) => `<option value="${x}" ${x === m ? "selected" : ""}>${x} ${x === 1 ? "email" : "emails"}</option>`).join("")}</select></div></div>
+	<p class="count" style="margin-top:12px">${icon("users")}<span>${!L.campaigns ? `None of your campaigns in that time could be tracked yet, so nobody counts as cold.` : L.count ? `<b>${num(L.count)}</b> ${L.count === 1 ? "person is" : "people are"} cold now, such as ${L.sample.map(esc).join(", ")}.` : "Nobody is cold. Everyone on your lists has read something lately."}${L.tagged ? ` ${num(L.tagged)} tagged ${esc("cold")} at the moment.` : ""}</span></p>
+	<div class="row" style="gap:8px"><button type="button" class="btn ghost small" id="cdTag" ${L.count ? "" : "disabled"}>${icon("tag")}Tag them cold now</button><button type="button" class="btn ghost small" id="cdRemove" ${L.count ? "" : "disabled"}>${icon("minus")}Take them off every list now</button></div>
+	<p class="hint">To win them back, send a campaign to the <b>cold</b> tag (step 2 of Who it goes to). Anyone who opens or clicks after that loses the tag by itself. Only campaigns we could track count, so switching tracking on never makes everyone look cold.</p>
+	<h3 style="margin-top:18px">Do it every day by itself</h3><p class="hint">Tags new cold contacts each morning and untags anyone who's read something since.</p><div><label class="check"><input type="checkbox" id="cdOn" ${p.on ? "checked" : ""}> Tag cold contacts every day</label><label class="check"><input type="checkbox" id="cdOff" ${p.remove ? "checked" : ""} ${p.on ? "" : "disabled"}> Then take them off every list if they still haven't read anything ${r.graceDays} days later</label></div>
+	<div class="row" style="margin-top:14px"><button type="button" class="btn" id="cdSave">${icon("save")}Save</button></div>`;
+	const vals = () => ({ days: Number($("#cdDays").value), min: Number($("#cdMin").value) });
+	$("#cdDays").onchange = $("#cdMin").onchange = () => coldCard(vals().days, vals().min);
+	$("#cdOn").onchange = () => { $("#cdOff").disabled = !$("#cdOn").checked; if (!$("#cdOn").checked) $("#cdOff").checked = false; };
+	$("#cdSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/cold", { body: { ...vals(), on: $("#cdOn").checked, remove: $("#cdOff").checked } }); toast("Saved"); coldCard(); });
+	$("#cdTag").onclick = (e) => run(e.currentTarget, async () => { const x = await api("/api/cold/tag", { body: vals() }); toast(`Tagged ${num(x.tagged)} cold${x.warmed ? `, and ${num(x.warmed)} who read something lately lost the tag` : ""}`); coldCard(vals().days, vals().min); });
+	$("#cdRemove").onclick = (e) => run(e.currentTarget, async () => { if (!confirm(`Take ${num(L.count)} cold ${L.count === 1 ? "person" : "people"} off every list? They won't get any more emails unless they sign up again.`)) return; const x = await api("/api/cold/remove", { body: vals() }); toast(`Done. ${num(x.removed)} ${x.removed === 1 ? "subscription" : "subscriptions"} ended.`); coldCard(vals().days, vals().min); });
+}
+
+// -- Settings, Writing helper: optional AI help in the campaign editor, off unless switched on -------------------
+async function aiSettings(head) {
+	const a = await api("/api/ai");
+	main.innerHTML = `${head}<div class="card"><h2>${icon("wand")}Writing helper</h2>
+	<p class="muted">An optional helper in the campaign editor. It suggests subject lines, tidies up or shortens a bit of your email you pick, and turns rough notes into a first draft. It's off unless you switch it on, and it never sends anything or changes your email unless you press its buttons.</p>
+	<div class="info">${icon("cloud")}<p>It uses Cloudflare's own AI on your Cloudflare account, so your emails don't go to any other company and there's no key to set up. Cloudflare gives every account a free allowance each day, which covers about 80 uses. Past that, Cloudflare bills your account about £1 per 1,000 uses. There's a limit of ${num(a.cap)} uses a day.</p></div>
+	<label class="check" style="margin-top:14px"><input type="checkbox" id="aiOn" ${a.on ? "checked" : ""}> Show the writing helper in the campaign editor</label>
+	${a.on && !a.ready ? `<p class="hwarn">${icon("alert")}<span>It's switched on, but it isn't connected to Cloudflare's AI yet. Update to the latest version and it connects by itself.</span></p>` : ""}
+	${a.used.month ? `<p class="hint">Used ${num(a.used.month)} ${a.used.month === 1 ? "time" : "times"} this month, ${num(a.used.today)} today.</p>` : ""}
+	<p class="hint">It's written by AI, so read what it suggests before you use it. It can get things wrong.</p>
+	<div class="row" style="margin-top:14px"><button class="btn" id="aiSave">${icon("save")}Save changes</button></div></div>`;
+	$("#aiSave").onclick = (e) => run(e.currentTarget, async () => { await api("/api/ai", { body: { on: $("#aiOn").checked } }); toast($("#aiOn").checked ? "The writing helper is on. Find it above the email in the campaign editor." : "The writing helper is off."); aiSettings(head); });
+}
+
 // -- Settings: everything else lives here ----------------------------------------------------------------------
-const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
+const SETTINGS = [["company", "Your company", "home"], ["sending", "Sending", "send"], ["lists", "Lists", "list"], ["tracking", "Tracking", "chart"], ["blog", "Blog posts", "rss"], ["ai", "Writing helper", "wand"], ["backups", "Backups", "shield"], ["api", "API", "code"], ["account", "Account", "user"]];
 const settingsTabs = () => {
 	if (ADDON.tabs) return ADDON.tabs(SETTINGS);
 	return SETTINGS;
@@ -1630,23 +1823,32 @@ async function settings(section) {
 		$("#f").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { name: $("#name").value, from_name: $("#from_name").value, from_email: $("#from_email").value, reply_to: $("#reply_to").value, footer: $("#footer").value, colour: $("#colour").value, logo: $("#logo").value, archive: $("#archive").checked, app_name: $("#app_name").value, manage_link: $("#manage_link").checked, forward_link: $("#forward_link").checked, done_email: $("#done_email").checked } }); toast("Saved"); showName({ app_name: $("#app_name").value }); $("#e").textContent = ""; } catch (err) { $("#e").textContent = err.message; } };
 	}
 	if (sec === "lists") {
+		const gb = await api("/api/goodbye");
 		main.innerHTML = `${head}<form class="card" id="rules"><h2>List settings</h2>
 		<div class="rule"><div><b>Can subscribers join more than one list?</b><p class="hint">Subscribers are automatically deduplicated at send time: sending to multiple lists at once will never email someone twice.</p></div><div class="opts"><label><input type="radio" name="one" value="0" ${b.one_list ? "" : "checked"}>Yes</label><label><input type="radio" name="one" value="1" ${b.one_list ? "checked" : ""}>No, strictly one list per contact</label></div></div>
 		<div class="rule"><div><b>When someone unsubscribes</b><p class="hint">Regulations only require opting subscribers out of the specific publication they selected. Unsubscribing from a single list keeps them on other relevant topics without losing them entirely.</p></div><div class="opts"><label><input type="radio" name="scope" value="list" ${b.unsub_scope === "all" ? "" : "checked"}>Remove only from the campaign's list</label><label><input type="radio" name="scope" value="all" ${b.unsub_scope === "all" ? "checked" : ""}>Opt out of all lists</label></div></div>
-		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form>`;
-		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); toast("Saved"); }); };
+		<div class="rule"><div><b>Goodbye email</b><p class="hint">A short note when someone unsubscribes, with a one click way back in case they pressed it by mistake. The way back works for 30 days and puts them back on exactly the lists they left. Someone who unsubscribes again within the month doesn't get a second one.</p></div><div class="opts"><label class="check"><input type="checkbox" id="gbOn" ${gb.on ? "checked" : ""}> Send a goodbye email</label></div></div>
+		<div id="gbText" ${gb.on ? "" : "hidden"}><label for="gbt">What it says <span class="hint">(a blank line starts a new paragraph; the Put me back on button goes underneath)</span></label><textarea id="gbt" rows="4">${esc(gb.text)}</textarea></div>
+		<div class="row" style="margin-top:14px"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#lists">${icon("list")}View all lists</a></div></form><div class="card" id="coldCard"></div>`;
+		coldCard();
+		$("#gbOn").onchange = () => { $("#gbText").hidden = !$("#gbOn").checked; };
+		$("#rules").onsubmit = (e) => { e.preventDefault(); run(e.submitter, async () => { await api("/api/brand", { body: { one_list: $("[name=one]:checked").value === "1", unsub_scope: $("[name=scope]:checked").value } }); await api("/api/goodbye", { body: { on: $("#gbOn").checked, text: $("#gbt").value } }); toast("Saved"); }); };
 	}
+	if (sec === "blog") return blogSettings(head);
+	if (sec === "ai") return aiSettings(head);
 	if (sec === "tracking") {
 		main.innerHTML = `${head}<form class="card" id="tf"><h2>Tracking</h2>
 		<p class="muted">Disabled by default to protect subscriber privacy and maximise delivery. Bounces and spam complaints are always recorded automatically: flagged addresses are updated in <a href="#reports">Reports</a> and permanently excluded from future sends.</p>
 		<label class="check"><input type="checkbox" id="to" ${b.track_opens ? "checked" : ""}> <span>Track email opens <span class="hint">Adds a 1 pixel tracking image to each email. Because modern email clients (like Apple Mail) cache or pre-fetch images, treat open rates as a general estimate rather than an exact figure.</span></span></label>
 		<label class="check"><input type="checkbox" id="tc" ${b.track_clicks ? "checked" : ""}> <span>Track link clicks <span class="hint">Routes links through your tracking domain before redirecting subscribers onward to record engagement.</span></span></label>
 		<p class="err" id="te"></p><div class="row"><button class="btn">${icon("save")}Save changes</button><a class="btn ghost" href="#reports">${icon("chart")}View reports</a></div></form>
+		<div class="card" id="rtCard"></div>
 		<div class="card" id="lk"><h2>Custom domain for email links</h2>
 		<p class="muted">Brand all outgoing links (such as unsubscribe links, web versions and click tracking URLs) with your own domain (e.g. news.yourdomain.com) rather than ${esc(location.host)}. A custom domain builds subscriber trust and improves inbox placement.</p>
 		<div id="lkBody"><p class="muted">Loading…</p></div></div>`;
 		$("#tf").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/brand", { body: { track_opens: $("#to").checked, track_clicks: $("#tc").checked } }); toast("Saved"); $("#te").textContent = ""; } catch (err) { $("#te").textContent = err.message; } };
 		linksCard();
+		retentionCard();
 	}
 	if (sec === "backups") {
 		const s = await api("/api/backups");
@@ -1697,7 +1899,7 @@ async function settings(section) {
 	if (sec === "api") {
 		const s = await api("/api/developer");
 		const when = (t) => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Never";
-		const LABEL = { "subscriber.subscribed": "Someone subscribes", "subscriber.pending": "Someone signs up and needs to confirm", "subscriber.unsubscribed": "Someone unsubscribes", "subscriber.bounced": "An email bounces", "subscriber.complained": "Someone marks you as spam", "campaign.started": "A campaign starts sending", "campaign.sent": "A campaign finishes", "campaign.paused": "A campaign is paused" };
+		const LABEL = { "subscriber.subscribed": "Someone subscribes", "subscriber.pending": "Someone signs up and needs to confirm", "subscriber.unsubscribed": "Someone unsubscribes", "subscriber.bounced": "An email bounces", "subscriber.complained": "Someone marks you as spam", "subscriber.updated": "Someone changes their details", "campaign.started": "A campaign starts sending", "campaign.sent": "A campaign finishes", "campaign.paused": "A campaign is paused" };
 		main.innerHTML = `${head}<div class="card"><h2>API keys</h2>
 		<p class="muted">Add subscribers from your website or online store, create campaign drafts and trigger one off transactional emails directly from your own code. Pass your API key in the Authorization header. Keep your keys secure on your server, never expose them in client side code.</p>
 		<label>API base URL</label><code class="row" style="display:flex;gap:8px;align-items:center"><span class="grow">${esc(s.base)}</span>${copyBtn(s.base)}</code>

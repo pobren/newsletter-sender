@@ -19,6 +19,7 @@ import { loadTestFor, pretendReplies, pretendSend } from "./loadtest.ts";
 import { parseReferrals, refCode } from "./referrals.ts";
 import { hasPoll } from "./polls.ts";
 import { abSplit, parseAb, pickWinners, sendableTo, subjectFor } from "./abtest.ts";
+import { allowance, waitForTomorrow } from "./warmup.ts";
 
 /** Send rows in one queue message. Bigger batches spend less of each second waiting on the queue between
  * messages: the 100k load test on Cloudflare reached about 65 a second (of 100) with 10 workers, as each message
@@ -32,7 +33,7 @@ const OPEN = 6;
 export const MAX_TRIES = 10;
 
 /** Default emails a second for services that don't tell us their limit. The owner can change it. */
-export const DEFAULT_RATE: Record<string, number> = { ses: 1, postmark: 20, mailgun: 20, brevo: 10, resend: 2 };
+export const DEFAULT_RATE: Record<string, number> = { ses: 1, postmark: 20, mailgun: 20, brevo: 10, resend: 2, sendgrid: 20, sparkpost: 20, smtp: 3 };
 
 /** One worker's share of the brand's rate, in emails a second. */
 /** How often a batch looks again to see if the send was paused or stopped. */
@@ -294,6 +295,16 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 		.bind(c.id, b.from, b.to)
 		.all<Row>();
 	if (!rows.length) return (await finishIfDone(db, c.id), 0);
+	// Domain warm up: only the day's number of emails, then pause until tomorrow.
+	let capped = false;
+	if (!test) {
+		const allow = await allowance(db, brand.id, rows.length);
+		if (allow !== null && allow < rows.length) {
+			capped = true;
+			rows.splice(allow);
+			if (!rows.length) return (await waitForTomorrow(db, c), 0);
+		}
+	}
 
 	const base = linkBase(brand, await origin(db));
 	const secret = await sealSecret(db);
@@ -362,6 +373,10 @@ export async function sendBatch(env: Env, b: SendBatch, attempts: number, fetche
 	const failed = outcome.done.filter(([, s]) => !s.ok && !s.throttled && !s.permanent);
 	if (failed.length >= 5 && failed.length === outcome.done.length) {
 		await pause(db, c, `Sending stopped because the sending service turned every email down: ${failed[0][1].error}`);
+		return 0;
+	}
+	if (capped) {
+		await waitForTomorrow(db, c);
 		return 0;
 	}
 	if (outcome.throttled || outcome.done.length < rows.length) {

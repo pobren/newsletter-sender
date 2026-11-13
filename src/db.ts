@@ -17,6 +17,8 @@ export interface Env {
 	/** Optional Cloudflare Turnstile on sign in and the sign up forms (turnstile.ts): both are needed. */
 	TURNSTILE_SITE_KEY?: string;
 	TURNSTILE_SECRET?: string;
+	/** Cloudflare's AI, for the optional writing helper (aihelper.ts). Only used when the owner switches it on. */
+	AI?: { run(model: string, input: unknown): Promise<unknown> };
 }
 
 /** One queue message: the send rows from one id to another, both included, for one campaign. */

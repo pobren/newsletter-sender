@@ -4,7 +4,7 @@
 
 import { csvLine, cleanEmail } from "./csv.ts";
 import { getMeta, isBlocked, iso, linkBase, logEvent, newId, origin, setMeta, type BrandRow, type CampaignRow, type Env, type ListRow, type SubscriberRow } from "./db.ts";
-import { isProvider, parseProviderEvent, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
+import { isProvider, parseProviderEvents, parseSesEvent, sendOne, trustedSubscribeUrl, type MailEvent } from "./providers.ts";
 import { cleanBlocks, esc, renderEmail } from "./render.ts";
 import { campaignContent, safeJson, sendSig, shareSig } from "./sending.ts";
 import { loadProvider, sealSecret } from "./settings.ts";
@@ -14,6 +14,7 @@ import { fireSafely } from "./automations.ts";
 import { dueRewards, parseReferrals, referralBody, refFrom } from "./referrals.ts";
 import { popupScript, popupSettings, popupTestPage } from "./popup.ts";
 import { pollsIn } from "./polls.ts";
+import { comeBack, getGoodbye, sayGoodbye } from "./goodbye.ts";
 
 export { csvLine };
 
@@ -284,9 +285,35 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 				: await db.prepare("UPDATE memberships SET status = 'unsubscribed', left_at = ? WHERE subscriber_id = ? AND status != 'unsubscribed'").bind(iso(), s.id).run();
 			for (const id of was) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: id });
 			if (changed.meta.changes) await logEvent(db, b.id, "unsubscribed", s.id, campaign, `${request.headers.get("content-type")?.includes("form") && (await request.clone().text()).includes("One-Click") ? "one click" : "page"}${names.length ? `, ${names.join(", ")}` : ""}`).run();
-			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(what)}.</p><p class="small">Changed your mind? You can sign up again on the website.</p></div>`));
+			// The goodbye email, when the owner has switched it on. Never stops the unsubscribe.
+			let goodbye = false;
+			if (changed.meta.changes) {
+				try {
+					goodbye = await sayGoodbye(env, b, s, was, what, (to, subject, paras, button) => oneOff(env, b, to, subject, paras, button), linkBase(b, await origin(db)));
+				} catch (e) {
+					console.error("goodbye email", e);
+				}
+			}
+			const way = goodbye || (await getGoodbye(db, b.id)).on ? `<p class="small">Pressed it by mistake? <a href="/u/${esc(s.token)}/back">Put me back on</a>.</p>` : `<p class="small">Changed your mind? You can sign up again on the website.</p>`;
+			return html(publicPage(b, "Unsubscribed", `<div class="card"><h1>You've unsubscribed</h1><p>${esc(s.email)} won't get any more emails from ${esc(what)}.</p>${way}</div>`));
 		}
 		return html(publicPage(b, "Unsubscribe", `<div class="card"><h1>Unsubscribe?</h1><p>Stop ${names.length ? "" : "all "}emails from ${esc(what)} to ${esc(s.email)}.</p><form method="post"><button type="submit">${ICON_X}Unsubscribe</button></form></div>`));
+	}
+
+	// -- The way back from the goodbye email: the lists they just left, in one click -------------------
+	const bm = /^\/u\/([0-9a-f]{32})\/back\/?$/.exec(path);
+	if (bm) {
+		const s = await db.prepare("SELECT * FROM subscribers WHERE token = ?").bind(bm[1]).first<SubscriberRow>();
+		const b = s ? await db.prepare("SELECT * FROM brands WHERE id = ?").bind(s.brand_id).first<BrandRow>() : null;
+		if (!s || !b) return html(publicPage({ name: "Newsletter", colour: "#a3195b", logo: null }, "Welcome back", `<div class="card"><h1>We couldn't find you</h1><p>The link may be old. You can sign up again on the website.</p></div>`), 404);
+		if (request.method === "POST") {
+			const ids = await comeBack(db, b, s);
+			if (ids === null) return html(publicPage(b, "Welcome back", `<div class="card"><h1>That link has run out</h1><p>It works for 30 days. You can sign up again on the website, or <a href="/p/${esc(s.token)}">choose your emails here</a>.</p></div>`), 410);
+			for (const id of ids) await fireSafely(db, b.id, s.id, { kind: "joined", list: id });
+			return html(publicPage(b, "Welcome back", `<div class="card"><h1>You're back on</h1><p>${esc(s.email)} will get emails from ${esc(b.name)} again. Thanks for staying.</p><p class="small"><a href="/p/${esc(s.token)}">Choose which emails you get</a></p></div>`));
+		}
+		// A page that presses its own button: link checkers don't run scripts, so they can't resubscribe anyone.
+		return html(publicPage(b, "Welcome back", `<div class="card"><h1>Put me back on</h1><p>Start getting emails from ${esc(b.name)} at ${esc(s.email)} again.</p><form method="post" id="back"><button type="submit">${ICON_CHECK}Put me back on</button></form></div><script>document.getElementById("back").submit()</script>`));
 	}
 
 	// -- Manage my subscription: change your name and which lists you're on ------------------------
@@ -318,10 +345,19 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 				}
 			}
 			if (stmts.length) await db.batch(stmts);
+			const changed: string[] = [];
+			if (name !== (s.name ?? "")) changed.push("name");
 			for (const l of lists) {
 				const on = l.status === "active" || l.status === "pending";
 				if (on && !want.has(l.id)) await fireSafely(db, b.id, s.id, { kind: "unsubscribed", list: l.id });
 				else if (!on && want.has(l.id) && !s.suppressed) await fireSafely(db, b.id, s.id, { kind: "joined", list: l.id });
+				if (on !== want.has(l.id) && !changed.includes("lists")) changed.push("lists");
+			}
+			// Profile update automations: they changed their own details.
+			if (changed.length) {
+				const now = (await db.prepare("SELECT list_id FROM memberships WHERE subscriber_id = ? AND status = 'active'").bind(s.id).all<{ list_id: string }>()).results.map((r) => r.list_id);
+				await logEvent(db, b.id, "profile.updated", s.id, null, `Changed ${changed.join(" and ")} on the subscription page`).run();
+				await fireSafely(db, b.id, s.id, { kind: "updated", lists: now, changed });
 			}
 			s.name = name || null;
 			lists = await load();
@@ -466,7 +502,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 	}
 
 	// -- Bounces and complaints from the sending services ------------------------------------------
-	const hm = /^\/hooks\/(ses|postmark|mailgun|brevo|resend)\/([0-9a-f]{32})$/.exec(path);
+	const hm = /^\/hooks\/([a-z]{2,12})\/([0-9a-f]{32})$/.exec(path);
 	if (hm && request.method === "POST") {
 		const b = await db.prepare("SELECT * FROM brands WHERE hook_key = ?").bind(hm[2]).first<BrandRow>();
 		if (!b) return new Response("Not found", { status: 404 });
@@ -484,10 +520,7 @@ export async function handlePublic(request: Request, env: Env, url: URL): Promis
 			}
 			return new Response("OK");
 		}
-		if (isProvider(hm[1])) {
-			const e = parseProviderEvent(hm[1], body);
-			if (e) await recordMailEvent(db, b, e);
-		}
+		if (isProvider(hm[1])) for (const e of parseProviderEvents(hm[1], body)) await recordMailEvent(db, b, e);
 		return new Response("OK");
 	}
 	return null;

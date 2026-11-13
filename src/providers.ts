@@ -1,12 +1,13 @@
 // Sending services. Newsletters go out through Amazon SES (the main way, at the account's full speed) or the owner's
-// own Postmark, Mailgun, Brevo or Resend. Cloudflare's own email service only sends sign up confirmations and other
+// own Postmark, Mailgun, Brevo, Resend, SendGrid, SparkPost or any SMTP server. Cloudflare's own email service only sends sign up confirmations and other
 // one off emails (Cloudflare describes it as for transactional email), never newsletters.
 //
 // The owner's keys are kept encrypted in the database (seal / unseal), and never shown again once saved.
 
 import { ses, type AwsKeys } from "./aws.ts";
+import { smtpSend, type Connect } from "./smtp.ts";
 
-export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend";
+export type ProviderId = "ses" | "postmark" | "mailgun" | "brevo" | "resend" | "sendgrid" | "sparkpost" | "smtp";
 
 export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: string }[] = [
 	{ id: "ses", name: "Amazon SES", keyLabel: "Secret access key", help: "In AWS: IAM, Users, your sending user, Security credentials, Create access key." },
@@ -14,6 +15,9 @@ export const PROVIDERS: { id: ProviderId; name: string; keyLabel: string; help: 
 	{ id: "mailgun", name: "Mailgun", keyLabel: "Sending API key", help: "In Mailgun: Send, Sending, Domain settings, Sending keys." },
 	{ id: "brevo", name: "Brevo", keyLabel: "API key", help: "In Brevo: your name, SMTP & API, API keys." },
 	{ id: "resend", name: "Resend", keyLabel: "API key", help: "In Resend: API Keys, Create API key (Full access, so we can add the bounce webhook)." },
+	{ id: "sendgrid", name: "SendGrid", keyLabel: "API key", help: "In SendGrid: Settings, API Keys, Create API Key (Full Access, so we can add the bounce webhook)." },
+	{ id: "sparkpost", name: "SparkPost", keyLabel: "API key", help: "In SparkPost: Configuration, API Keys, New API Key (Transmissions: Read/Write and Event Webhooks: Read/Write)." },
+	{ id: "smtp", name: "Your own SMTP server", keyLabel: "Password", help: "Your email host's SMTP server name, port, user name and password." },
 ];
 export const isProvider = (x: unknown): x is ProviderId => PROVIDERS.some((p) => p.id === x);
 export const providerName = (id: ProviderId) => PROVIDERS.find((p) => p.id === id)!.name;
@@ -32,6 +36,15 @@ export interface ProviderConfig {
 	/** Mailgun only: the sending domain, and whether the account is in Mailgun's EU region. */
 	mailgunDomain?: string;
 	mailgunRegion?: "us" | "eu";
+	/** SendGrid only: an EU regional account sends through api.eu.sendgrid.com. */
+	sendgridRegion?: "us" | "eu";
+	/** SparkPost only: an EU account sends through api.eu.sparkpost.com. */
+	sparkpostRegion?: "us" | "eu";
+	/** SMTP only: the server, port, how it's encrypted and the user name. The password is the key. */
+	smtpHost?: string;
+	smtpPort?: number;
+	smtpSecurity?: "tls" | "starttls";
+	smtpUser?: string;
 	/** Postmark, Mailgun, Brevo or Resend: we added our bounce and complaint webhook there ourselves. */
 	hookAdded?: boolean;
 }
@@ -41,6 +54,7 @@ export const sesKeys = (c: ProviderConfig): AwsKeys => ({ accessKeyId: c.accessK
 /** A tidy provider set-up from the form, or what's wrong with it. */
 export function parseProvider(input: Record<string, unknown>, fromEmail: string): ProviderConfig | { error: string } {
 	if (!isProvider(input.provider)) return { error: "Please choose how to send." };
+	if (input.provider === "smtp") return parseSmtp(input);
 	const key = typeof input.key === "string" ? input.key.trim() : "";
 	if (key.length < 10 || key.length > 300 || /\s/.test(key)) return { error: "Please paste the whole key, with no spaces." };
 	const out: ProviderConfig = { provider: input.provider, key };
@@ -58,13 +72,30 @@ export function parseProvider(input: Record<string, unknown>, fromEmail: string)
 		out.mailgunDomain = d;
 		out.mailgunRegion = input.mailgunRegion === "eu" ? "eu" : "us";
 	}
+	if (input.provider === "sendgrid") out.sendgridRegion = input.sendgridRegion === "eu" ? "eu" : "us";
+	if (input.provider === "sparkpost") out.sparkpostRegion = input.sparkpostRegion === "eu" ? "eu" : "us";
 	return out;
+}
+
+/** An SMTP server set-up from the form. Passwords can be short and have spaces (Gmail app passwords do). */
+function parseSmtp(input: Record<string, unknown>): ProviderConfig | { error: string } {
+	const host = String(input.smtpHost ?? "").trim().toLowerCase();
+	if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(host)) return { error: "Please enter the SMTP server's name, such as smtp.yourhost.com." };
+	const port = Number(input.smtpPort) || 587;
+	if (port === 25) return { error: "Cloudflare doesn't allow port 25. Please use 587 or 465 (most hosts offer both)." };
+	if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: "Please enter the SMTP port, such as 587 or 465." };
+	const user = String(input.smtpUser ?? "").trim();
+	if (user.length > 200 || /[\r\n]/.test(user)) return { error: "Please check the user name." };
+	const key = typeof input.key === "string" ? input.key : "";
+	if ((user && !key) || key.length > 300 || /[\r\n]/.test(key)) return { error: "Please enter the password for this user name." };
+	const smtpSecurity = input.smtpSecurity === "tls" || input.smtpSecurity === "starttls" ? input.smtpSecurity : port === 465 ? "tls" : "starttls";
+	return { provider: "smtp", key, smtpHost: host, smtpPort: port, smtpSecurity, smtpUser: user };
 }
 
 /** What the owner sees about their sending set-up: never the key itself. */
 export function providerSummary(c: ProviderConfig | null) {
 	if (!c) return null;
-	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? null, mailgunDomain: c.mailgunDomain ?? null, keyEnd: c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
+	return { provider: c.provider, name: providerName(c.provider), region: c.region ?? (c.sendgridRegion === "eu" || c.sparkpostRegion === "eu" ? "EU" : null), mailgunDomain: c.mailgunDomain ?? null, smtp: c.provider === "smtp" ? { host: c.smtpHost, port: c.smtpPort, user: c.smtpUser } : null, keyEnd: c.provider === "smtp" ? "" : c.key.slice(-4), bounces: c.provider === "ses" ? Boolean(c.configSet) : Boolean(c.hookAdded), cloudflareDns: Boolean(c.cfToken) };
 }
 
 export interface OutEmail {
@@ -90,6 +121,10 @@ export interface Sent {
 	quota?: boolean;
 	error?: string;
 }
+
+const sendgridApi = (c: ProviderConfig) => (c.sendgridRegion === "eu" ? "https://api.eu.sendgrid.com" : "https://api.sendgrid.com");
+
+const sparkpostApi = (c: ProviderConfig) => (c.sparkpostRegion === "eu" ? "https://api.eu.sparkpost.com" : "https://api.sparkpost.com");
 
 const quoteName = (n: string) => `"${n.replace(/["\\\r\n]/g, "")}"`;
 
@@ -122,6 +157,40 @@ export function providerRequest(c: ProviderConfig, fromName: string, fromEmail: 
 				method: "POST",
 				headers: { "api-key": c.key, "content-type": "application/json", accept: "application/json" },
 				body: JSON.stringify({ sender: { name: fromName, email: fromEmail }, to: [{ email: m.to }], subject: m.subject, textContent: m.text, htmlContent: m.html, ...(m.replyTo ? { replyTo: { email: m.replyTo } } : {}), ...(someHeaders ? { headers } : {}) }),
+			},
+		};
+	}
+	if (c.provider === "sendgrid") {
+		// We track opens and clicks ourselves and use our own unsubscribe link, so SendGrid's are switched off.
+		return {
+			url: `${sendgridApi(c)}/v3/mail/send`,
+			init: {
+				method: "POST",
+				headers: { authorization: `Bearer ${c.key}`, "content-type": "application/json" },
+				body: JSON.stringify({
+					personalizations: [{ to: [{ email: m.to }], ...(m.tags ? { custom_args: m.tags } : {}) }],
+					from: { email: fromEmail, name: fromName },
+					...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
+					subject: m.subject,
+					content: [{ type: "text/plain", value: m.text }, { type: "text/html", value: m.html }],
+					...(someHeaders ? { headers } : {}),
+					tracking_settings: { click_tracking: { enable: false, enable_text: false }, open_tracking: { enable: false }, subscription_tracking: { enable: false } },
+				}),
+			},
+		};
+	}
+	if (c.provider === "sparkpost") {
+		// A newsletter, not a transactional email, so SparkPost honours its own unsubscribes too. Its tracking is off.
+		return {
+			url: `${sparkpostApi(c)}/api/v1/transmissions`,
+			init: {
+				method: "POST",
+				headers: { authorization: c.key, "content-type": "application/json", accept: "application/json" },
+				body: JSON.stringify({
+					options: { open_tracking: false, click_tracking: false, transactional: false },
+					recipients: [{ address: { email: m.to }, ...(m.tags ? { metadata: m.tags } : {}) }],
+					content: { from: { email: fromEmail, name: fromName }, subject: m.subject, text: m.text, html: m.html, ...(m.replyTo ? { reply_to: m.replyTo } : {}), ...(someHeaders ? { headers } : {}) },
+				}),
 			},
 		};
 	}
@@ -164,13 +233,14 @@ export function sesBody(c: ProviderConfig, fromName: string, fromEmail: string, 
 }
 
 /** Sends one email and says how it went. Never throws. */
-export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: string, m: OutEmail, fetcher: typeof fetch = fetch): Promise<Sent> {
+export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: string, m: OutEmail, fetcher: typeof fetch = fetch, connector?: Connect): Promise<Sent> {
 	try {
 		if (c.provider === "ses") {
 			const a = await ses(sesKeys(c), "POST", "/outbound-emails", sesBody(c, fromName, fromEmail, m), fetcher);
 			if (a.ok) return { ok: true, id: a.data?.MessageId };
 			return classify(a.status, a.text);
 		}
+		if (c.provider === "smtp") return smtpSend({ host: c.smtpHost ?? "", port: c.smtpPort ?? 587, security: c.smtpSecurity ?? "starttls", user: c.smtpUser ?? "", password: c.key }, fromName, fromEmail, m, connector ?? (await import("cloudflare:sockets")).connect as unknown as Connect);
 		const { url, init } = providerRequest(c, fromName, fromEmail, m);
 		const res = await fetcher(url, init);
 		const text = await res.text();
@@ -179,7 +249,8 @@ export async function sendOne(c: ProviderConfig, fromName: string, fromEmail: st
 			try {
 				d = JSON.parse(text);
 			} catch {}
-			return { ok: true, id: d?.MessageID ?? d?.messageId ?? d?.id ?? undefined };
+			// SendGrid answers 202 with no body, and puts its id in a header.
+			return { ok: true, id: d?.MessageID ?? d?.messageId ?? d?.id ?? d?.results?.id ?? res.headers.get("x-message-id") ?? undefined };
 		}
 		return classify(res.status, text);
 	} catch (e) {
@@ -194,7 +265,7 @@ export function classify(status: number, text: string): Sent {
 	if (status === 429 || /Throttl|TooManyRequests|Maximum sending rate exceeded|rate limit/i.test(text)) return { ok: false, throttled: true, error };
 	if (status >= 500) return { ok: false, throttled: true, error };
 	// An address the service refuses outright (on its suppression list, or not a valid address).
-	if (/InvalidParameterValue.*(address|Destination)|Illegal address|inactive recipient|is not a valid email|suppress/i.test(text)) return { ok: false, permanent: true, error };
+	if (/InvalidParameterValue.*(address|Destination)|Illegal address|inactive recipient|is not a valid email|does not contain a valid address|suppress/i.test(text)) return { ok: false, permanent: true, error };
 	return { ok: false, error };
 }
 
@@ -274,7 +345,7 @@ export function parseSesEvent(message: any): MailEvent | null {
 	return null;
 }
 
-/** A bounce or complaint webhook from Postmark, Mailgun, Brevo or Resend. */
+/** A bounce or complaint webhook from Postmark, Mailgun, Brevo or Resend (SendGrid and SparkPost: parseProviderEvents). */
 export function parseProviderEvent(provider: ProviderId, body: any): MailEvent | null {
 	if (provider === "postmark") {
 		if (body?.RecordType === "Bounce") {
@@ -308,6 +379,44 @@ export function parseProviderEvent(provider: ProviderId, body: any): MailEvent |
 	return null;
 }
 
+/**
+ * Every event in one webhook post. SendGrid and SparkPost send a list of events in each post; the others send one.
+ */
+export function parseProviderEvents(provider: ProviderId, body: any): MailEvent[] {
+	const list = (Array.isArray(body) ? body : []).slice(0, 1000);
+	if (provider === "sendgrid") return list.map(sendgridEvent).filter((e): e is MailEvent => e !== null);
+	if (provider === "sparkpost") return list.map(sparkpostEvent).filter((e): e is MailEvent => e !== null);
+	const e = parseProviderEvent(provider, body);
+	return e ? [e] : [];
+}
+
+/** One SendGrid event. Our tags come back as top level fields (custom_args). */
+export function sendgridEvent(e: any): MailEvent | null {
+	const extra = { sub: tag(e?.ns_sub), campaign: tag(e?.ns_campaign) };
+	// "bounce" is a hard bounce; "blocked" (also sent as a bounce) is a soft one.
+	if (e?.event === "bounce") return { kind: "bounce", permanent: e.type !== "blocked", addresses: addrs([e.email]), detail: String(e.reason || e.type || "Bounced").slice(0, 120), ...extra };
+	if (e?.event === "spamreport") return { kind: "complaint", permanent: true, addresses: addrs([e.email]), detail: "Marked as spam", ...extra };
+	// SendGrid dropped it without trying: an address that bounced or complained before, or isn't valid.
+	if (e?.event === "dropped" && /bounced|invalid|spam/i.test(String(e.reason ?? ""))) {
+		const spam = /spam/i.test(String(e.reason));
+		return { kind: spam ? "complaint" : "bounce", permanent: true, addresses: addrs([e.email]), detail: `SendGrid: ${String(e.reason).slice(0, 100)}`, ...extra };
+	}
+	return null;
+}
+
+// SparkPost bounce classes that mean the address won't work: invalid recipient, no recipient, unsubscribe.
+const SPARKPOST_HARD = new Set(["10", "30", "90"]);
+
+/** One SparkPost event, inside msys. Our tags come back as rcpt_meta. */
+export function sparkpostEvent(x: any): MailEvent | null {
+	const e = x?.msys?.message_event;
+	if (!e) return null;
+	const extra = { sub: tag(e.rcpt_meta?.ns_sub), campaign: tag(e.rcpt_meta?.ns_campaign) };
+	if (e.type === "bounce" || e.type === "out_of_band") return { kind: "bounce", permanent: SPARKPOST_HARD.has(String(e.bounce_class)), addresses: addrs([e.rcpt_to ?? e.raw_rcpt_to]), detail: String(e.reason || e.raw_reason || `Bounce class ${e.bounce_class}`).slice(0, 120), ...extra };
+	if (e.type === "spam_complaint") return { kind: "complaint", permanent: true, addresses: addrs([e.rcpt_to ?? e.raw_rcpt_to]), detail: "Marked as spam", ...extra };
+	return null;
+}
+
 /** Where SNS may send us to confirm a subscription: only Amazon's own SNS addresses. */
 export function trustedSubscribeUrl(url: unknown): boolean {
 	try {
@@ -321,7 +430,7 @@ export function trustedSubscribeUrl(url: unknown): boolean {
 // -- Bounce and complaint webhooks, added for the owner ----------------------------------------------------
 
 /**
- * Adds our bounce and spam complaint webhook in Postmark, Mailgun, Brevo or Resend, with the key the owner has just
+ * Adds our bounce and spam complaint webhook in Postmark, Mailgun, Brevo, Resend, SendGrid or SparkPost, with the key the owner has just
  * pasted, so they don't have to do it by hand. Leaves any webhooks they already have alone, and does nothing if ours is
  * already there. Never throws: says what went wrong instead, so the owner can add it themselves.
  */
@@ -337,7 +446,7 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 		return { ok: res.ok, status: res.status, data, text };
 	};
 	const failed = (r: { status: number; text: string }) => {
-		if (r.status === 401 || r.status === 403) return { error: `${name} didn't let this key add webhooks${c.provider === "resend" ? " (a Sending access key can't; a Full access key can)" : ""}. Add the address below in ${name} yourself.` };
+		if (r.status === 401 || r.status === 403) return { error: `${name} didn't let this key add webhooks${c.provider === "resend" ? " (a Sending access key can't; a Full access key can)" : c.provider === "sendgrid" ? " (a Restricted Access key can't; a Full Access key can)" : c.provider === "sparkpost" ? " (it needs Event Webhooks: Read/Write)" : ""}. Add the address below in ${name} yourself.` };
 		return { error: `${name} said: ${r.text.replace(/\s+/g, " ").slice(0, 160) || `error ${r.status}`}` };
 	};
 	try {
@@ -393,6 +502,37 @@ export async function addWebhook(c: ProviderConfig, hookUrl: string, fetcher: ty
 			const r = await call("https://api.resend.com/webhooks", { method: "POST", headers: h, body: JSON.stringify({ endpoint: hookUrl, events: ["email.bounced", "email.complained"] }) });
 			return r.ok ? { ok: true } : failed(r);
 		}
+		if (c.provider === "sendgrid") {
+			const h = { authorization: `Bearer ${c.key}`, "content-type": "application/json" };
+			const events = { enabled: true, url: hookUrl, bounce: true, dropped: true, spam_report: true, deferred: false, delivered: false, processed: false, open: false, click: false, unsubscribe: false, group_unsubscribe: false, group_resubscribe: false };
+			const base = `${sendgridApi(c)}/v3/user/webhooks/event/settings`;
+			const list = await call(`${base}/all`, { headers: h });
+			if (list.ok) {
+				if ((list.data?.webhooks ?? []).some((w: any) => w?.url === hookUrl && w?.enabled)) return { ok: true };
+				const have = (list.data?.webhooks ?? []).find((w: any) => w?.url === hookUrl);
+				const r = have?.id
+					? await call(`${base}/${encodeURIComponent(have.id)}`, { method: "PATCH", headers: h, body: JSON.stringify(events) })
+					: await call(base, { method: "POST", headers: h, body: JSON.stringify({ ...events, friendly_name: "Newsletter Sender" }) });
+				return r.ok ? { ok: true } : failed(r);
+			}
+			if (list.status !== 404) return failed(list);
+			// Accounts with just the one event webhook: only take it over when it's empty or already ours.
+			const one = await call(base, { headers: h });
+			if (!one.ok) return failed(one);
+			if (one.data?.url && one.data.url !== hookUrl) return { error: "SendGrid already sends its events to another address, and this account can only have one. Add ours in SendGrid yourself, or remove the other one first." };
+			const r = await call(base, { method: "PATCH", headers: h, body: JSON.stringify(events) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		if (c.provider === "sparkpost") {
+			const h = { authorization: c.key, "content-type": "application/json", accept: "application/json" };
+			const base = `${sparkpostApi(c)}/api/v1/webhooks`;
+			const list = await call(base, { headers: h });
+			if (!list.ok) return failed(list);
+			if ((list.data?.results ?? []).some((w: any) => w?.target === hookUrl)) return { ok: true };
+			const r = await call(base, { method: "POST", headers: h, body: JSON.stringify({ name: "Newsletter Sender", target: hookUrl, events: ["bounce", "out_of_band", "spam_complaint"] }) });
+			return r.ok ? { ok: true } : failed(r);
+		}
+		if (c.provider === "smtp") return { error: "An SMTP server sends bounces back to your from address as emails, so there's no webhook to add." };
 		return { error: "Amazon SES reports bounces its own way." };
 	} catch (e) {
 		return { error: `Couldn't reach ${name}: ${(e as Error).message}` };
