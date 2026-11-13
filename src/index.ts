@@ -1,5 +1,5 @@
 // Newsletter Sender: newsletters for solo writers, businesses and agencies, from your own Cloudflare account.
-// Hosted on Cloudflare, sent with Amazon SES (or Postmark, Mailgun, Brevo or Resend).
+// Hosted on Cloudflare, sent with Amazon SES (or Postmark, Mailgun, Brevo, Resend, SendGrid, SparkPost or any SMTP server).
 //
 //   /                     the dashboard (set-up, sign in and the app are one page: ui.ts)
 //   /api/*                its JSON (api.ts)
@@ -17,12 +17,19 @@
 
 import { runDue } from "./automations.ts";
 import { backupIfDue } from "./backup.ts";
-import { handleApi } from "./api.ts";
+import { handleApi, reportTotals } from "./api.ts";
 import { ensureSchema, type Env, type SendBatch } from "./db.ts";
 import { handlePublic } from "./public.ts";
-import { consume, startDue } from "./sending.ts";
+import { consume, resume, startDue } from "./sending.ts";
+import { carryOnTomorrow } from "./warmup.ts";
+import { checkFeedsDue } from "./blogfeed.ts";
+import { tidyBacks } from "./goodbye.ts";
+import { tidyAiUse } from "./aihelper.ts";
+import { coldDue } from "./cold.ts";
+import { clearOld } from "./retention.ts";
 import { installId } from "./settings.ts";
 import { appPage } from "./ui.ts";
+import { addon } from "./addon.ts";
 import { dispatchHooks, DOCS, handleV1 } from "./v1.ts";
 
 import { VERSION } from "./update.ts";
@@ -72,7 +79,7 @@ export default {
 		}
 		if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
 		if (["/", "/setup", "/signin"].includes(path)) {
-			return withHeaders(new Response(appPage(VERSION), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }), { "x-frame-options": "DENY" });
+			return withHeaders(new Response(appPage(VERSION, await addon.look(env.DB)), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }), { "x-frame-options": "DENY" });
 		}
 		if (path === "/.well-known/newsletter-sender") return new Response(await installId(env.DB), { headers: { "content-type": "text/plain", "cache-control": "no-store", "access-control-allow-origin": "*" } });
 		if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /archive\nAllow: /s/\n", { headers: { "content-type": "text/plain" } });
@@ -91,6 +98,18 @@ export default {
 			runDue(env).catch((e) => console.error("automations", e)),
 			backupIfDue(env).catch((e) => console.error("backup", e)),
 			dispatchHooks(env).catch((e) => console.error("webhooks", e)),
+			// Domain warm up: campaigns paused at the day's number carry on the next day.
+			carryOnTomorrow(env, resume).catch((e) => console.error("warm up", e)),
+			// Blog posts to newsletter drafts: each blog's feed, once an hour.
+			checkFeedsDue(env.DB).catch((e) => console.error("blog feeds", e)),
+			// Goodbye email ways back last 30 days.
+			tidyBacks(env.DB).catch((e) => console.error("goodbye", e)),
+			// Yesterday's writing helper counts.
+			tidyAiUse(env.DB).catch((e) => console.error("writing helper", e)),
+			// Cold contact clean up, once a day for newsletters that switched it on.
+			coldDue(env.DB).catch((e) => console.error("cold contacts", e)),
+			// Open and click log retention: clear old campaigns' per-person rows, a chunk a minute.
+			clearOld(env.DB, (id) => reportTotals(env.DB, id)).catch((e) => console.error("retention", e)),
 			// The agency licence's daily check with newslettersender.com (agency/licence.ts): only the licence id, the version and a short fingerprint of the key.
 			checkLicenceIfDue(env.DB, VERSION).catch((e) => console.error("licence check", e)),
 			// Sign up rate limits only matter for ten minutes.

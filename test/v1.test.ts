@@ -8,5 +8,5 @@ test("webhooks only go to public https addresses", () => {
 });
 
 test("webhook events are the documented set", () => {
-	assert.deepEqual([...EVENTS], ["subscriber.subscribed", "subscriber.pending", "subscriber.unsubscribed", "subscriber.bounced", "subscriber.complained", "campaign.started", "campaign.sent", "campaign.paused"]);
+	assert.deepEqual([...EVENTS], ["subscriber.subscribed", "subscriber.pending", "subscriber.unsubscribed", "subscriber.bounced", "subscriber.complained", "subscriber.updated", "campaign.started", "campaign.sent", "campaign.paused"]);
 });

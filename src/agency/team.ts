@@ -6,14 +6,16 @@ import { iso, type AccountRow, type BrandRow } from "../db.ts";
 import type { Can } from "../addon.ts";
 
 export type { Can };
-export const OWNER_CAN: Can = { send: true, import: true, export: true, delete: true, settings: true, month_limit: 0 };
+export const OWNER_CAN: Can = { send: true, import: true, export: true, delete: true, settings: true, month_limit: 0, review: false };
 
-export const CLIENT_START: Can = { send: false, import: true, export: false, delete: false, settings: false, month_limit: 0 };
+export const CLIENT_START: Can = { send: false, import: true, export: false, delete: false, settings: false, month_limit: 0, review: false };
 
 export function cleanCan(v: unknown): Can {
 	const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
 	const n = Math.floor(Number(o.month_limit));
-	return { send: o.send === true, import: o.import === true, export: o.export === true, delete: o.delete === true, settings: o.settings === true, month_limit: Number.isFinite(n) && n > 0 ? Math.min(n, 100_000_000) : 0 };
+	// Review and approve only: nothing else, whatever else was ticked.
+	if (o.review === true) return { send: false, import: false, export: false, delete: false, settings: false, month_limit: 0, review: true };
+	return { send: o.send === true, import: o.import === true, export: o.export === true, delete: o.delete === true, settings: o.settings === true, month_limit: Number.isFinite(n) && n > 0 ? Math.min(n, 100_000_000) : 0, review: false };
 }
 
 export function canOf(a: Pick<AccountRow, "role" | "limits">): Can {
@@ -46,8 +48,11 @@ export function pickBrand(request: Request, brands: BrandRow[]): BrandRow {
 export function notAllowed(a: Pick<AccountRow, "role">, can: Can, path: string, method: string): string | null {
 	if (a.role !== "client") return null;
 	const write = method !== "GET" && method !== "HEAD";
-	if (/^\/api\/(backups|people|licence)(\/|$)/.test(path) || (path === "/api/brands" && write)) return "Only the owner can do that.";
-	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|links)$/.test(path) && write)))
+	if (/^\/api\/(backups|people|licence|look|signoff)(\/|$)/.test(path) || (path === "/api/brands" && write)) return "Only the owner can do that.";
+	// A reviewer looks, sends themselves tests and approves; nothing else changes.
+	if (can.review && write && !/^\/api\/(campaigns\/[0-9a-f]{16}\/(test|signoff\/decide)|audience|brands\/switch|signout|signout-everywhere|account\/password|passkey(\/.*)?)$/.test(path))
+		return "Your login is for reviewing and approving campaigns. Please ask the agency to make changes.";
+	if (!can.settings && ((path === "/api/brand" && write) || /^\/api\/developer(\/|$)/.test(path) || (/^\/api\/(sending|sending\/cloudflare|sending\/ses-setup|sending\/warmup|blogfeed|blogfeed\/draft|goodbye|ai|cold|cold\/tag|cold\/remove|retention|links)$/.test(path) && write)))
 		return "Changing settings is switched off for your login. Please ask the owner.";
 	if (!can.send && ((/^\/api\/campaigns\/[0-9a-f]{16}\/(send|schedule|resume)$/.test(path) && write) || (/^\/api\/automations(\/|$)/.test(path) && write)))
 		return "Sending is switched off for your login. You can still write and test campaigns: the owner sends them.";

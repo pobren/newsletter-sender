@@ -11,7 +11,14 @@ import { bad, body, freeSlug, multi, ok, str } from "./kit.ts";
 import { copyToS3, s3Keys, s3Status } from "./s3.ts";
 import { finishUpload, getBackup, KEEP, timed, listBackups, makeBackup, restoreBackup, startUpload, uploadPart } from "./backup.ts";
 import { accountById, firstBrand, getMeta, iso, setMeta, logEvent, newId, origin, type AccountRow, type BrandRow, type CampaignRow, type Env, type ListRow } from "./db.ts";
-import { addWebhook, isProvider, parseProvider, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
+import { cleanKeep, forgetKept, getKeep, KEEP_CHOICES, keptOne, olderThan, saveKeep, withKept, type Kept } from "./retention.ts";
+import { cleanCold, getCold, GRACE_DAYS, lookCold, removeCold, saveCold, tagCold } from "./cold.ts";
+import { AiError, aiUse, DAILY_CAP, getAi, saveAi, TASKS, write } from "./aihelper.ts";
+import { cleanSegment, deleteSegment, forLists, getSegments, saveSegment } from "./segments.ts";
+import { cleanGoodbye, DEFAULT_TEXT, getGoodbye, saveGoodbye } from "./goodbye.ts";
+import { getFeed, makeDraft, readFeed, saveFeed } from "./blogfeed.ts";
+import { FIRSTS, getWarmup, saveWarmup, today, warmupStatus } from "./warmup.ts";
+import { addWebhook, isProvider, parseProvider, PROVIDERS, providerName, providerSummary, sendOne, sesKeys } from "./providers.ts";
 import { formHtml, oneOff, signUp } from "./public.ts";
 import { blocksToHtml, cleanBlocks, renderEmail, sanitise, slugify } from "./render.ts";
 import { audienceCount, campaignContent, DEFAULT_RATE, parseAudience, pause, resume, safeJson, sendTest, sendTime, start } from "./sending.ts";
@@ -87,6 +94,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return bad("That email and password don't match.", 401);
 		}
 		await clearFailures(db, email);
+		const away = await addon.here(db, a, url.hostname);
+		if (away) return bad(away, 403);
 		const pk = await db.prepare("SELECT 1 FROM passkeys WHERE account_id = ? AND rp_id = ? LIMIT 1").bind(a.id, url.hostname).first();
 		return ok({ ok: true, passkeyHere: Boolean(pk) }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 	}
@@ -108,6 +117,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			if ("error" in r) return fail(r.error);
 			const a = await accountById(db, pk.account_id);
 			if (!a) return fail("That passkey's account has gone.");
+			const away = await addon.here(db, a, url.hostname);
+			if (away) return fail(away);
 			await db.prepare("UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?").bind(r.count, iso(), pk.id).run();
 			return ok({ ok: true }, { headers: { "set-cookie": await sessionCookie(db, a, secure) } });
 		} catch {
@@ -121,6 +132,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 
 	const me = await currentAccount(request, db);
 	if (!me) return bad("Please sign in.", 401);
+	const away = await addon.here(db, me, url.hostname);
+	if (away) return bad(away, 403);
 	// Only this app's own pages may change things.
 	if (method !== "GET" && request.headers.get("origin") && request.headers.get("origin") !== url.origin) return bad("Not allowed from another website.", 403);
 	const brands = await addon.brandsFor(db, me);
@@ -182,7 +195,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	}
 	if (path === "/api/passkey/add-options" && method === "POST") {
 		const have = (await db.prepare("SELECT id FROM passkeys WHERE account_id = ? AND rp_id = ?").bind(me.id, url.hostname).all<{ id: string }>()).results;
-		return ok({ challenge: await newChallenge(db, "add", me.id), rpId: url.hostname, rpName: brand.app_name || "Newsletter Sender", user: { id: b64url(new TextEncoder().encode(me.id)), name: me.email, displayName: me.name || me.email }, exclude: have.map((k) => k.id), algs: ALGS });
+		return ok({ challenge: await newChallenge(db, "add", me.id), rpId: url.hostname, rpName: brand.app_name || (await addon.look(db))?.name || "Newsletter Sender", user: { id: b64url(new TextEncoder().encode(me.id)), name: me.email, displayName: me.name || me.email }, exclude: have.map((k) => k.id), algs: ALGS });
 	}
 	if (path === "/api/passkey/add" && method === "POST") {
 		const b = await body(request);
@@ -296,12 +309,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 				if (provider?.provider === "ses" && provider.cfToken) c.cfToken = provider.cfToken;
 			} else {
 				// Check the key works with a real email to the owner before saving it.
-				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Newsletter Sender is connected", text: `This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.</p>`, headers: {} });
+				const r = await sendOne(c, brand.from_name, brand.from_email, { to: me.email, subject: "Your sending service is connected", text: `This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.\n`, html: `<p>This test came through ${providerName(c.provider)}. Your newsletters will go out the same way.</p>`, headers: {} });
 				if (!r.ok) return bad(`The test email didn't go: ${r.error}`);
 			}
 			// Add our bounce and complaint webhook in their account for them. If we can't, the page shows the address to add.
 			let hook: { ok: true } | { error: string } | null = null;
-			if (c.provider !== "ses") {
+			if (c.provider !== "ses" && c.provider !== "smtp") {
 				hook = await addWebhook(c, `${base}/hooks/${c.provider}/${brand.hook_key}`);
 				c.hookAdded = "ok" in hook;
 			}
@@ -313,15 +326,126 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			sending: providerSummary(provider),
 			rate: brand.rate,
 			fromEmail: brand.from_email,
-			hooks: Object.fromEntries(["ses", "postmark", "mailgun", "brevo", "resend"].map((p) => [p, `${base}/hooks/${p}/${brand.hook_key}`])),
+			hooks: Object.fromEntries(PROVIDERS.map(({ id }) => [id, `${base}/hooks/${id}/${brand.hook_key}`])),
 			ses: setup ? { ...setup, records: sesRecords(setup.domain, setup.tokens, setup.region) } : null,
 			cloudflareEmail: Boolean(env.EMAIL),
 		});
 	}
+	// Domain warm up (Settings, Sending): a small number of emails a day at first, growing each day.
+	if (path === "/api/sending/warmup") {
+		if (method === "POST") {
+			const b = await body(request);
+			const w = await getWarmup(db, brand.id);
+			if (b.on === true) {
+				const first = FIRSTS.includes(Number(b.first)) ? Number(b.first) : 50;
+				await saveWarmup(db, brand.id, { on: true, start: w?.on ? w.start : today(), first, waiting: w?.waiting ?? [] });
+			} else if (w) await saveWarmup(db, brand.id, { ...w, on: false, done: false });
+		}
+		return ok(await warmupStatus(db, brand.id));
+	}
+	// Open and click log retention (Settings, Tracking).
+	if (path === "/api/retention") {
+		if (method === "POST") await saveKeep(db, brand.id, cleanKeep((await body(request))?.days));
+		const days = await getKeep(db, brand.id);
+		const look = cleanKeep(url.searchParams.get("days") ?? days);
+		return ok({ days, choices: KEEP_CHOICES, older: await olderThan(db, brand.id, look), look });
+	}
+	// Cold contact clean up (Settings, Lists).
+	if (path === "/api/cold") {
+		if (method === "POST") await saveCold(db, brand.id, cleanCold(await body(request)));
+		const policy = await getCold(db, brand.id);
+		const look = cleanCold({ days: url.searchParams.get("days") ?? policy.days, min: url.searchParams.get("min") ?? policy.min });
+		return ok({ policy, look: await lookCold(db, brand.id, look), graceDays: GRACE_DAYS, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+	}
+	if ((path === "/api/cold/tag" || path === "/api/cold/remove") && method === "POST") {
+		const p = cleanCold(await body(request));
+		if (path === "/api/cold/tag") return ok(await tagCold(db, brand.id, p));
+		return ok({ removed: await removeCold(db, brand.id, p, { afterGrace: false }) });
+	}
+	// The writing helper (Settings, Writing helper; used in the campaign editor). Off unless switched on.
+	if (path === "/api/ai") {
+		if (method === "POST") await saveAi(db, brand.id, (await body(request))?.on === true);
+		return ok({ ...(await getAi(db, brand.id)), ready: Boolean(env.AI), used: await aiUse(db, brand.id), cap: DAILY_CAP });
+	}
+	if (path === "/api/ai/write" && method === "POST") {
+		const b = await body(request);
+		if (!(TASKS as readonly string[]).includes(b?.task)) return bad("Choose what the helper should do.");
+		try {
+			return ok({ result: await write(env, brand, b.task, typeof b.text === "string" ? b.text : "") });
+		} catch (e) {
+			if (e instanceof AiError) return bad(e.message);
+			throw e;
+		}
+	}
+	// Saved segments: named audience filters to pick when setting up a campaign.
+	if (path === "/api/segments") {
+		const own = (await db.prepare("SELECT id FROM lists WHERE brand_id = ?").bind(brand.id).all<{ id: string }>()).results.map((r) => r.id);
+		if (method === "POST") {
+			const s = cleanSegment(await body(request));
+			if (!s) return bad("Give the segment a name, and choose at least one list, tag or recent activity.");
+			try {
+				const seg = await saveSegment(db, brand.id, { ...s, audience: { ...s.audience, lists: s.audience.lists.filter((id) => own.includes(id)) } });
+				return ok({ segment: seg, segments: await getSegments(db, brand.id) });
+			} catch (e) {
+				return bad((e as Error).message);
+			}
+		}
+		if (method === "DELETE") {
+			const id = url.searchParams.get("id") ?? "";
+			await deleteSegment(db, brand.id, id);
+		}
+		return ok({ segments: (await getSegments(db, brand.id)).map((s) => ({ ...s, audience: forLists(s, own) })) });
+	}
+	// The goodbye email with a one click way back (Settings, Lists).
+	if (path === "/api/goodbye") {
+		if (method === "POST") await saveGoodbye(db, brand.id, cleanGoodbye(await body(request)));
+		return ok({ ...(await getGoodbye(db, brand.id)), defaultText: DEFAULT_TEXT });
+	}
+	// Blog posts to newsletter drafts (Settings, Blog posts).
+	if (path === "/api/blogfeed") {
+		const f = await getFeed(db, brand.id);
+		if (method === "DELETE") {
+			await saveFeed(db, brand.id, null);
+			return ok();
+		}
+		if (method === "POST") {
+			const b = await body(request);
+			const own = new Set((await db.prepare("SELECT id FROM lists WHERE brand_id = ?").bind(brand.id).all<{ id: string }>()).results.map((r) => r.id));
+			const lists = (Array.isArray(b.lists) ? b.lists : f?.lists ?? []).filter((x: unknown) => typeof x === "string" && own.has(x)).slice(0, 50);
+			if (b.on === false && f) {
+				await saveFeed(db, brand.id, { ...f, on: false, lists });
+				return ok({ feed: { ...f, on: false, lists, seen: undefined } });
+			}
+			let url = String(b.url ?? f?.url ?? "").trim();
+			if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+			try {
+				const u = new URL(url);
+				if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw new Error();
+			} catch {
+				return bad("Please enter your blog's address, or its feed, such as https://yourblog.com/feed.");
+			}
+			const r = await readFeed(url);
+			if ("error" in r) return bad(r.error);
+			const same = f && f.url === r.feedUrl;
+			const next = { url: r.feedUrl, on: true, lists, seen: same ? f.seen : r.posts.map((p) => p.id).slice(0, 100), checked_at: iso(), error: null, made: f?.made ?? 0 };
+			await saveFeed(db, brand.id, next);
+			return ok({ feed: { ...next, seen: undefined }, latest: r.posts.slice(0, 3) });
+		}
+		return ok({ feed: f ? { ...f, seen: undefined } : null });
+	}
+	// A draft from the newest post now, to see what they look like.
+	if (path === "/api/blogfeed/draft" && method === "POST") {
+		const f = await getFeed(db, brand.id);
+		if (!f) return bad("Please add your blog first.");
+		const r = await readFeed(f.url);
+		if ("error" in r) return bad(r.error);
+		if (!r.posts[0]?.link) return bad("Your blog's feed has no posts yet.");
+		return ok({ id: await makeDraft(db, brand, f, r.posts[0]) });
+	}
 	// Try adding the bounce webhook again (Settings, Sending), say after the owner swapped to a Full access key.
 	if (path === "/api/sending/webhook" && method === "POST") {
 		const p = await loadProvider(db, brand);
-		if (!p || p.provider === "ses") return bad("Please save your sending service first.");
+		if (!p || p.provider === "ses" || p.provider === "smtp") return bad("Please save your sending service first.");
 		const r = await addWebhook(p, `${await origin(db, request)}/hooks/${p.provider}/${brand.hook_key}`);
 		if ("error" in r) return bad(r.error);
 		await saveProvider(db, brand.id, { ...p, hookAdded: true }, brand.rate);
@@ -499,7 +623,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			return ok();
 		}
 		if (dh[2] === "/test" && method === "POST") {
-			const status = await deliver(db, h, "test", { message: "This is a test from Newsletter Sender." });
+			const status = await deliver(db, h, "test", { message: "This is a test webhook." });
 			return ok({ status, ok: status >= 200 && status < 300 });
 		}
 	}
@@ -524,7 +648,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 	if (path === "/api/sending/test" && method === "POST") {
 		const b = await body(request);
 		const to = cleanEmail(b.to) ?? me.email;
-		const sent = await oneOff(env, brand, to, `A test from ${brand.name}`, ["This is a one off test email from Newsletter Sender.", "Sign up confirmations look like this."]);
+		const sent = await oneOff(env, brand, to, `A test from ${brand.name}`, ["This is a one off test email.", "Sign up confirmations look like this."]);
 		return sent ? ok() : bad("The test didn't go. Check the sending set-up.");
 	}
 
@@ -735,8 +859,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			(SELECT COUNT(*) FROM sends x WHERE x.campaign_id = c.id AND x.status = 'sent') AS sent,
 			(SELECT COUNT(opened_at) FROM sends x WHERE x.campaign_id = c.id) AS opens,
 			(SELECT COUNT(clicked_at) FROM sends x WHERE x.campaign_id = c.id) AS clicks
-			FROM campaigns c WHERE c.brand_id = ? ORDER BY COALESCE(c.started_at, c.send_at, c.updated_at) DESC LIMIT 500`).bind(brand.id).all();
-		return ok({ campaigns: results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+			FROM campaigns c WHERE c.brand_id = ? ORDER BY COALESCE(c.started_at, c.send_at, c.updated_at) DESC LIMIT 500`).bind(brand.id).all<any>();
+		return ok({ campaigns: await withKept(db, results), tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 	if (path === "/api/campaigns" && method === "POST") {
 		const b = await body(request);
@@ -769,6 +893,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const n = Number(b?.n ?? url.searchParams.get("n") ?? 0);
 		const pick = usesLink(reportPeople(who));
 		if (!pick) return bad("Please choose who.");
+		if (await keptOne(db, c.id)) return bad("Who opened and clicked this campaign was cleared, as set under Settings, Tracking. The totals are still in the report.");
 		const sel = `SELECT x.subscriber_id FROM sends x WHERE x.campaign_id = ?1 AND ${pick}`;
 		if (method === "POST") {
 			const l = await db.prepare("SELECT id, name FROM lists WHERE id = ? AND brand_id = ?").bind(String(b?.list ?? ""), brand.id).first<{ id: string; name: string }>();
@@ -798,8 +923,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		const editable = c.status === "draft" || c.status === "scheduled";
 		if (!action && method === "GET") {
 			const stats = await campaignStats(db, c.id);
-			const links = brand.track_clicks ? (await db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(c.id).all()).results : [];
-			const countries = brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
+			const kept = await keptOne(db, c.id);
+			const links = kept ? (brand.track_clicks ? kept.links : []) : brand.track_clicks ? (await db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(c.id).all()).results : [];
+			const countries = kept ? (brand.track_opens || brand.track_clicks ? kept.countries : []) : brand.track_opens || brand.track_clicks ? (await db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(c.id).all()).results : [];
 			const paused = c.status === "paused" ? await db.prepare("SELECT detail FROM events WHERE campaign_id = ? AND kind = 'campaign.paused' ORDER BY id DESC LIMIT 1").bind(c.id).first<{ detail: string }>() : null;
 			const base = await origin(db, request);
 			const polls = pollsIn(c.html);
@@ -810,10 +936,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			const ab = parseAb(c.ab);
 			const abOut = ab && { subject: ab.b, pct: ab.pct, hours: ab.hours, by: ab.by, at: ab.at ?? null, winner: ab.winner ?? null, results: ab.bTo != null ? await abResults(db, c, ab) : null };
 			if (abOut?.results && !abOut.winner && abOut.results.a[ab!.by] + abOut.results.b[ab!.by] > 0) (abOut as any).leading = winnerOf(abOut.results, ab!.by);
-			return ok({ ...c, ab: abOut, resendOf, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
+			return ok({ ...c, cleared: Boolean(kept), ab: abOut, resendOf, polls: pollResults, blocks: undefined, html: c.html ?? blocksToHtml(cleanBlocks(safeJson(c.blocks)), brand.colour), audience: parseAudience(c.audience), stats, links, countries, pausedWhy: paused?.detail ?? null, defaults: { from_name: brand.from_name, from_email: brand.from_email, reply_to: brand.reply_to }, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) }, colour: brand.colour, webUrl: brand.archive && c.public && c.slug && !editable ? `${base}/archive/${c.slug}` : null });
 		}
 		if (!action && method === "POST") {
 			if (!editable) return bad("This email has been sent, so it can't be changed. Duplicate it to make a new one.");
+			const locked = await addon.beforeEdit(db, me, brand, c);
+			if (locked) return bad(locked, 409);
 			const b = await body(request);
 			const slug = b.slug ? slugify(String(b.slug)) : slugify(str(b.subject, 200));
 			const clash = await db.prepare("SELECT id FROM campaigns WHERE slug = ? AND id != ?").bind(slug, c.id).first();
@@ -829,7 +957,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 		}
 		if (!action && method === "DELETE") {
 			if (c.status === "sending") return bad("This one is sending. Stop it first, then delete it.");
-			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
+			await db.batch([db.prepare("DELETE FROM sends WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM links WHERE campaign_id = ?").bind(c.id), db.prepare("DELETE FROM poll_votes WHERE campaign_id = ?").bind(c.id), forgetKept(db, c.id), db.prepare("DELETE FROM campaigns WHERE id = ?").bind(c.id)]);
 			return ok();
 		}
 		if (action === "preview") {
@@ -1130,7 +1258,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			db.prepare(`SELECT e.at, e.kind, e.detail, s.email, c.name, c.subject FROM events e LEFT JOIN subscribers s ON s.id = e.subscriber_id LEFT JOIN campaigns c ON c.id = e.campaign_id
 				WHERE e.brand_id = ? AND e.kind IN ('bounced', 'soft_bounce', 'complained') ORDER BY e.id DESC LIMIT 100`).bind(brand.id),
 		]);
-		return ok({ emails: emails.results, problems: problems.results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
+		return ok({ emails: await withKept(db, emails.results as any[]), problems: problems.results, tracking: { opens: Boolean(brand.track_opens), clicks: Boolean(brand.track_clicks) } });
 	}
 
 	// -- Images ----------------------------------------------------------------------------------------
@@ -1171,6 +1299,23 @@ function usesLink(sql: string | null): string | null {
 
 /** What happened to a campaign's emails. */
 export async function campaignStats(db: D1Database, id: string) {
+	// Older than the newsletter's retention: the rows are gone, so use the totals saved before they went.
+	const kept = await keptOne(db, id);
+	if (kept) return kept.stats as unknown as Awaited<ReturnType<typeof countStats>>;
+	return countStats(db, id);
+}
+
+/** A campaign's totals, links and countries, saved before its per-person rows are cleared (retention.ts). */
+export async function reportTotals(db: D1Database, id: string): Promise<Omit<Kept, "cleared_at">> {
+	const [stats, links, countries] = await Promise.all([
+		countStats(db, id),
+		db.prepare("SELECT l.n, l.url, l.clicks, (SELECT COUNT(*) FROM link_clicks k WHERE k.campaign_id = l.campaign_id AND k.n = l.n) AS people FROM links l WHERE l.campaign_id = ? ORDER BY people DESC, l.clicks DESC LIMIT 50").bind(id).all<any>(),
+		db.prepare("SELECT country, COUNT(*) AS n FROM sends WHERE campaign_id = ? AND country IS NOT NULL GROUP BY country ORDER BY n DESC LIMIT 10").bind(id).all<any>(),
+	]);
+	return { stats, links: links.results, countries: countries.results };
+}
+
+async function countStats(db: D1Database, id: string) {
 	const [byStatus, byEvent, engaged] = await db.batch([
 		db.prepare("SELECT status, COUNT(*) AS n FROM sends WHERE campaign_id = ? GROUP BY status").bind(id),
 		db.prepare("SELECT kind, COUNT(DISTINCT subscriber_id) AS n FROM events WHERE campaign_id = ? GROUP BY kind").bind(id),

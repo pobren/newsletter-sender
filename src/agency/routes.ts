@@ -8,10 +8,24 @@ import { getMeta, iso, newId, type AccountRow, type Env } from "../db.ts";
 import { brandHealth } from "../health.ts";
 import { bad, body, freeSlug, ok, str } from "../kit.ts";
 import { sesKeys } from "../providers.ts";
+import { keptOne } from "../retention.ts";
 import { loadProvider } from "../settings.ts";
 import { askLicence, checkLicence, covers, currentLicence, GRACE_DAYS, licenceStatus, notCovered, renewedKey, renewUrl, saveLicence } from "./licence.ts";
 import { VERSION } from "../update.ts";
 import { brandCookie, canOf, cleanCan, CLIENT_START } from "./team.ts";
+import { addressRoutes, appBase } from "./address.ts";
+import { signoffRoutes } from "./signoff.ts";
+import { cleanLook, currentLook, savedLook, saveLook, type Look } from "./look.ts";
+import { oneOff } from "../public.ts";
+import type { BrandRow } from "../db.ts";
+
+/** Emails a client their invite link, from the agency (white label) when there is one. False when it couldn't go. */
+export async function emailInvite(env: Env, look: Look | null, brand: BrandRow, to: string, name: string | null, link: string): Promise<boolean> {
+	const logo = look?.logo?.startsWith("/") ? new URL(look.logo, link).href : look?.logo ?? null;
+	const from: BrandRow = look ? { ...brand, name: look.name, from_name: look.name, from_email: look.from_email || brand.from_email, colour: look.colour, logo, footer: null, reply_to: look.support?.startsWith("mailto:") ? look.support.slice(7) : brand.reply_to } : brand;
+	const who = look?.name || brand.name;
+	return oneOff(env, from, to, `Your login for ${brand.name}`, [`Hello${name ? ` ${name}` : ""},`, `${who} has made you a login to see and work on ${brand.name}'s newsletters.`, `Press the button to choose your password. The link works once and runs out in ${INVITE_DAYS} days.`], { label: "Choose my password", href: link }).catch(() => false);
+}
 
 const INVITE_DAYS = 14;
 
@@ -72,12 +86,31 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		return ok({ to: c.licence.to, covered: covers(c.licence) });
 	}
 
+	// -- White label (the owner only: team.ts) -------------------------------------------------------------------
+	if (path === "/api/look" && method === "GET") return ok({ look: await savedLook(db), on: Boolean(await currentLook(db)) });
+	if (path === "/api/look" && method === "POST") {
+		if (!(await currentLicence(db))) return bad("White label needs the agency licence. Add your key under Settings, Licence.", 403);
+		const b = await body(request);
+		if (b.off === true) {
+			await saveLook(db, null);
+			return ok();
+		}
+		const look = cleanLook(b);
+		if ("error" in look) return bad(look.error);
+		await saveLook(db, look);
+		return ok({ look });
+	}
+	const address = await addressRoutes(x);
+	if (address) return address;
+
 	const licence = await currentLicence(db);
 	// Who's signed in, which brands they can open, and the licence (for the brand picker and Settings).
 	if (path === "/api/brands" && method === "GET") {
 		return ok({ brands: brands.map((b) => ({ id: b.id, name: b.name })), current: brand.id, role: me.role, can: canOf(me), me: { name: me.name, email: me.email }, edition: "agency", licence: licence && { to: licence.to, brands: licence.brands, until: licence.until, updates: licence.updates } });
 	}
 	if (!licence) return null; // the free edition: none of the routes below
+	const signoff = await signoffRoutes(x);
+	if (signoff) return signoff;
 
 	// -- Brands -----------------------------------------------------------------------------------------
 	if (path === "/api/brands" && method === "POST") {
@@ -108,7 +141,8 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 			const lc = (last.results[0] as any) ?? null;
 			let opened: number | null = null;
 			if (lc && b.track_opens) {
-				const o = await db.prepare("SELECT COUNT(*) AS sent, COUNT(opened_at) AS opened FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(lc.id).first<{ sent: number; opened: number }>();
+				const k = await keptOne(db, lc.id);
+				const o = k ? { sent: k.stats.sent ?? 0, opened: k.stats.opens ?? 0 } : await db.prepare("SELECT COUNT(*) AS sent, COUNT(opened_at) AS opened FROM sends WHERE campaign_id = ? AND status = 'sent'").bind(lc.id).first<{ sent: number; opened: number }>();
 				opened = o?.sent ? o.opened / o.sent : null;
 			}
 			const p = await loadProvider(db, b);
@@ -121,10 +155,11 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 			}
 			const limits = clients.filter((c) => c.brand_id === b.id).map((c) => canOf({ role: "client", limits: c.limits }).month_limit).filter((n) => n > 0);
 			const health = await brandHealth(db, b.id);
+			const waiting = (await db.prepare("SELECT COUNT(*) AS n FROM campaigns c WHERE c.brand_id = ? AND c.status = 'draft' AND (SELECT kind FROM signoffs s WHERE s.campaign_id = c.id ORDER BY s.at DESC, s.rowid DESC LIMIT 1) = 'asked'").bind(b.id).first<{ n: number }>())?.n ?? 0;
 			return {
 				id: b.id, name: b.name, logo: b.logo, colour: b.colour, provider: p?.provider ?? null, account,
 				subscribers: (subs.results[0] as any)?.n ?? 0, sentMonth: (sent.results[0] as any)?.n ?? 0, limit: limits.length ? Math.min(...limits) : 0,
-				sending: ((live.results[0] as any)?.n ?? 0) > 0, last: lc && { id: lc.id, name: lc.name || lc.subject, status: lc.status, at: lc.finished_at || lc.started_at }, opened,
+				sending: ((live.results[0] as any)?.n ?? 0) > 0, waiting, last: lc && { id: lc.id, name: lc.name || lc.subject, status: lc.status, at: lc.finished_at || lc.started_at }, opened,
 				health: health.bounceLevel === "bad" || health.complaintLevel === "bad" ? "bad" : health.bounceLevel === "ok" || health.complaintLevel === "ok" || health.paused.length ? "ok" : "good",
 			};
 		}));
@@ -157,7 +192,10 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		const token = newId(16);
 		await db.prepare("INSERT INTO accounts (id, email, name, password, role, brand_id, limits, reset_token, reset_until, created_at) VALUES (?, ?, ?, NULL, 'client', ?, ?, ?, ?, ?)")
 			.bind(newId(8), email, str(b.name, 80) || null, b.brand, JSON.stringify(cleanCan(b.can)), token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), iso()).run();
-		return ok({ link: `${url.origin}/#invite/${token}` });
+		const link = `${await appBase(db, url)}/#invite/${token}`;
+		const toBrand = brands.find((x) => x.id === b.brand)!;
+		const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, email, str(b.name, 80) || null, link) : false;
+		return ok({ link, emailed });
 	}
 	const pp = /^\/api\/people\/([0-9a-f]{16})(\/link)?$/.exec(path);
 	if (pp) {
@@ -166,7 +204,11 @@ export async function agencyRoutes(x: AddonContext): Promise<Response | null> {
 		if (pp[2] && method === "POST") {
 			const token = newId(16);
 			await db.prepare("UPDATE accounts SET reset_token = ?, reset_until = ? WHERE id = ?").bind(token, iso(new Date(Date.now() + INVITE_DAYS * 86_400_000)), p.id).run();
-			return ok({ link: `${url.origin}/#invite/${token}` });
+			const link = `${await appBase(db, url)}/#invite/${token}`;
+			const b = await body(request).catch(() => ({}) as Record<string, any>);
+			const toBrand = brands.find((x) => x.id === p.brand_id) ?? brand;
+			const emailed = b.send === true ? await emailInvite(env, await currentLook(db), toBrand, p.email, p.name, link) : false;
+			return ok({ link, emailed });
 		}
 		if (!pp[2] && method === "POST") {
 			const b = await body(request);
