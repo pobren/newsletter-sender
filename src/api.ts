@@ -171,6 +171,18 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
 			await logEvent(db, brand.id, "update", null, null, `Updated from ${VERSION} to ${rel.version}`).run();
 			return ok({ version: rel.version });
 		}
+		// The writing helper needs Cloudflare's AI, which installs from before 0.4.0 don't have: putting this version in
+		// again adds it (install() always includes it), keeping everything else as it is.
+		if (path === "/api/update/connect-ai" && method === "POST") {
+			const rel = await latest(db, true);
+			if (!rel) return bad("We couldn't reach the releases just then. Please try again in a minute.");
+			if (newer(rel.version, VERSION)) return bad(`Please update to ${rel.version} first, under Settings, Account. That connects it too.`);
+			if (rel.version !== VERSION) return bad("This version can't connect itself. Please update under Settings, Account.");
+			const r = await install(db, url.hostname, rel);
+			if ("error" in r) return bad(r.error);
+			await logEvent(db, brand.id, "update", null, null, "Connected the writing helper to Cloudflare's AI").run();
+			return ok({ version: rel.version });
+		}
 		if (path === "/api/update/undo" && method === "POST") {
 			const r = await undo(db, url.hostname);
 			if ("error" in r) return bad(r.error);

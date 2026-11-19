@@ -20,7 +20,7 @@ const API = "https://api.cloudflare.com/client/v4";
 /** How often the app looks for a new version. */
 const CHECK_MS = 6 * 3600_000;
 /** Every kind of binding a Newsletter Sender Worker might have, all kept as they are when the code is replaced. */
-const KEEP = ["d1", "queue", "r2_bucket", "send_email", "secret_text", "plain_text", "json", "kv_namespace", "version_metadata", "analytics_engine", "service", "durable_object_namespace", "secrets_store_secret", "ai", "browser", "hyperdrive", "workflow", "images", "assets"];
+const KEEP = ["d1", "queue", "r2_bucket", "send_email", "secret_text", "plain_text", "json", "kv_namespace", "version_metadata", "analytics_engine", "service", "durable_object_namespace", "secrets_store_secret", "browser", "hyperdrive", "workflow", "images", "assets"];
 
 export interface ReleaseFile { name: string; sha256: string; type: string }
 export interface Release {
@@ -121,6 +121,8 @@ export async function install(db: D1Database, host: string, release: Release, fe
 		main_module: release.main_module,
 		compatibility_date: release.compatibility_date,
 		compatibility_flags: release.compatibility_flags ?? [],
+		// Cloudflare's AI for the writing helper (0.4.0): added on update, since installs from before then don't have it.
+		bindings: [{ type: "ai", name: "AI" }],
 		keep_bindings: KEEP,
 		placement: { mode: "smart" },
 		limits: { cpu_ms: 300000 },

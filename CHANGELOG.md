@@ -2,6 +2,10 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.4.1
+
+- The writing helper connects itself: if it says it isn't connected to Cloudflare's AI, press Connect it for me under Settings, Writing helper. Updates from now on connect it too.
+
 ## 0.4.0
 
 - White label for the agency edition: under Settings, White label, add your agency's name, colour, logo and a help link. Your clients see your look on the sign in page, in the browser tab and across the app. Their brand's name leads, with your logo beside it. You keep updates, the licence and our guides.
