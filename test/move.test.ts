@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { importStatus, mailchimp, mailchimpDc, mailchimpRow, pastDate } from "../src/move.ts";
 
 test("status words from other services", () => {
-	for (const [x, want] of [["subscribed", "active"], ["", "active"], ["Active", "active"], ["Unsubscribed", "unsubscribed"], ["opted-out", "unsubscribed"], ["cleaned", "bounced"], ["Bounced", "bounced"], ["Marked as spam", "complained"], ["complaint", "complained"]] as const)
+	for (const [x, want] of [["subscribed", "active"], ["", "active"], ["Active", "active"], ["Unsubscribed", "unsubscribed"], ["opted-out", "unsubscribed"], ["cleaned", "bounced"], ["Bounced", "bounced"], ["Marked as spam", "complained"], ["complaint", "complained"], ["blocklisted", "unsubscribed"], ["Blacklisted", "unsubscribed"], ["enabled", "active"]] as const)
 		assert.equal(importStatus(x), want, x);
 });
 

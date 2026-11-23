@@ -2,6 +2,10 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.4.2
+
+- Importing from listmonk: subscribers listmonk has blocklisted now come in as unsubscribed, so they're never emailed.
+
 ## 0.4.1
 
 - The writing helper connects itself: if it says it isn't connected to Cloudflare's AI, press Connect it for me under Settings, Writing helper. Updates from now on connect it too.
