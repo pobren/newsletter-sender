@@ -6,7 +6,8 @@ export type ImportStatus = "active" | "unsubscribed" | "bounced" | "complained";
 /** Reads the status words other services use in their exports. Anything unknown counts as subscribed. */
 export function importStatus(x: unknown): ImportStatus {
 	const s = String(x ?? "").trim().toLowerCase();
-	if (/^(unsub|opted.?out|optout|left|removed)/.test(s)) return "unsubscribed";
+	// listmonk calls a subscriber who asked never to be emailed "blocklisted" (older exports say "blacklisted").
+	if (/^(unsub|opted.?out|optout|left|removed|block|black|suppress|do.?not)/.test(s)) return "unsubscribed";
 	if (/(spam|complain|abuse)/.test(s)) return "complained";
 	if (/^(bounce|clean|hard|invalid|undeliverable)/.test(s)) return "bounced";
 	return "active";
