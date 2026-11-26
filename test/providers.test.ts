@@ -91,3 +91,16 @@ test("AWS signing matches Amazon's published example", async () => {
 	);
 	assert.match(h.authorization, /Signature=5d672d79c15b13162d9279b0855cfba6789a8edb4c82c400e06b5924a6f2b5d7$/);
 });
+
+// Expected signatures below come from Amazon's own signer (@smithy/signature-v4) with the same example keys.
+const exampleKeys = { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", region: "ap-southeast-2" };
+
+test("AWS signing encodes an SES email address in the path twice, as Amazon does (issue #86)", async () => {
+	const h = await signAws({ method: "GET", url: "https://email.ap-southeast-2.amazonaws.com/v2/email/identities/someone%40example.com", headers: {}, body: "", service: "ses", amzDate: "20261126T120000Z" }, exampleKeys);
+	assert.match(h.authorization, /Signature=781361c55047adbcaf5ec6f5cea3282be4739568e135bd42ffabfafab1b938ca$/);
+});
+
+test("AWS signing still encodes an S3 path once", async () => {
+	const h = await signAws({ method: "GET", url: "https://b.s3.ap-southeast-2.amazonaws.com/backups/a%40b.json", headers: { "x-amz-content-sha256": "UNSIGNED-PAYLOAD" }, body: "", service: "s3", amzDate: "20261126T120000Z", payloadHash: "UNSIGNED-PAYLOAD" }, exampleKeys);
+	assert.match(h.authorization, /Signature=4c38a58fc2b5b07f33266a4d94c2d7d0c9373d01dad46b340681c28685b27e06$/);
+});

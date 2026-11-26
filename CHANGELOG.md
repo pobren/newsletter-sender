@@ -2,6 +2,10 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.4.3
+
+- Fixed the From address check with Amazon SES. It said "We couldn't ask Amazon SES just now" for any address with an @, even when the keys were fine. Sending wasn't affected. Thanks to alicam for the report and the fix.
+
 ## 0.4.2
 
 - Importing from listmonk: subscribers listmonk has blocklisted now come in as unsubscribed, so they're never emailed.
