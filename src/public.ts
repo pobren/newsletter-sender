@@ -132,26 +132,29 @@ export async function signUp(env: Env, l: ListRow, b: BrandRow, input: { email: 
 }
 
 /**
- * A one off email (a sign up confirmation or welcome). Cloudflare's email service sends these when the Worker has
- * it (Paul's rule: confirmations only, never newsletters); otherwise the brand's own sending service does.
+ * A one off email (a sign up confirmation or welcome). The brand's own sending service (Amazon SES and the like)
+ * sends these first; Cloudflare's email service is the backup when the Worker has it. Paul, 27 Nov 2026: Cloudflare's
+ * daily allowance is shared by every domain on the Cloudflare account, so one busy form could stop all of them.
  */
 export async function oneOff(env: Env, b: BrandRow, to: string, subject: string, paras: string[], button?: { label: string; href: string }): Promise<boolean> {
 	const blocks = [{ type: "text" as const, text: paras.join("\n\n") }, ...(button ? [{ type: "button" as const, label: button.label, href: button.href }] : [])];
 	const base = linkBase(b, await origin(env.DB));
 	const out = renderEmail(subject, blocks, { brandName: b.name, colour: b.colour, logo: b.logo, footer: b.footer, unsubscribeUrl: `${base}/archive`, track: null }, { email: to });
 	const text = [...paras, button ? `${button.label}: ${button.href}` : ""].filter(Boolean).join("\n\n") + `\n\n${b.name}\n`;
-	if (env.EMAIL) {
-		try {
-			await env.EMAIL.send({ to, from: { email: b.from_email, name: b.from_name }, subject, text, html: out.html.replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, "") } as any);
-			return true;
-		} catch (e) {
-			console.error("Cloudflare email failed, trying the sending service", e);
-		}
-	}
 	const p = await loadProvider(env.DB, b);
-	if (!p) return false;
-	const r = await sendOne(p, b.from_name, b.from_email, { to, subject, text, html: out.html, headers: {}, replyTo: b.reply_to });
-	return r.ok;
+	if (p) {
+		const r = await sendOne(p, b.from_name, b.from_email, { to, subject, text, html: out.html, headers: {}, replyTo: b.reply_to }).catch((e) => ({ ok: false, error: String(e) }));
+		if (r.ok) return true;
+		console.error("sending service refused a one off email, trying Cloudflare", r);
+	}
+	if (!env.EMAIL) return false;
+	try {
+		await env.EMAIL.send({ to, from: { email: b.from_email, name: b.from_name }, subject, text, html: out.html.replace(/You're getting this because[^<]*<br>/, "").replace(/<a [^>]*>Unsubscribe<\/a>/, "") } as any);
+		return true;
+	} catch (e) {
+		console.error("Cloudflare email failed too", e);
+		return false;
+	}
 }
 
 /**
