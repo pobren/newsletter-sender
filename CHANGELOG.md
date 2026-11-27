@@ -2,6 +2,10 @@
 
 Each version's notes show in the app when it's available. Newest first.
 
+## 0.4.4
+
+- Sign-up confirmation emails now go through the brand's own sending service (Amazon SES, Postmark and the others) first, with Cloudflare only as a backup. Before, they used Cloudflare first, whose daily limit is shared by every site on your Cloudflare account.
+
 ## 0.4.3
 
 - Fixed the From address check with Amazon SES. It said "We couldn't ask Amazon SES just now" for any address with an @, even when the keys were fine. Sending wasn't affected. Thanks to alicam for the report and the fix.
